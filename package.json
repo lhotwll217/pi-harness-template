@@ -25,6 +25,10 @@
     "typescript": "^5.7.0"
   },
   "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.65",
+    "@earendil-works/pi-ai": "0.80.6",
+    "@earendil-works/pi-coding-agent": "0.80.6",
+    "@gotgenes/pi-permission-system": "20.7.1",
     "croner": "10.0.1"
   }
 }
