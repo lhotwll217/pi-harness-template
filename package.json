@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "pi-template": "./pi-template"
+  },
   "description": "Running, self-documenting, demonstrative harness template for Pi-based products.",
   "license": "MIT",
   "workspaces": [

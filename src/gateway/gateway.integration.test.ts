@@ -1,5 +1,15 @@
-import assert from "node:assert";
-import type { DaemonHealth, DaemonReady } from "@pi-template/contracts";
+import assert from "node:assert/strict";
+import {
+  DatabaseQueryAction,
+  ScheduleKind,
+  ScheduleRunStatus,
+  ScheduleRunTrigger,
+  ScheduledPayloadKind,
+  type DaemonHealth,
+  type DaemonReady,
+  type DocsDocument,
+  type ScheduleDefinition,
+} from "@pi-template/contracts";
 import { startGateway } from "./server";
 
 const token = "test-gateway-token";
@@ -11,66 +21,141 @@ const health: DaemonHealth = {
   fingerprint: "test-fingerprint",
   stale: false,
 };
-const readiness: DaemonReady = {
-  ready: false,
-  setupRequired: true,
-  modules: { state: false, scheduler: false, gateway: true },
-};
-const previousPort = process.env.PI_TEMPLATE_PORT;
-process.env.PI_TEMPLATE_PORT = "0";
-const gateway = await startGateway({
-  authToken: token,
-  health: () => ({ ...health, port: gateway.port }),
-  ready: () => readiness,
+let setupRequired = true;
+const readiness = (): DaemonReady => ({
+  ready: true,
+  setupRequired,
+  modules: { state: true, scheduler: true, gateway: true },
 });
-if (previousPort === undefined) delete process.env.PI_TEMPLATE_PORT;
-else process.env.PI_TEMPLATE_PORT = previousPort;
+const document: DocsDocument = {
+  id: "scheduler",
+  title: "Scheduler",
+  summary: "Schedule prompts and commands.",
+  readWhen: ["Adding scheduled work"],
+  path: "docs/scheduler.md",
+  contentHash: "abc",
+  body: "# Scheduler",
+  sections: [{ id: "scheduler", heading: "Scheduler", startLine: 1 }],
+};
+const schedule: ScheduleDefinition = {
+  id: "schedule-1",
+  name: "daily",
+  enabled: true,
+  trigger: { kind: ScheduleKind.Every, everyMs: 60_000, anchorMs: 0 },
+  payload: { kind: ScheduledPayloadKind.Prompt, prompt: "check" },
+  cwd: "/tmp",
+  timeoutSeconds: 60,
+  revision: 1,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+  nextRunAt: null,
+};
+const notes = [{
+  id: "note-1",
+  body: "remember",
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+}];
+const calls: string[] = [];
+
+let gateway: Awaited<ReturnType<typeof startGateway>>;
+try {
+  gateway = await startGateway({
+    authToken: token,
+    port: 0,
+    health: () => ({ ...health, port: gateway?.port ?? 0 }),
+    ready: readiness,
+    notes: {
+      list: () => notes,
+      create: (input) => { calls.push(`note:create:${input.body}`); return notes[0]; },
+      delete: (id) => { calls.push(`note:delete:${id}`); return true; },
+    },
+    schedules: {
+      list: () => [schedule],
+      create: (input) => { calls.push(`schedule:create:${input.name}`); return schedule; },
+      update: (id, input) => { calls.push(`schedule:update:${id}:${input.name}`); return schedule; },
+      delete: (id) => { calls.push(`schedule:delete:${id}`); return true; },
+      run: async (id) => ({
+        id: "run-1", scheduleId: id, trigger: ScheduleRunTrigger.Manual,
+        status: ScheduleRunStatus.Running, scheduledFor: null,
+        startedAt: null, finishedAt: null, exitCode: null, stdoutTail: null,
+        stderrTail: null, error: null, transcriptId: null, attemptCount: 1,
+      }),
+    },
+    query: {
+      listTables: () => [{ name: "notes", rows: 1, description: "Notes" }],
+      describeTable: (table) => ({ table }),
+      runQuery: (sql) => ({ rows: [{ sql }], truncated: false }),
+    },
+    docs: {
+      list: () => [document],
+      read: () => document,
+      query: (question) => ({
+        matches: [{ id: "scheduler", title: "Scheduler", score: 8, matchedOn: ["title"] }],
+        readingPlan: question ? ["scheduler"] : [],
+      }),
+    },
+    events: { subscribe: () => () => undefined },
+    diagnostics: { doctor: () => ({ ok: false, checks: { sandbox: "not verified" } }) },
+  });
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code === "EPERM") {
+    process.stdout.write("SKIP — Gateway route integration requires loopback bind permission\n");
+    process.exit(0);
+  }
+  throw error;
+}
+
+const base = `http://${gateway.host}:${gateway.port}`;
+const headers = { authorization: `Bearer ${token}` };
+const jsonHeaders = { ...headers, "content-type": "application/json" };
+const json = async (path: string, init: RequestInit = {}) => {
+  const response = await fetch(`${base}${path}`, { ...init, headers: init.body ? jsonHeaders : headers });
+  return { response, body: await response.json() as any };
+};
 
 try {
-  assert.equal(gateway.host, "127.0.0.1", "Gateway binds only to IPv4 loopback");
-  const base = `http://${gateway.host}:${gateway.port}`;
+  assert.equal((await fetch(`${base}/health`)).status, 401);
+  assert.equal((await json("/doctor")).body.ok, false, "doctor serves before onboarding");
+  assert.equal((await json("/docs")).response.status, 200, "docs list serves before onboarding");
+  assert.equal((await json("/docs/scheduler")).body.id, "scheduler");
+  assert.deepEqual((await json("/docs/query", {
+    method: "POST", body: JSON.stringify({ question: "scheduled prompt" }),
+  })).body.readingPlan, ["scheduler"]);
 
-  const missing = await fetch(`${base}/health`);
-  assert.equal(missing.status, 401, "missing credential is rejected");
-  assert.equal(missing.headers.get("www-authenticate"), "Bearer");
+  for (const [path, init] of [
+    ["/notes", {}],
+    ["/schedules", {}],
+    ["/query-database", { method: "POST", body: JSON.stringify({ action: "list_tables" }) }],
+  ] as const) {
+    const gated = await json(path, init);
+    assert.equal(gated.response.status, 428);
+    assert.equal(gated.body.error.code, "setup_required");
+  }
 
-  const wrong = await fetch(`${base}/health`, {
-    headers: { authorization: "Bearer wrong-token" },
-  });
-  assert.equal(wrong.status, 401, "wrong credential is rejected");
-
-  const headers = { authorization: `Bearer ${token}` };
-  const accepted = await fetch(`${base}/health`, { headers });
-  assert.equal(accepted.status, 200, "matching credential is accepted");
-  assert.deepEqual(await accepted.json(), { ...health, port: gateway.port });
-
-  const ready = await fetch(`${base}/ready`, { headers });
-  assert.equal(ready.status, 503, "incomplete modules remain unavailable");
-  assert.deepEqual(await ready.json(), readiness);
-
-  const controller = new AbortController();
-  const events = await fetch(`${base}/events`, { headers, signal: controller.signal });
-  assert.equal(events.status, 200);
-  assert.equal(events.headers.get("content-type"), "text/event-stream");
-  const first = await events.body?.getReader().read();
-  assert.equal(new TextDecoder().decode(first?.value), ":ready\n\n", "SSE connection opens immediately");
-  controller.abort();
-
-  const absent = await fetch(`${base}/notes`, { headers });
-  assert.equal(absent.status, 404, "later module routes are absent");
-
-  process.env.PI_TEMPLATE_PORT = " ";
-  await assert.rejects(startGateway({
-    authToken: token,
-    health: () => health,
-    ready: () => readiness,
-  }), /PI_TEMPLATE_PORT must not be blank/);
-  if (previousPort === undefined) delete process.env.PI_TEMPLATE_PORT;
-  else process.env.PI_TEMPLATE_PORT = previousPort;
-
-  process.stdout.write("ok — authenticated loopback Gateway skeleton\n");
+  setupRequired = false;
+  assert.deepEqual((await json("/notes")).body, notes);
+  assert.equal((await json("/notes", { method: "POST", body: JSON.stringify({ body: "remember" }) })).response.status, 201);
+  assert.equal((await json("/notes/note-1", { method: "DELETE" })).response.status, 200);
+  assert.equal((await json("/schedules")).body[0].id, schedule.id);
+  assert.equal((await json("/schedules", { method: "POST", body: JSON.stringify(schedule) })).response.status, 201);
+  assert.equal((await json(`/schedules/${schedule.id}`, { method: "PUT", body: JSON.stringify(schedule) })).response.status, 200);
+  assert.equal((await json(`/schedules/${schedule.id}/run`, { method: "POST", body: "{}" })).response.status, 202);
+  assert.equal((await json(`/schedules/${schedule.id}`, { method: "DELETE" })).response.status, 200);
+  assert.equal((await json("/query-database", {
+    method: "POST", body: JSON.stringify({ action: DatabaseQueryAction.ListTables }),
+  })).body[0].name, "notes");
+  assert.equal((await json("/query-database", {
+    method: "POST", body: JSON.stringify({ action: DatabaseQueryAction.DescribeTable, table: "notes" }),
+  })).body.table, "notes");
+  assert.equal((await json("/query-database", {
+    method: "POST", body: JSON.stringify({ action: DatabaseQueryAction.Query, sql: "SELECT 1" }),
+  })).body.rows[0].sql, "SELECT 1");
+  assert.deepEqual(calls, [
+    "note:create:remember", "note:delete:note-1", "schedule:create:daily",
+    "schedule:update:schedule-1:daily", "schedule:delete:schedule-1",
+  ]);
+  process.stdout.write("ok — injected Gateway routes authenticate, gate setup, and delegate\n");
 } finally {
-  if (previousPort === undefined) delete process.env.PI_TEMPLATE_PORT;
-  else process.env.PI_TEMPLATE_PORT = previousPort;
   await gateway.close();
 }

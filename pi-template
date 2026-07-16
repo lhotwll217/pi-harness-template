@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Resolve the checkout when invoked through an npm-linked executable.
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIRECTORY="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [ "${SOURCE#/}" = "$SOURCE" ] && SOURCE="$DIRECTORY/$SOURCE"
+done
+ROOT="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+
+if [ -f "$ROOT/node_modules/tsx/dist/loader.mjs" ]; then
+  exec node --import "$ROOT/node_modules/tsx/dist/loader.mjs" "$ROOT/src/cli/main.ts" "$@"
+fi
+exec npx tsx "$ROOT/src/cli/main.ts" "$@"
