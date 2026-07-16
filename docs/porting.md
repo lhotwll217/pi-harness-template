@@ -42,7 +42,7 @@ Gateway-first: modules land behind their real authenticated transport.
 | 3 | Docs catalog + routes + drift checks | `scripts/docs-list.mjs`, new catalog + `docs` routes | [Documentation interface](docs-interface.md), [Self-documentation](self-documentation.md) | Landed (routes with WP7) |
 | 4 | State | `src/state` machinery; new `notes` example; migrations | [State and sessions](state-and-sessions.md) | Landed |
 | 5 | Scheduler | `src/scheduler` | [Scheduler](scheduler.md) | Landed |
-| 6 | Agent | `src/agent` (runtime, onboarding, doctor, `query_database`, new `save_note`), sandbox adapter | [Onboarding](onboarding.md), [Security](security.md) | Pending |
+| 6 | Agent | `src/agent` (runtime, onboarding, doctor, `query_database`, new `save_note`), sandbox adapter | [Onboarding](onboarding.md), [Security](security.md) | Landed |
 | 7 | CLI + composition | `src/cli`, `src/daemon` completion | [Architecture](architecture.md) | Pending |
 | 8 | Acceptance e2e + live smoke | new | [Testing](testing.md) | Pending |
 

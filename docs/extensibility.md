@@ -9,7 +9,9 @@ read_when:
 
 # Extensibility
 
-> **Status:** Design rules; no extension catalog or packages exist yet.
+> **Status:** The ordered resource catalog and exact-set loading are
+> implemented (`src/agent/resource-catalog.ts`); the design rules below govern
+> everything added to it.
 
 The template uses three extension seams and does not invent a fourth:
 

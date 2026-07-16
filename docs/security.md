@@ -9,8 +9,11 @@ read_when:
 
 # Security
 
-> **Status:** Architectural contract. Specific permission and sandbox adapters
-> remain open decisions.
+> **Status:** Implemented across the four controls: the pinned
+> `@gotgenes/pi-permission-system` reconciled from owner settings, protected
+> paths, the `@anthropic-ai/sandbox-runtime` adapter with its fail-closed
+> verification probe (`src/agent/sandbox`), and headless approval denial in the
+> scheduled-prompt runner.
 
 Security is not one feature. The harness keeps four independent controls visible
 because each answers a different question:

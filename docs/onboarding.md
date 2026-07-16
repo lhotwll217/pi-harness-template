@@ -9,7 +9,9 @@ read_when:
 
 # Onboarding
 
-> **Status:** Planned contract; no onboarding flow is implemented.
+> **Status:** Implemented (`src/agent/onboarding.ts`) as the resumable
+> versioned stage machine below, drivable non-interactively; the interactive
+> CLI wrapper lands with the CLI package.
 
 Onboarding is a versioned, resumable state machine rather than a collection of
 first-run side effects. It establishes the trust and runtime contract shared by

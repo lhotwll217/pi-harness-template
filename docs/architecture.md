@@ -114,7 +114,7 @@ packages/
   contracts/   stable types, pure rules, wire shapes, config readers (implemented)
 src/
   state/       durable store, events, read-only query surface (implemented)
-  agent/       owned Pi runtime and bundled resources (planned)
+  agent/       owned Pi runtime, onboarding, sandbox adapter, tools (implemented)
   scheduler/   triggers, queue, and isolated execution (implemented)
   gateway/     authenticated loopback transport and client (skeleton: auth, health, ready, SSE)
   daemon/      composition and lifecycle (skeleton: info file, fingerprint, shutdown)
