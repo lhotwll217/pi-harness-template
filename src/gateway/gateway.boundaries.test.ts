@@ -37,4 +37,16 @@ for (const file of runtime) {
     `${file}: process lifecycle belongs outside Gateway transport`);
 }
 
+const server = readFileSync(join(here, "server.ts"), "utf8");
+for (const seam of ["notes", "schedules", "query", "docs", "events", "diagnostics"] as const) {
+  assert.match(server, new RegExp(`options\\.${seam}\\.`), `route table delegates through injected ${seam} interface`);
+}
+for (const implementation of ["State", "Scheduler", "loadDocsCatalog", "queryDocs", "createScheduledPromptRunner"]) {
+  assert.doesNotMatch(
+    server,
+    new RegExp(`\\b${implementation}\\b`),
+    `Gateway route table must not reach ${implementation} implementation`,
+  );
+}
+
 process.stdout.write("ok — Gateway transport boundary holds\n");
