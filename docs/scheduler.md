@@ -9,12 +9,18 @@ read_when:
 
 # Scheduler
 
-> **Status:** Planned kernel contract; no scheduler is implemented.
+> **Status:** Planned harness-core contract; no scheduler is implemented.
 
-Scheduling is a kernel primitive because time, durable state, permissions,
+Scheduling is a harness-core primitive because time, durable state, permissions,
 process cleanup, and crash recovery are difficult to retrofit safely. State owns
 schedule and run records. The scheduler owns time and execution. The daemon owns
 lifecycle. The Gateway exposes only the selected protocol surface.
+
+The scheduler presents one typed service facade — start, stop, status, list,
+add, update, remove, and manual run — consumed by the Gateway and by tests, in
+the style of OpenClaw's pinned `CronServiceContract`. Callers never reach past
+the facade into timers, the queue, or State. Calendar evaluation uses Croner,
+converging on Owner Operator's scheduler.
 
 ## Vocabulary
 
@@ -65,13 +71,15 @@ boundaries are injectable so tests can prove daylight-saving behavior,
 concurrency, timeout, shutdown, and crash recovery without waiting on wall time
 or calling a model.
 
+Prompt and exact-argument command payloads both ship in the first
+implementation: command runs are what exercise the demonstrative process
+hygiene — timeouts, process-group termination, and no implicit shell.
+
 ## Open decisions
 
-- Calendar library and persistence adapter.
 - Initial global concurrency and queue fairness.
 - Default missed-run and shutdown policies.
 - Output-tail limits and retention.
-- Whether command payloads belong in the first implementation or follow prompts.
 
 ## Design references
 
@@ -80,4 +88,6 @@ The intended seam follows OpenClaw's small, explicit
 [timezone-aware schedule adapter](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/src/cron/schedule.ts#L13-L55),
 and rule that each isolated scheduled prompt receives a
 [fresh session](https://github.com/openclaw/openclaw/blob/372b527da4a1cee5b819e7852f6e26ef11160e85/docs/automation/cron-jobs.md#L203-L220).
-These are adopted design patterns, not copied product behavior or code.
+These are adopted design patterns, not copied product behavior or code. Run
+records persist through State in SQLite (Owner Operator's pattern) rather than
+OpenClaw's separate JSONL run log, preserving the single durable writer.

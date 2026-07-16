@@ -4,7 +4,8 @@ This file owns repository policy. Start with [`README.md`](README.md) for projec
 orientation, then use its documentation map to select the owning page under
 [`docs/`](docs/). Read any nearer `AGENTS.md` before working within a subtree.
 
-The repository is currently a documentation-only architecture scaffold. Do not
+The repository is currently a documentation-only architecture scaffold; its end
+state is a running, self-documenting, demonstrative harness at MVP level. Do not
 describe planned behavior as implemented, and do not add runtime scaffolding
 unless the task explicitly starts implementation.
 

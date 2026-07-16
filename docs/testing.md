@@ -1,6 +1,6 @@
 ---
 title: "Testing"
-summary: "The intended deterministic verification tiers for kernel boundaries, recovery, security, and documentation"
+summary: "The intended deterministic verification tiers for harness boundaries, recovery, security, and documentation"
 read_when:
   - Planning or adding a test
   - Defining acceptance checks for an implementation milestone
@@ -40,6 +40,10 @@ Future tests should prove:
 - Global concurrency, same-job no-overlap, timeout, cancellation, process-group cleanup, and crash recovery.
 - Scheduled prompts receive fresh sessions and immutable run snapshots.
 - Explicit resource loading rejects unintended ambient prompts, skills, or extensions.
+- The read-only query surface rejects every write statement, caps result rows,
+  and reports schema descriptions from the git-tracked docs, not the database file.
+- The documentation interface returns stable identifiers and equivalent JSON
+  over either transport.
 
 ## Documentation checks
 
@@ -59,8 +63,21 @@ workspaces, bind ephemeral ports, inject clocks and executors, and tear down all
 processes. Committed fixtures must be sanitized. Promote an inline fixture to a
 shared fixture only after more than one test needs it.
 
+## MVP gate
+
+The first implementation is declared done only when all four default tiers are
+green, the full acceptance loop passes as an end-to-end test — fresh temporary
+harness home, non-interactive onboarding against a fake provider, daemon,
+scheduled prompt with a stubbed model, durable run record, then interrogation
+through the docs interface and the read-only query surface over the Gateway —
+and an opt-in live-model smoke run succeeds on the owner's machine.
+
+## Decided
+
+- Language and runner converge with the port: TypeScript on Node's built-in
+  test runner, using Owner Operator's tiered `test/run.mjs` convention.
+
 ## Open decisions
 
-- Language, runner, and filename convention chosen with the implementation stack.
-- Supported operating systems and their sandbox test strategy.
+- Supported operating systems beyond macOS and their sandbox test strategy.
 - Which live behavior deserves a separately gated evaluation suite.

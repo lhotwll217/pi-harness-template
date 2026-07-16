@@ -1,28 +1,35 @@
 # Pi Harness Template
 
-> **Status:** Architecture and documentation scaffold. No runtime implementation exists yet.
+> **Status:** Architecture and documentation scaffold. No runtime implementation exists yet;
+> the end state is a running harness at MVP level.
 
-Pi Harness Template is a reusable, self-documenting foundation for building a
-local-first application harness around the [Pi agent ecosystem](https://pi.dev/).
-It captures the parts that every serious Pi-based product would otherwise need
-to rediscover: daemon lifecycle, an authenticated Gateway, onboarding,
-permissions and sandboxing, durable state and sessions, scheduling, and
-verification.
+Pi Harness Template is a **running, demonstrative template**: a functional,
+self-documenting local-first harness built around the
+[Pi agent ecosystem](https://pi.dev/). It captures the parts that every serious
+Pi-based product would otherwise need to rediscover: daemon lifecycle, an
+authenticated Gateway, onboarding, permissions and sandboxing, durable state and
+sessions, scheduling, and verification.
 
-It is also meant to teach. A coding agent entering the repository should be able
-to discover the design progressively, identify the owner of each behavior, and
-see which decisions remain open before implementation begins.
+Being demonstrative is the point. Every primitive exists to be read, run, and
+copied. The harness documents itself with code and can document itself at
+runtime: start it and ask how to build a harness, and it answers by routing you
+through its own code and documentation — for example through the docs CLI or
+the read-only database query tool. A coding agent entering the repository should
+be able to discover the design progressively, identify the owner of each
+behavior, and see which decisions remain open.
 
 ## Goals
 
-- Provide a small, production-oriented harness kernel around Pi.
-- Keep product behavior outside the kernel.
+- Provide a small, production-oriented, working harness around Pi.
+- Demonstrate every primitive with running code that a product can copy.
+- Keep product behavior outside the harness core.
 - Separate stable contracts from replaceable adapters.
 - Make trust boundaries explicit and fail closed before onboarding completes.
 - Preserve durable state, sessions, provenance, and scheduled-run history.
-- Make architectural knowledge discoverable by humans and agents.
-- Demonstrate one machine-readable public primitive through documentation
-  discovery.
+- Make architectural knowledge discoverable by humans and agents — from the
+  repository and from the running harness itself.
+- Demonstrate machine-readable self-description through documentation discovery
+  and a read-only database query tool.
 
 ## Non-goals
 
@@ -51,7 +58,7 @@ human · coding agent · future product surface
  provenance         runs        extensions
 ```
 
-The intended kernel has a few hard boundaries:
+The intended harness core has a few hard boundaries:
 
 - The daemon composes modules and owns process lifecycle, not product behavior.
 - The authenticated loopback Gateway translates transport; it owns no durable
@@ -73,18 +80,24 @@ Durable behavior knowledge lives under [`docs/`](docs/). Each page owns one
 surface and carries routing metadata so people and agents can decide what to
 read without loading the whole repository.
 
-The planned example public interface is:
+The template's own demonstrative surface is self-description, in two planned
+machine-readable primitives:
 
 ```text
-harness docs list
-harness docs read <id>
-harness docs query <question>
+pi-template docs list
+pi-template docs read <id>
+pi-template docs query <question>
 ```
 
-These commands are not implemented. They demonstrate how this harness could
-make one of its own primitives available to another harness or coding agent.
-Surfacing harness primitives through a command-line interface for external
-agents can be valuable, but **doing this is a product decision**.
+plus a read-only `query_database` agent tool with progressive disclosure
+(list tables → describe one → run a bounded `SELECT`). Together they let a
+coding agent inspect the harness's documentation and durable state without
+loading the whole repository or opening the database file.
+
+Which primitives to expose publicly is a **product decision** — the template
+decides it for itself as a demonstration; a product built on this harness makes
+its own call. See [Documentation interface](docs/docs-interface.md) and
+[State and sessions](docs/state-and-sessions.md).
 
 ## Documentation
 
@@ -101,6 +114,10 @@ agents can be valuable, but **doing this is a product decision**.
 ## Implementation status
 
 This repository currently records intent and architectural constraints only.
-The documentation labels proposed details and open decisions explicitly. Runtime
-work should begin only after the relevant open decisions are resolved and the
-documentation is revised to describe the chosen contract.
+The documentation labels proposed details and open decisions explicitly. The
+current stage ports proven modules from the
+[Owner Operator](https://github.com/lhotwll217/owner-operator) codebase and
+aligns them with this template's contracts, targeting a functional MVP: a
+harness you can start, onboard, schedule work in, and interrogate through its
+self-description primitives. The port plan, decision ledger, and work packages
+live in [Porting](docs/porting.md).

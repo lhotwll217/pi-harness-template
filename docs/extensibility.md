@@ -3,7 +3,7 @@ title: "Extensibility"
 summary: "The intended extension seams for Pi resources, application modules, and product-selected surfaces"
 read_when:
   - Adding a tool, skill, prompt, extension, adapter, or client surface
-  - Deciding whether reusable behavior belongs inside or outside the kernel
+  - Deciding whether reusable behavior belongs inside or outside the harness core
   - Considering extraction or package publication
 ---
 
@@ -15,10 +15,10 @@ The template uses three extension seams and does not invent a fourth:
 
 1. **Pi resources** — prompts, tools, skills, and Pi-native extensions loaded by
    the owned agent runtime.
-2. **Application modules** — replaceable implementations behind narrow kernel
-   contracts, such as state or sandbox adapters.
+2. **Application modules** — replaceable implementations behind narrow
+   harness-core contracts, such as state or sandbox adapters.
 3. **Product surfaces** — clients, commands, or interfaces selected by the
-   product using the kernel.
+   product using the harness.
 
 ## Pi resources
 
@@ -47,10 +47,12 @@ publication.
 
 ## Product surfaces
 
-The kernel may provide a Gateway client and selected CLI commands, but a product
-chooses which primitives it exposes. Sessions, schedules, state, events, or model
-intelligence are not automatically public APIs. The documentation interface is
-the one planned example; see [Documentation interface](docs-interface.md).
+The harness core may provide a Gateway client and selected CLI commands, but a
+product chooses which primitives it exposes. Sessions, schedules, state, events,
+or model intelligence are not automatically public APIs. The template's own
+product surface is self-description — the
+[documentation interface](docs-interface.md) and the
+[read-only query surface](state-and-sessions.md#read-only-query-surface).
 
 ## Open decisions
 

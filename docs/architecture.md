@@ -1,9 +1,9 @@
 ---
 title: "Architecture"
-summary: "The intended harness kernel: system boundaries, module ownership, roots, and dependency direction"
+summary: "The intended harness core: system boundaries, module ownership, roots, and dependency direction"
 read_when:
   - Deciding where future implementation belongs
-  - Evaluating whether a capability belongs in the reusable kernel
+  - Evaluating whether a capability belongs in the reusable harness core
   - Tracing which module should own a behavior or boundary
 ---
 
@@ -12,10 +12,14 @@ read_when:
 > **Status:** Intended architecture. Module names and filesystem layout remain
 > proposals until implementation begins.
 
-Pi Harness Template is a local-first kernel for Pi-based products. The intended
-kernel is responsible for lifecycle, trust, continuity, and automation
-primitives. The product using the kernel owns user experience, domain workflows,
-and any public surface beyond the explicitly chosen harness interfaces.
+Pi Harness Template is a local-first harness core for Pi-based products. The
+harness core is responsible for lifecycle, trust, continuity, and automation
+primitives, and every module doubles as a demonstration a product can copy. The
+product using the harness owns user experience, domain workflows, and any public
+surface beyond the explicitly chosen harness interfaces. The template's own
+chosen surface is self-description: the
+[documentation interface](docs-interface.md) and the read-only
+[database query surface](state-and-sessions.md#read-only-query-surface).
 
 ## System boundary
 
@@ -34,7 +38,7 @@ durable truth  time + runs      agent sessions
 The daemon is a process boundary and composition root, not a domain layer. The
 Gateway is a transport adapter, not a second application core. Product-specific
 interfaces may use the Gateway client without moving their behavior into the
-kernel.
+harness core.
 
 ## Runtime roots
 
@@ -64,19 +68,20 @@ These are conceptual seams, not approved package paths:
 | Daemon | Composition, readiness, discovery, process and shutdown lifecycle | Product decisions or duplicated domain rules |
 | CLI | Human- and agent-facing commands over stable contracts | Durable state, privileged runtime access, or product behavior |
 
-Dependencies point toward contracts and owning seams. The daemon supplies
-implementations to modules at composition time. Gateway code should receive
-interfaces rather than import scheduler, state, or Pi-runtime implementations.
+Dependencies point toward contracts and owning seams, following the layering
+proven in Owner Operator:
 
 ```text
-contracts ← {state, Pi runtime, scheduler, Gateway server, Gateway client}
-Gateway client ← {CLI, product clients}
-{state, Pi runtime, scheduler, Gateway server} ← daemon
+contracts ← state ← {Pi runtime, scheduler, Gateway server} ← daemon
+contracts ← Gateway client ← {CLI, product clients}
 ```
 
-Scheduler and Gateway depend on injected contracts, not concrete State or
-Pi-runtime implementations. The daemon selects and supplies those
-implementations at the composition root.
+State is the one concrete module other application modules may import; the
+scheduler and Pi runtime persist through the typed State interface rather than
+private database access. The Gateway server receives module interfaces from the
+daemon at composition time and does not import scheduler, state, or Pi-runtime
+implementations. The daemon selects and supplies concrete adapters at the
+composition root.
 
 ## Durable truth and events
 
@@ -85,9 +90,11 @@ transaction may publish a typed, fail-isolated event after commit. Events tell
 consumers what class of truth changed; consumers refetch the current projection
 instead of treating event payloads as another database.
 
-The concrete store is intentionally undecided. Whatever adapter is selected
-must preserve transactions, migrations, recovery, and single-writer semantics.
-See [State and sessions](state-and-sessions.md).
+The concrete store is SQLite through Node's built-in `node:sqlite`, converging
+on Owner Operator's choice: zero external dependency, transactional, and
+single-file. The adapter must preserve transactions, migrations, recovery, and
+single-writer semantics. What the template's database demonstratively stores
+remains an open decision. See [State and sessions](state-and-sessions.md).
 
 ## Trust boundary
 
@@ -113,7 +120,7 @@ src/
   cli/         selected public commands
 ```
 
-## Kernel exclusions
+## Harness-core exclusions
 
 - Product UI, widgets, channel bridges, monitoring views, and business workflows.
 - A second plugin runtime beside Pi extensions.
@@ -122,13 +129,44 @@ src/
   be considered after a real second local consumer exists; external publication
   is a separate product decision outside the template.
 
+## Adopted by convergence
+
+Decisions already proven in Owner Operator and OpenClaw are adopted rather than
+reopened:
+
+- Pi lineage: the `@earendil-works` Pi toolkit (`pi-ai`, `pi-coding-agent`,
+  `pi-tui`) plus the `@gotgenes/pi-permission-system`, pinned at port time.
+- Durable store: SQLite via Node's built-in `node:sqlite`.
+- Gateway transport: loopback (`127.0.0.1`) HTTP + SSE with timing-safe
+  bearer-token authentication, as in Owner Operator's gateway and following
+  OpenClaw's authenticated-loopback-gateway posture.
+- Scheduler seam: one typed service facade shared by the Gateway and tests, in
+  the style of OpenClaw's `CronServiceContract`; calendar math via Croner.
+- Run history: durable run records live in SQLite through State (Owner
+  Operator's pattern), rejecting OpenClaw's separate JSONL run log to preserve
+  the single-durable-writer rule.
+- Docs catalog: a deterministic frontmatter parser in the OpenClaw
+  `docs-list` style (see [Self-documentation](self-documentation.md)).
+
+## Decided
+
+- Naming: executable `pi-template`, packages `@pi-template/*`, harness home
+  `~/.pi-template/`.
+- Every CLI command traverses the Gateway; there is no direct-filesystem CLI
+  path. Model-free docs routes are served before onboarding completes under the
+  fail-closed rule's diagnostics exception.
+- The database stores harness bookkeeping plus one deliberately trivial
+  `notes` worked example (see
+  [State and sessions](state-and-sessions.md#worked-example-notes)).
+- OS sandbox enforcement adopts `@anthropic-ai/sandbox-runtime` behind the
+  replaceable adapter (see [Security](security.md#sandbox-adapter-boundary)).
+
 ## Open decisions
 
-- Which Pi lineage and exact version policy the first implementation will use.
-- Which durable-store adapter satisfies the state contract with the least local code.
-- Which existing sandbox implementation can enforce the required OS boundary.
-- Whether the first CLI reads a local catalog directly or always traverses the Gateway.
-- The final executable and command names.
+- Initial global concurrency, queue fairness, and retention defaults
+  (owned by [Scheduler](scheduler.md)).
+- Event delivery guarantees across Gateway clients
+  (owned by [State and sessions](state-and-sessions.md)).
 
 ## Design references
 

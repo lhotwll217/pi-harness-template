@@ -49,9 +49,18 @@ resources, permission posture, sandbox status, and daemon configuration without
 printing secrets. Readiness is a deterministic diagnostic; it must not require a
 paid model call.
 
+## Decided
+
+- All ten stages ship in the first implementation; none are deferred or
+  ceremonial. Every stage has a verification predicate and a test proving it
+  fails closed when its precondition is broken.
+- Sandbox enforcement (stage 7) is verified through the adopted
+  [sandbox adapter](security.md#sandbox-adapter-boundary); there is no
+  complete-with-warning path.
+- macOS (launchd) is the first always-on service platform, ported from Owner
+  Operator's daemon management; other platforms follow.
+
 ## Open decisions
 
 - Supported provider login and credential-import paths.
 - The exact versioning and access-contract hash format.
-- Which platforms receive an always-on service in the first implementation.
-- Whether sandbox verification can be portable or needs platform-specific probes.

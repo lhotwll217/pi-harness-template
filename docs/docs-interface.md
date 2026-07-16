@@ -12,18 +12,23 @@ read_when:
 > **Status:** Planned example interface. No commands, Gateway routes, generated
 > catalog, or model-backed query exist yet.
 
-The first proposed public harness primitive is documentation discovery:
+The first planned public harness primitive is documentation discovery:
 
 ```text
-harness docs list
-harness docs read <id>
-harness docs query <question>
+pi-template docs list
+pi-template docs read <id>
+pi-template docs query <question>
 ```
 
 It demonstrates how a harness can let another harness or coding agent inspect
 its capabilities progressively without making every internal subsystem public.
 Surfacing harness primitives through a command-line interface for external
-agents can be valuable, but **doing this is a product decision**.
+agents can be valuable, but **doing this is a product decision** — the template
+makes that decision for itself because self-description is its demonstrative
+product; a product built on the harness makes its own call. Its sibling
+primitive is the
+[read-only query surface](state-and-sessions.md#read-only-query-surface) over
+durable state.
 
 ## Command intent
 
@@ -39,10 +44,10 @@ product decision.
 
 ## Shared catalog
 
-CLI, Gateway, and any future Pi adapter should consume the same `DocsCatalog`
-contract and identifier scheme. Whether the first CLI reads Markdown locally or
-calls the Gateway remains an implementation decision. Markdown under `docs/`
-remains canonical, and either transport must return equivalent stable JSON.
+CLI, Gateway, and any future Pi adapter consume the same `DocsCatalog`
+contract and identifier scheme. The CLI reaches the catalog through the
+Gateway, like every other command. Markdown under `docs/` remains canonical,
+and any transport must return equivalent stable JSON.
 
 ## Proposed output properties
 
@@ -62,9 +67,18 @@ This example does not require sessions, schedules, state, events, or model
 intelligence to become public CLI APIs. A product may expose those primitives
 only after choosing their authority, privacy, and compatibility contracts.
 
+## Decided
+
+- The executable is `pi-template`.
+- Docs commands traverse the Gateway like every other CLI command. The daemon
+  serves docs routes before onboarding completes: they are model-free and ride
+  the fail-closed rule's diagnostics exception.
+- `docs query` ships in the first milestone with deliberately simple,
+  deterministic ranking — term matching over titles, summaries, `read_when`
+  triggers, and section headings with a transparent score. Its quality is
+  asserted by acceptance fixtures with real questions and expected top pages;
+  a product may replace the ranker behind the same contract.
+
 ## Open decisions
 
-- Final executable name; `harness` is illustrative.
-- Direct filesystem versus Gateway transport for local CLI reads.
 - Section identifier and content-version format.
-- Whether `docs query` belongs in the first implementation milestone.

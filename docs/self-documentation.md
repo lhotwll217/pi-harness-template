@@ -12,9 +12,15 @@ read_when:
 > **Status:** The Markdown routing structure exists. Automated catalog and drift
 > checks are planned.
 
-Self-documentation is a product primitive: another coding agent should be able
-to enter the repository, learn only what it needs, and follow stable links to
-deeper contracts. Source Markdown remains canonical for people and machines.
+Self-documentation is the template's product primitive, and it works at two
+levels. At rest, another coding agent enters the repository, learns only what it
+needs, and follows stable links to deeper contracts. At runtime, the running
+harness describes itself: ask it how to build a harness like it and it answers
+through the [documentation interface](docs-interface.md) and the
+[read-only query surface](state-and-sessions.md#read-only-query-surface),
+routing the caller to its own code and documentation. Everything is meant to be
+demonstrative — the harness documents itself with code. Source Markdown remains
+canonical for people and machines.
 
 ## Routing chain
 

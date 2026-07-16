@@ -54,9 +54,16 @@ logs, readiness output, transcripts, events, or error messages.
 
 The sandbox is a replaceable platform adapter behind a small contract. The
 contract should express filesystem, process, and network policy and provide a
-model-free verification probe. The implementation should prefer a maintained
-external capability; adoption requires current availability, license, and
-escape-boundary review.
+model-free verification probe.
+
+The adopted provider is `@anthropic-ai/sandbox-runtime` (Apache-2.0), wrapping
+macOS Seatbelt and Linux bubblewrap behind one API. It is pinned exactly and
+treated as disposable behind the adapter contract: the package is pre-1.0 and
+published from an experimental organization, so the contract — not the provider
+— is the durable architecture. Adoption is gated on an escape-boundary review
+at port time. There is no stub fallback: if enforcement cannot be verified by
+the model-free probe, the onboarding sandbox stage fails closed rather than
+completing with a warning.
 
 ## Audit and provenance
 
@@ -67,7 +74,7 @@ must not duplicate secrets or become a competing source of durable truth.
 
 ## Open decisions
 
-- The permission extension and stable adapter contract.
-- The sandbox provider on each supported operating system.
+- The stable adapter contract around the adopted
+  `@gotgenes/pi-permission-system` extension.
 - Network defaults for interactive and scheduled work.
 - How owner-authored task policy may narrow or widen the global baseline.
