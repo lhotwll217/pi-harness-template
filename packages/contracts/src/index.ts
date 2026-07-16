@@ -93,3 +93,15 @@ export type {
   DatabaseQueryResponse,
   GatewayApi,
 } from "./protocol";
+
+// Deterministic documentation catalog, query results, and lookup failures
+// (docs/docs-interface.md).
+export type {
+  DocsCatalogEntry,
+  DocsDocument,
+  DocsLookupError,
+  DocsQueryField,
+  DocsQueryMatch,
+  DocsQueryResult,
+  DocsSection,
+} from "./docs";
