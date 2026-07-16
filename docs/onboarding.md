@@ -10,8 +10,8 @@ read_when:
 # Onboarding
 
 > **Status:** Implemented (`src/agent/onboarding.ts`) as the resumable
-> versioned stage machine below, drivable non-interactively; the interactive
-> CLI wrapper lands with the CLI package.
+> versioned stage machine below, driven interactively by `pi-template onboard`
+> or non-interactively for tests.
 
 Onboarding is a versioned, resumable state machine rather than a collection of
 first-run side effects. It establishes the trust and runtime contract shared by

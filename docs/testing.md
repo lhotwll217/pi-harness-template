@@ -9,8 +9,9 @@ read_when:
 
 # Testing
 
-> **Status:** The tiered runner (`test/run.mjs`) and default suites are active
-> for the implemented modules. The MVP gate below is not yet met.
+> **Status:** All four default tiers are active and green, including the
+> acceptance loop (`test/acceptance.e2e.test.ts`). The MVP gate awaits only the
+> opt-in live-model smoke run on the owner's machine.
 
 Default verification must be deterministic, model-free, and isolated from the
 owner's real harness home, credentials, sessions, and network. Live paid-model

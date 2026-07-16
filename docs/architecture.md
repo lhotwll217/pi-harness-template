@@ -116,9 +116,9 @@ src/
   state/       durable store, events, read-only query surface (implemented)
   agent/       owned Pi runtime, onboarding, sandbox adapter, tools (implemented)
   scheduler/   triggers, queue, and isolated execution (implemented)
-  gateway/     authenticated loopback transport and client (skeleton: auth, health, ready, SSE)
-  daemon/      composition and lifecycle (skeleton: info file, fingerprint, shutdown)
-  cli/         selected public commands (planned)
+  gateway/     authenticated loopback transport, routes, and client (implemented)
+  daemon/      composition, lifecycle, and service management (implemented)
+  cli/         the pi-template executable (implemented)
 ```
 
 ## Harness-core exclusions

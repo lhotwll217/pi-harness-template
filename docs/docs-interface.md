@@ -9,9 +9,10 @@ read_when:
 
 # Documentation interface
 
-> **Status:** The catalog and deterministic ranked query are implemented
-> (`src/docs-catalog`) with real-question fixtures. The `pi-template docs`
-> CLI commands and Gateway routes remain planned.
+> **Status:** Implemented end to end: the catalog and deterministic ranked
+> query (`src/docs-catalog`), the Gateway docs routes (served pre-onboarding
+> under the model-free diagnostics exception), and the `pi-template docs`
+> CLI commands.
 
 The first planned public harness primitive is documentation discovery:
 
@@ -74,6 +75,11 @@ only after choosing their authority, privacy, and compatibility contracts.
 - Docs commands traverse the Gateway like every other CLI command. The daemon
   serves docs routes before onboarding completes: they are model-free and ride
   the fail-closed rule's diagnostics exception.
+- Bootstrap commands are the one exception to Gateway traversal, by nature:
+  `pi-template daemon` hosts the Gateway and `pi-template onboard` runs the
+  local setup machine. Every data command — docs, notes, schedules, query,
+  status — traverses the Gateway, and docs commands fail with a clear
+  start-the-daemon message rather than falling back to local reads.
 - `docs query` ships in the first milestone with deliberately simple,
   deterministic ranking — term matching over titles, summaries, `read_when`
   triggers, and section headings with a transparent score. Its quality is

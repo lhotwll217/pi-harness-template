@@ -43,8 +43,8 @@ Gateway-first: modules land behind their real authenticated transport.
 | 4 | State | `src/state` machinery; new `notes` example; migrations | [State and sessions](state-and-sessions.md) | Landed |
 | 5 | Scheduler | `src/scheduler` | [Scheduler](scheduler.md) | Landed |
 | 6 | Agent | `src/agent` (runtime, onboarding, doctor, `query_database`, new `save_note`), sandbox adapter | [Onboarding](onboarding.md), [Security](security.md) | Landed |
-| 7 | CLI + composition | `src/cli`, `src/daemon` completion | [Architecture](architecture.md) | Pending |
-| 8 | Acceptance e2e + live smoke | new | [Testing](testing.md) | Pending |
+| 7 | CLI + composition | `src/cli`, `src/daemon` completion | [Architecture](architecture.md) | Landed |
+| 8 | Acceptance e2e + live smoke | new | [Testing](testing.md) | Acceptance landed; live smoke awaits the owner |
 
 Packages 2, 3, and 4 may run in parallel once 1 lands; 5 needs 4; 6 needs 4 and
 5; 7 ties the seams; 8 gates the whole.

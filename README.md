@@ -1,8 +1,9 @@
 # Pi Harness Template
 
-> **Status:** Mid-port toward the MVP. Contracts, durable State, and the
-> daemon/Gateway skeleton are implemented; remaining modules land in
-> [porting](docs/porting.md) order.
+> **Status:** All modules are implemented and the acceptance loop passes:
+> onboard, run the daemon, schedule work, and interrogate the harness through
+> its self-description primitives. The MVP gate awaits the owner's live-model
+> smoke run ([porting](docs/porting.md)).
 
 Pi Harness Template is a **running, demonstrative template**: a functional,
 self-documenting local-first harness built around the
@@ -114,12 +115,11 @@ its own call. See [Documentation interface](docs/docs-interface.md) and
 
 ## Implementation status
 
-The port is underway: `@pi-template/contracts`, `src/state`, and the
-`src/gateway` + `src/daemon` skeleton are implemented with their test tiers
-green. The documentation labels remaining proposed details and open decisions
-explicitly. The port takes proven modules from the
-[Owner Operator](https://github.com/lhotwll217/owner-operator) codebase and
-aligns them with this template's contracts, targeting a functional MVP: a
-harness you can start, onboard, schedule work in, and interrogate through its
-self-description primitives. The port plan, decision ledger, and work packages
-live in [Porting](docs/porting.md).
+All modules are implemented — contracts, State, scheduler, agent (Pi runtime,
+onboarding, sandbox adapter, tools), Gateway, daemon, docs catalog, and the
+`pi-template` CLI — ported from proven
+[Owner Operator](https://github.com/lhotwll217/owner-operator) modules and
+OpenClaw patterns, with all four default test tiers green including the
+end-to-end acceptance loop. Declaring MVP awaits the opt-in live-model smoke
+run on the owner's machine. The port plan, decision ledger, and work-package
+history live in [Porting](docs/porting.md).
