@@ -104,20 +104,21 @@ separate controls. Pi resources are loaded from an explicit ordered catalog;
 ambient project resources are not automatically trusted. See
 [Security](security.md) and [Onboarding](onboarding.md).
 
-## Proposed source map
+## Source map
 
-This map records likely ownership only. It is not an instruction to create empty
-directories or a commitment to one package layout.
+`packages/contracts` is implemented; the `src/` modules are planned and land in
+[porting](porting.md) order.
 
 ```text
+packages/
+  contracts/   stable types, pure rules, wire shapes, config readers (implemented)
 src/
-  contracts/   stable types and pure rules
-  state/       durable store adapter and events
-  agent/       owned Pi runtime and bundled resources
-  scheduler/   triggers, queue, and isolated execution
-  gateway/     authenticated protocol and client
-  daemon/      composition and lifecycle
-  cli/         selected public commands
+  state/       durable store adapter and events (planned)
+  agent/       owned Pi runtime and bundled resources (planned)
+  scheduler/   triggers, queue, and isolated execution (planned)
+  gateway/     authenticated protocol and client (planned)
+  daemon/      composition and lifecycle (planned)
+  cli/         selected public commands (planned)
 ```
 
 ## Harness-core exclusions

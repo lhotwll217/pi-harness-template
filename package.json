@@ -1,0 +1,26 @@
+{
+  "name": "pi-template",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Running, self-documenting, demonstrative harness template for Pi-based products.",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "test": "npm run test:unit && npm run test:integration && npm run test:e2e && npm run test --workspaces --if-present",
+    "test:unit": "node test/run.mjs unit",
+    "test:integration": "node test/run.mjs integration",
+    "test:e2e": "node test/run.mjs e2e",
+    "typecheck": "tsc --noEmit && npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

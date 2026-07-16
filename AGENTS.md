@@ -4,10 +4,10 @@ This file owns repository policy. Start with [`README.md`](README.md) for projec
 orientation, then use its documentation map to select the owning page under
 [`docs/`](docs/). Read any nearer `AGENTS.md` before working within a subtree.
 
-The repository is currently a documentation-only architecture scaffold; its end
-state is a running, self-documenting, demonstrative harness at MVP level. Do not
-describe planned behavior as implemented, and do not add runtime scaffolding
-unless the task explicitly starts implementation.
+The repository is being ported toward its end state: a running,
+self-documenting, demonstrative harness at MVP level.
+[`docs/porting.md`](docs/porting.md) owns the active plan and work packages. Do
+not describe planned behavior as implemented.
 
 - **Keep a chain of context.** Route readers from this file to the README, from
   the README to the owning page, and from each page to narrower contracts.
