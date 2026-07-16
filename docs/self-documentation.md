@@ -9,8 +9,9 @@ read_when:
 
 # Self-documentation
 
-> **Status:** The Markdown routing structure exists. Automated catalog and drift
-> checks are planned.
+> **Status:** The Markdown routing structure, the deterministic catalog
+> (`src/docs-catalog`), the `docs:list` script, and automated drift checks are
+> implemented. Runtime transports (CLI and Gateway routes) remain planned.
 
 Self-documentation is the template's product primitive, and it works at two
 levels. At rest, another coding agent enters the repository, learns only what it
@@ -72,15 +73,16 @@ contracts exist, schemas, catalogs, flags, and parsers should document their own
 exact shapes. Narrative pages explain purpose and invariants and point to those
 contracts rather than copying them.
 
-## Planned catalog
+## Catalog
 
-A deterministic catalog will parse routing frontmatter and stable section
-headings from the same Markdown used by contributors. The catalog may later back
-the CLI, Gateway, and an embedded Pi tool. Generated views are disposable; they
-never replace source Markdown.
+The deterministic catalog (`src/docs-catalog`) parses routing frontmatter and
+stable section headings from the same Markdown contributors edit, and fails on
+any page missing required metadata. It backs `npm run docs:list` today and will
+back the CLI, Gateway, and an embedded Pi tool. Generated views are disposable;
+they never replace source Markdown.
 
-Drift checks should validate metadata, links, duplicate identifiers, generated
-artifacts, and claims that refer to paths or commands that do not exist.
+Drift checks run in the default suite: required frontmatter, resolving relative
+links (including heading anchors), and duplicate identifiers fail tests.
 
 ## Open decisions
 

@@ -39,7 +39,7 @@ Gateway-first: modules land behind their real authenticated transport.
 |---|---|---|---|---|
 | 1 | Scaffold + contracts | `packages/core`, pruned | [Architecture](architecture.md) | Landed |
 | 2 | Daemon + Gateway skeleton | `src/daemon`, `src/gateway` (auth + readiness routes only) | [Architecture](architecture.md) | Landed |
-| 3 | Docs catalog + routes + drift checks | `scripts/docs-list.mjs`, new catalog + `docs` routes | [Documentation interface](docs-interface.md), [Self-documentation](self-documentation.md) | In flight |
+| 3 | Docs catalog + routes + drift checks | `scripts/docs-list.mjs`, new catalog + `docs` routes | [Documentation interface](docs-interface.md), [Self-documentation](self-documentation.md) | Landed (routes with WP7) |
 | 4 | State | `src/state` machinery; new `notes` example; migrations | [State and sessions](state-and-sessions.md) | Landed |
 | 5 | Scheduler | `src/scheduler` | [Scheduler](scheduler.md) | In flight |
 | 6 | Agent | `src/agent` (runtime, onboarding, doctor, `query_database`, new `save_note`), sandbox adapter | [Onboarding](onboarding.md), [Security](security.md) | Pending |

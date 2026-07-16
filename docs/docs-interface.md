@@ -9,8 +9,9 @@ read_when:
 
 # Documentation interface
 
-> **Status:** Planned example interface. No commands, Gateway routes, generated
-> catalog, or model-backed query exist yet.
+> **Status:** The catalog and deterministic ranked query are implemented
+> (`src/docs-catalog`) with real-question fixtures. The `pi-template docs`
+> CLI commands and Gateway routes remain planned.
 
 The first planned public harness primitive is documentation discovery:
 
