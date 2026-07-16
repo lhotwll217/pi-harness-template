@@ -35,16 +35,16 @@ per the [testing MVP gate](testing.md#mvp-gate).
 
 Gateway-first: modules land behind their real authenticated transport.
 
-| # | Package | Ports from OO | Key contract |
-|---|---|---|---|
-| 1 | Scaffold + contracts | `packages/core`, pruned | [Architecture](architecture.md) |
-| 2 | Daemon + Gateway skeleton | `src/daemon`, `src/gateway` (auth + readiness routes only) | [Architecture](architecture.md) |
-| 3 | Docs catalog + routes + drift checks | `scripts/docs-list.mjs`, new catalog + `docs` routes | [Documentation interface](docs-interface.md), [Self-documentation](self-documentation.md) |
-| 4 | State | `src/state` machinery; new `notes` example; migrations | [State and sessions](state-and-sessions.md) |
-| 5 | Scheduler | `src/scheduler` | [Scheduler](scheduler.md) |
-| 6 | Agent | `src/agent` (runtime, onboarding, doctor, `query_database`, new `save_note`), sandbox adapter | [Onboarding](onboarding.md), [Security](security.md) |
-| 7 | CLI + composition | `src/cli`, `src/daemon` completion | [Architecture](architecture.md) |
-| 8 | Acceptance e2e + live smoke | new | [Testing](testing.md) |
+| # | Package | Ports from OO | Key contract | Status |
+|---|---|---|---|---|
+| 1 | Scaffold + contracts | `packages/core`, pruned | [Architecture](architecture.md) | Landed |
+| 2 | Daemon + Gateway skeleton | `src/daemon`, `src/gateway` (auth + readiness routes only) | [Architecture](architecture.md) | Landed |
+| 3 | Docs catalog + routes + drift checks | `scripts/docs-list.mjs`, new catalog + `docs` routes | [Documentation interface](docs-interface.md), [Self-documentation](self-documentation.md) | In flight |
+| 4 | State | `src/state` machinery; new `notes` example; migrations | [State and sessions](state-and-sessions.md) | Landed |
+| 5 | Scheduler | `src/scheduler` | [Scheduler](scheduler.md) | In flight |
+| 6 | Agent | `src/agent` (runtime, onboarding, doctor, `query_database`, new `save_note`), sandbox adapter | [Onboarding](onboarding.md), [Security](security.md) | Pending |
+| 7 | CLI + composition | `src/cli`, `src/daemon` completion | [Architecture](architecture.md) | Pending |
+| 8 | Acceptance e2e + live smoke | new | [Testing](testing.md) | Pending |
 
 Packages 2, 3, and 4 may run in parallel once 1 lands; 5 needs 4; 6 needs 4 and
 5; 7 ties the seams; 8 gates the whole.

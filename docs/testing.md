@@ -9,7 +9,8 @@ read_when:
 
 # Testing
 
-> **Status:** Verification plan only. No test runner or runtime code exists.
+> **Status:** The tiered runner (`test/run.mjs`) and default suites are active
+> for the implemented modules. The MVP gate below is not yet met.
 
 Default verification must be deterministic, model-free, and isolated from the
 owner's real harness home, credentials, sessions, and network. Live paid-model

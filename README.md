@@ -1,7 +1,8 @@
 # Pi Harness Template
 
-> **Status:** Architecture and documentation scaffold. No runtime implementation exists yet;
-> the end state is a running harness at MVP level.
+> **Status:** Mid-port toward the MVP. Contracts, durable State, and the
+> daemon/Gateway skeleton are implemented; remaining modules land in
+> [porting](docs/porting.md) order.
 
 Pi Harness Template is a **running, demonstrative template**: a functional,
 self-documenting local-first harness built around the
@@ -113,9 +114,10 @@ its own call. See [Documentation interface](docs/docs-interface.md) and
 
 ## Implementation status
 
-This repository currently records intent and architectural constraints only.
-The documentation labels proposed details and open decisions explicitly. The
-current stage ports proven modules from the
+The port is underway: `@pi-template/contracts`, `src/state`, and the
+`src/gateway` + `src/daemon` skeleton are implemented with their test tiers
+green. The documentation labels remaining proposed details and open decisions
+explicitly. The port takes proven modules from the
 [Owner Operator](https://github.com/lhotwll217/owner-operator) codebase and
 aligns them with this template's contracts, targeting a functional MVP: a
 harness you can start, onboard, schedule work in, and interrogate through its

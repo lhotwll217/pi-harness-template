@@ -9,8 +9,8 @@ read_when:
 
 # Architecture
 
-> **Status:** Intended architecture. Module names and filesystem layout remain
-> proposals until implementation begins.
+> **Status:** Partially implemented. Contracts, State, and the daemon/Gateway
+> skeleton exist; the source map below marks each module.
 
 Pi Harness Template is a local-first harness core for Pi-based products. The
 harness core is responsible for lifecycle, trust, continuity, and automation
@@ -113,11 +113,11 @@ ambient project resources are not automatically trusted. See
 packages/
   contracts/   stable types, pure rules, wire shapes, config readers (implemented)
 src/
-  state/       durable store adapter and events (planned)
+  state/       durable store, events, read-only query surface (implemented)
   agent/       owned Pi runtime and bundled resources (planned)
   scheduler/   triggers, queue, and isolated execution (planned)
-  gateway/     authenticated protocol and client (planned)
-  daemon/      composition and lifecycle (planned)
+  gateway/     authenticated loopback transport and client (skeleton: auth, health, ready, SSE)
+  daemon/      composition and lifecycle (skeleton: info file, fingerprint, shutdown)
   cli/         selected public commands (planned)
 ```
 

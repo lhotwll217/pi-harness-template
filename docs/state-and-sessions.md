@@ -10,8 +10,9 @@ read_when:
 
 # State and sessions
 
-> **Status:** Planned behavioral contract. The store is decided; the schema and
-> the database's demonstrative function are not.
+> **Status:** State machinery is implemented (`src/state`): migrations, notes,
+> schedules and runs, post-commit events, startup recovery, and the read-only
+> query surface. Session lifecycle and provenance records remain planned.
 
 The harness needs one durable source of truth for configuration state,
 onboarding, sessions, schedules, run history, and provenance. State owns that
