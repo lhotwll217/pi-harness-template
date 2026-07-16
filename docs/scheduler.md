@@ -9,7 +9,9 @@ read_when:
 
 # Scheduler
 
-> **Status:** Planned harness-core contract; no scheduler is implemented.
+> **Status:** Implemented (`src/scheduler`) behind the typed facade, with an
+> injected clock, timer, and prompt runner. The real Pi prompt runner arrives
+> with the agent module.
 
 Scheduling is a harness-core primitive because time, durable state, permissions,
 process cleanup, and crash recovery are difficult to retrofit safely. State owns
@@ -75,11 +77,16 @@ Prompt and exact-argument command payloads both ship in the first
 implementation: command runs are what exercise the demonstrative process
 hygiene — timeouts, process-group termination, and no implicit shell.
 
+## Decided
+
+- Global concurrency defaults to 1 and is configurable.
+- Missed-run policy defaults to skip, with missed timing and count durably
+  recorded on the run.
+- Shutdown defaults to drain.
+
 ## Open decisions
 
-- Initial global concurrency and queue fairness.
-- Default missed-run and shutdown policies.
-- Output-tail limits and retention.
+- Run-record retention.
 
 ## Design references
 
