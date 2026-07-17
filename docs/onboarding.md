@@ -63,9 +63,17 @@ Owner Operator's pattern — never a subcommand the owner must discover:
 - Non-interactive invocations without a marker fail closed: setup-required on
   stderr and exit code 2.
 - The auth stage offers, in order: copying existing standalone Pi or Owner
-  Operator authorizations (read-only — importing never modifies the source),
-  Pi's built-in provider login (the toolkit's own OAuth flows; the harness does
-  not reinvent login), and manual API-key entry only as an explicit fallback.
+  Operator authorizations and model settings (read-only — importing never
+  modifies the source), Pi's built-in provider login (the toolkit's own OAuth
+  flows; the harness does not reinvent login), and manual API-key entry only as
+  an explicit fallback.
+- Guided setup is consolidated onto one review surface: after the import offer
+  and a dedicated protected-paths question, every remaining choice — provider
+  and model, the exact resource catalog, permission mode, skill policy,
+  workspace approval, sandbox defaults, and service — is shown together and
+  accepted with a single confirmation. Declining the summary drops into
+  per-question customization. Consolidation never skips a stage predicate or
+  the sandbox probe; it only consolidates the asking.
 
 ## Decided
 
