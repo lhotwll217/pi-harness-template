@@ -37,6 +37,8 @@ const dependencies = (): OnboardingDependencies => ({
         checks: {
           allowedRootReadPermitted: sandboxPasses,
           canaryReadDenied: sandboxPasses,
+          allowedRootWritePermitted: sandboxPasses,
+          canaryWriteDenied: sandboxPasses,
           networkDenied: sandboxPasses,
         },
       };

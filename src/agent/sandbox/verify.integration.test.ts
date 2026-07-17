@@ -30,9 +30,11 @@ try {
     assert.deepEqual(result.checks, {
       allowedRootReadPermitted: true,
       canaryReadDenied: true,
+      allowedRootWritePermitted: true,
+      canaryWriteDenied: true,
       networkDenied: true,
     });
-    process.stdout.write("ok — real sandbox probe denied canary and network while permitting allowed-root read\n");
+    process.stdout.write("ok — real sandbox probe denied canary read, canary write, and network while permitting allowed-root read and write\n");
   }
 } finally {
   rmSync(dir, { recursive: true, force: true });

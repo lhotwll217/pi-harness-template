@@ -40,7 +40,13 @@ export function passingOnboardingDependencies(home?: string): OnboardingDependen
           ok: true,
           unavailable: false,
           reason: "test verifier passed",
-          checks: { allowedRootReadPermitted: true, canaryReadDenied: true, networkDenied: true },
+          checks: {
+            allowedRootReadPermitted: true,
+            canaryReadDenied: true,
+            allowedRootWritePermitted: true,
+            canaryWriteDenied: true,
+            networkDenied: true,
+          },
         };
       },
     },

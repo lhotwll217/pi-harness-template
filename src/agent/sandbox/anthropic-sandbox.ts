@@ -160,6 +160,7 @@ async function spawnSandboxed(
 class AnthropicSandboxAdapter implements SandboxAdapter {
   async verify(policy: SandboxPolicy, suppliedFiles?: SandboxProbeFiles): Promise<SandboxVerification> {
     let ownedDir: string | undefined;
+    let probeWriteCanary: string | undefined;
     let listener: Awaited<ReturnType<typeof listenForProbe>> | undefined;
     try {
       if (!policy.process.allowSubprocesses) {
@@ -179,21 +180,31 @@ class AnthropicSandboxAdapter implements SandboxAdapter {
         writeFileSync(files.canaryFile, "canary\n");
       }
       const scriptPath = join(dirname(files.allowedFile), "sandbox-probe.mjs");
+      // The write canary lives beside the read canary, outside every allowed root. If a
+      // broken sandbox lets the write through, the probe removes the file itself (the same
+      // broken enforcement that allowed the write allows the unlink) and still reports failure.
+      const writeCanary = `${files.canaryFile}.write-canary`;
+      probeWriteCanary = writeCanary;
+      const allowedWriteFile = join(dirname(files.allowedFile), "writable.txt");
       writeFileSync(scriptPath, [
-      'import { readFileSync } from "node:fs";',
+      'import { readFileSync, writeFileSync, unlinkSync } from "node:fs";',
       'import { connect } from "node:net";',
-      'const [allowedFile, canaryFile, portText] = process.argv.slice(2);',
+      'const [allowedFile, canaryFile, allowedWriteFile, writeCanary, portText] = process.argv.slice(2);',
       'let allowedRootReadPermitted = false;',
       'let canaryReadDenied = false;',
+      'let allowedRootWritePermitted = false;',
+      'let canaryWriteDenied = false;',
       'try { readFileSync(allowedFile, "utf8"); allowedRootReadPermitted = true; } catch {}',
       'try { readFileSync(canaryFile, "utf8"); } catch { canaryReadDenied = true; }',
+      'try { writeFileSync(allowedWriteFile, "probe write\\n"); allowedRootWritePermitted = true; } catch {}',
+      'try { writeFileSync(writeCanary, "leaked\\n"); try { unlinkSync(writeCanary); } catch {} } catch { canaryWriteDenied = true; }',
       'const networkDenied = await new Promise((resolve) => {',
       '  const socket = connect({ host: "127.0.0.1", port: Number(portText) });',
       '  socket.once("connect", () => { socket.destroy(); resolve(false); });',
       '  socket.once("error", () => resolve(true));',
       '  socket.setTimeout(1200, () => { socket.destroy(); resolve(true); });',
       '});',
-      'process.stdout.write(JSON.stringify({ allowedRootReadPermitted, canaryReadDenied, networkDenied }));',
+      'process.stdout.write(JSON.stringify({ allowedRootReadPermitted, canaryReadDenied, allowedRootWritePermitted, canaryWriteDenied, networkDenied }));',
       ].join("\n"));
       listener = await listenForProbe();
       const config = runtimeConfig({
@@ -201,12 +212,13 @@ class AnthropicSandboxAdapter implements SandboxAdapter {
         filesystem: {
           ...policy.filesystem,
           allowedReadRoots: [...new Set([...policy.filesystem.allowedReadRoots, dirname(files.allowedFile)])],
+          allowedWriteRoots: [...new Set([...policy.filesystem.allowedWriteRoots, dirname(files.allowedFile)])],
         },
-      }, [files.canaryFile]);
+      }, [files.canaryFile, writeCanary]);
       await SandboxManager.initialize(config, undefined, false);
-      const command = [process.execPath, scriptPath, files.allowedFile, files.canaryFile, String(listener.port)]
-        .map(shellQuote)
-        .join(" ");
+      const command = [
+        process.execPath, scriptPath, files.allowedFile, files.canaryFile, allowedWriteFile, writeCanary, String(listener.port),
+      ].map(shellQuote).join(" ");
       const wrapped = await SandboxManager.wrapWithSandboxArgv(command, undefined, undefined, undefined, dirname(files.allowedFile));
       const child = await executeProbe(wrapped.argv, { ...process.env, ...wrapped.env }, dirname(files.allowedFile));
       let checks: SandboxVerificationChecks;
@@ -215,7 +227,9 @@ class AnthropicSandboxAdapter implements SandboxAdapter {
       } catch {
         return unavailable(`sandboxed probe did not run (exit ${child.code}): ${child.stderr.trim() || "no output"}`);
       }
-      const ok = checks.allowedRootReadPermitted && checks.canaryReadDenied && checks.networkDenied;
+      const ok = checks.allowedRootReadPermitted && checks.canaryReadDenied
+        && checks.allowedRootWritePermitted && checks.canaryWriteDenied
+        && checks.networkDenied;
       return {
         ok,
         unavailable: false,
@@ -227,6 +241,7 @@ class AnthropicSandboxAdapter implements SandboxAdapter {
     } finally {
       await listener?.close().catch(() => undefined);
       await SandboxManager.reset().catch(() => undefined);
+      if (probeWriteCanary) rmSync(probeWriteCanary, { force: true });
       if (ownedDir) rmSync(ownedDir, { recursive: true, force: true });
     }
   }

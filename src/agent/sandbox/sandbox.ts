@@ -27,6 +27,8 @@ export interface SandboxProbeFiles {
 export interface SandboxVerificationChecks {
   allowedRootReadPermitted: boolean;
   canaryReadDenied: boolean;
+  allowedRootWritePermitted: boolean;
+  canaryWriteDenied: boolean;
   networkDenied: boolean;
 }
 
@@ -58,5 +60,7 @@ export interface SandboxAdapter {
 export const failedSandboxChecks = (): SandboxVerificationChecks => ({
   allowedRootReadPermitted: false,
   canaryReadDenied: false,
+  allowedRootWritePermitted: false,
+  canaryWriteDenied: false,
   networkDenied: false,
 });
