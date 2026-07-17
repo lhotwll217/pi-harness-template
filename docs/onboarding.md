@@ -62,11 +62,13 @@ Owner Operator's pattern — never a subcommand the owner must discover:
   revisit path.
 - Non-interactive invocations without a marker fail closed: setup-required on
   stderr and exit code 2.
-- The auth stage offers, in order: copying existing standalone Pi or Owner
-  Operator authorizations and model settings (read-only — importing never
-  modifies the source), Pi's built-in provider login (the toolkit's own OAuth
+- The auth stage offers, in order: copying the global standalone Pi
+  installation's authorizations and model settings if one exists (read-only —
+  importing never modifies the source; the harness knows about no other
+  application's files), Pi's built-in provider login (the toolkit's own OAuth
   flows; the harness does not reinvent login), and manual API-key entry only as
-  an explicit fallback.
+  an explicit fallback. Without a standalone Pi install, the owner
+  authenticates the harness like any other fresh tool.
 - Guided setup is consolidated onto one review surface: after the import offer
   and a dedicated protected-paths question, every remaining choice — provider
   and model, the exact resource catalog, permission mode, skill policy,

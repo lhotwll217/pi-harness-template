@@ -59,9 +59,11 @@ Packages 2, 3, and 4 may run in parallel once 1 lands; 5 needs 4; 6 needs 4 and
   `enrichment`, and other chief-of-staff terms are a CI grep failure in
   contracts.
 - Every `@owner-operator` identifier, `oo` binary reference, and
-  `~/.owner-operator` path is renamed at port time, not in a later pass. One
-  deliberate exception: the onboarding auth stage names
-  `~/.owner-operator/pi/auth.json` as a legacy import source it offers to copy.
+  `~/.owner-operator` path is renamed at port time, not in a later pass. No
+  exceptions: the running harness knows nothing about Owner Operator — it is
+  the porting source, never a runtime dependency or data source. The only
+  external installation onboarding may read is the global standalone Pi
+  install's own files.
 
 ## Definition of done (per package)
 
