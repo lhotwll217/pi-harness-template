@@ -35,6 +35,14 @@ const runCli = async (args: readonly string[]) => await new Promise<{
 
 async function runTest(): Promise<void> {
 try {
+  const firstRunHeadless = await runCli([]);
+  assert.equal(firstRunHeadless.status, 2);
+  assert.equal(firstRunHeadless.stdout, "");
+  assert.match(
+    firstRunHeadless.stderr,
+    /pi-template: setup required; run `pi-template` in an interactive terminal/,
+  );
+
   const noDaemon = await runCli(["docs", "list"]);
   assert.equal(noDaemon.status, 1);
   assert.match(noDaemon.stderr, /daemon is not running.*pi-template daemon/is);
@@ -61,6 +69,11 @@ try {
     testOnboardingAnswers(home),
     passingOnboardingDependencies(home),
   );
+
+  const bareReady = await runCli([]);
+  assert.equal(bareReady.status, 0, bareReady.stderr);
+  assert.match(bareReady.stdout, /"setupRequired": false/);
+  assert.match(bareReady.stdout, /Pi Harness Template/);
 
   const status = await runCli(["status"]);
   assert.equal(status.status, 0, status.stderr);

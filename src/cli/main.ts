@@ -2,10 +2,11 @@ import {
   DatabaseQueryAction,
   ScheduleKind,
   ScheduleRunStatus,
+  harnessPaths,
   type ScheduleCreateInput,
 } from "@pi-template/contracts";
 import { connectGateway, type GatewayClient } from "../gateway/client";
-import { CliUsageError, parseCliArgs } from "./args";
+import { CliUsageError, parseCliArgs, resolveBareInvocation } from "./args";
 
 const USAGE = `Pi Harness Template
 
@@ -31,6 +32,10 @@ Non-interactive onboarding requires --provider, --api-key or --auth-file, --mode
 const output = (value: unknown): void => {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 };
+
+async function outputStatus(client: GatewayClient): Promise<void> {
+  output({ health: await client.health(), ready: await client.ready() });
+}
 
 async function requireGateway(): Promise<GatewayClient> {
   const client = await connectGateway();
@@ -61,6 +66,30 @@ async function completedRun(client: GatewayClient, runId: string): Promise<Recor
 
 async function run(): Promise<void> {
   const command = parseCliArgs(process.argv.slice(2));
+  if (command.kind === "entry") {
+    const destination = resolveBareInvocation({
+      markerPath: harnessPaths().onboardingMarker,
+      isTTY: Boolean(process.stdin.isTTY && process.stdout.isTTY),
+    });
+    if (destination === "setup-required") {
+      process.stderr.write("pi-template: setup required; run `pi-template` in an interactive terminal\n");
+      process.exitCode = 2;
+      return;
+    }
+    if (destination === "onboard") {
+      const { onboard } = await import("./onboard");
+      output(await onboard([]));
+      return;
+    }
+    const client = await requireGateway();
+    try {
+      await outputStatus(client);
+      process.stdout.write(`${USAGE}\n`);
+    } finally {
+      client.close();
+    }
+    return;
+  }
   if (command.kind === "help") {
     process.stdout.write(`${USAGE}\n`);
     return;
@@ -80,7 +109,7 @@ async function run(): Promise<void> {
   try {
     switch (command.kind) {
       case "status":
-        output({ health: await client.health(), ready: await client.ready() });
+        await outputStatus(client);
         return;
       case "doctor": {
         const report = await client.doctor() as { ok?: boolean };

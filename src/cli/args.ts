@@ -1,4 +1,11 @@
-import { ScheduleKind, ScheduledPayloadKind, type ScheduledPayload } from "@pi-template/contracts";
+import { readFileSync } from "node:fs";
+import {
+  ScheduleKind,
+  ScheduledPayloadKind,
+  isOnboardingComplete,
+  type OnboardingMarker,
+  type ScheduledPayload,
+} from "@pi-template/contracts";
 
 export class CliUsageError extends Error {
   constructor(message: string) {
@@ -13,6 +20,7 @@ type ScheduleAddTrigger =
   | { kind: ScheduleKind.Cron; expression: string; timeZone: string };
 
 export type CliCommand =
+  | { kind: "entry" }
   | { kind: "help" }
   | { kind: "daemon" }
   | { kind: "onboard"; argv: string[] }
@@ -28,6 +36,19 @@ export type CliCommand =
   | { kind: "schedule-list" }
   | { kind: "schedule-remove"; id: string }
   | { kind: "schedule-run"; id: string };
+
+export type BareInvocation = "onboard" | "setup-required" | "status";
+
+export function resolveBareInvocation(options: { markerPath: string; isTTY: boolean }): BareInvocation {
+  let marker: OnboardingMarker | undefined;
+  try {
+    marker = JSON.parse(readFileSync(options.markerPath, "utf8")) as OnboardingMarker;
+  } catch {
+    marker = undefined;
+  }
+  if (isOnboardingComplete(marker)) return "status";
+  return options.isTTY ? "onboard" : "setup-required";
+}
 
 function required(value: string | undefined, description: string): string {
   if (!value?.trim()) throw new CliUsageError(`${description} is required`);
@@ -104,7 +125,8 @@ function parseScheduleAdd(argv: readonly string[]): Extract<CliCommand, { kind: 
 }
 
 export function parseCliArgs(argv: readonly string[]): CliCommand {
-  if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) return { kind: "help" };
+  if (argv.length === 0) return { kind: "entry" };
+  if (argv.includes("--help") || argv.includes("-h")) return { kind: "help" };
   const [command, action, ...rest] = argv;
   if (command === "daemon" && action === undefined) return { kind: "daemon" };
   if (command === "onboard") return { kind: "onboard", argv: argv.slice(1) };

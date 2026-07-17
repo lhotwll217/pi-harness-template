@@ -1,5 +1,24 @@
 import assert from "node:assert/strict";
-import { parseCliArgs } from "./args";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ONBOARDING_VERSION } from "@pi-template/contracts";
+import { parseCliArgs, resolveBareInvocation } from "./args";
+
+const entryRoot = mkdtempSync(join(tmpdir(), "pi-template-entry-routing-"));
+const markerPath = join(entryRoot, "onboarded.json");
+
+try {
+  assert.equal(resolveBareInvocation({ markerPath, isTTY: true }), "onboard");
+  assert.equal(resolveBareInvocation({ markerPath, isTTY: false }), "setup-required");
+  writeFileSync(markerPath, JSON.stringify({ version: ONBOARDING_VERSION, completedAt: "2026-07-17T12:00:00.000Z" }));
+  assert.equal(resolveBareInvocation({ markerPath, isTTY: true }), "status");
+  assert.equal(resolveBareInvocation({ markerPath, isTTY: false }), "status");
+} finally {
+  rmSync(entryRoot, { recursive: true, force: true });
+}
+
+assert.deepEqual(parseCliArgs([]), { kind: "entry" });
 
 assert.deepEqual(parseCliArgs(["docs", "list"]), { kind: "docs-list" });
 assert.deepEqual(parseCliArgs(["docs", "read", "scheduler"]), { kind: "docs-read", id: "scheduler" });
