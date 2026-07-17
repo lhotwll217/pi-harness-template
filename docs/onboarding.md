@@ -10,9 +10,10 @@ read_when:
 # Onboarding
 
 > **Status:** Implemented, including the entry behavior below: running
-> `pi-template` starts guided setup when needed, and the auth stage offers
-> credential import and Pi's built-in provider login before manual API-key
-> entry.
+> `pi-template` starts guided setup when needed — three questions on the happy
+> path (standalone-Pi import including model settings, protected paths, one
+> accept over the full review surface) — with Pi's built-in provider login for
+> fresh installs and per-question customization when the review is declined.
 
 Onboarding is a versioned, resumable state machine rather than a collection of
 first-run side effects. It establishes the trust and runtime contract shared by
