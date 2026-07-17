@@ -45,6 +45,7 @@ Gateway-first: modules land behind their real authenticated transport.
 | 6 | Agent | `src/agent` (runtime, onboarding, doctor, `query_database`, new `save_note`), sandbox adapter | [Onboarding](onboarding.md), [Security](security.md) | Landed |
 | 7 | CLI + composition | `src/cli`, `src/daemon` completion | [Architecture](architecture.md) | Landed |
 | 8 | Acceptance e2e + live smoke | new | [Testing](testing.md) | Acceptance landed; live smoke awaits the owner |
+| 9 | Onboarding entry + built-in login | drift correction toward OO's `oo.ts` entry; pi-ai OAuth registry | [Onboarding](onboarding.md#entry-behavior) | In flight |
 
 Packages 2, 3, and 4 may run in parallel once 1 lands; 5 needs 4; 6 needs 4 and
 5; 7 ties the seams; 8 gates the whole.

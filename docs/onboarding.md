@@ -9,9 +9,10 @@ read_when:
 
 # Onboarding
 
-> **Status:** Implemented (`src/agent/onboarding.ts`) as the resumable
-> versioned stage machine below, driven interactively by `pi-template onboard`
-> or non-interactively for tests.
+> **Status:** The resumable versioned stage machine is implemented
+> (`src/agent/onboarding.ts`). The entry behavior below — guided setup on
+> first interactive run and Pi's built-in provider login — is the contract; a
+> correction work package is landing it (see [Porting](porting.md)).
 
 Onboarding is a versioned, resumable state machine rather than a collection of
 first-run side effects. It establishes the trust and runtime contract shared by
@@ -51,11 +52,29 @@ resources, permission posture, sandbox status, and daemon configuration without
 printing secrets. Readiness is a deterministic diagnostic; it must not require a
 paid model call.
 
+## Entry behavior
+
+Onboarding is the first-run experience of the main entry point, converging on
+Owner Operator's pattern — never a subcommand the owner must discover:
+
+- Running `pi-template` in an interactive terminal with no completed marker
+  starts guided setup immediately. `pi-template onboard` remains the explicit
+  revisit path.
+- Non-interactive invocations without a marker fail closed: setup-required on
+  stderr and exit code 2.
+- The auth stage offers, in order: copying existing standalone Pi or Owner
+  Operator authorizations (read-only — importing never modifies the source),
+  Pi's built-in provider login (the toolkit's own OAuth flows; the harness does
+  not reinvent login), and manual API-key entry only as an explicit fallback.
+
 ## Decided
 
 - All ten stages ship in the first implementation; none are deferred or
   ceremonial. Every stage has a verification predicate and a test proving it
   fails closed when its precondition is broken.
+- Provider login and credential import follow the entry behavior above:
+  toolkit-owned OAuth flows plus guided import, resolving what a product must
+  support before onboarding can complete.
 - Sandbox enforcement (stage 7) is verified through the adopted
   [sandbox adapter](security.md#sandbox-adapter-boundary); there is no
   complete-with-warning path.
@@ -64,5 +83,4 @@ paid model call.
 
 ## Open decisions
 
-- Supported provider login and credential-import paths.
 - The exact versioning and access-contract hash format.
