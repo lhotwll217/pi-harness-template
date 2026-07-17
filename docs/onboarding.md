@@ -9,10 +9,10 @@ read_when:
 
 # Onboarding
 
-> **Status:** The resumable versioned stage machine is implemented
-> (`src/agent/onboarding.ts`). The entry behavior below — guided setup on
-> first interactive run and Pi's built-in provider login — is the contract; a
-> correction work package is landing it (see [Porting](porting.md)).
+> **Status:** Implemented, including the entry behavior below: running
+> `pi-template` starts guided setup when needed, and the auth stage offers
+> credential import and Pi's built-in provider login before manual API-key
+> entry.
 
 Onboarding is a versioned, resumable state machine rather than a collection of
 first-run side effects. It establishes the trust and runtime contract shared by

@@ -45,7 +45,7 @@ Gateway-first: modules land behind their real authenticated transport.
 | 6 | Agent | `src/agent` (runtime, onboarding, doctor, `query_database`, new `save_note`), sandbox adapter | [Onboarding](onboarding.md), [Security](security.md) | Landed |
 | 7 | CLI + composition | `src/cli`, `src/daemon` completion | [Architecture](architecture.md) | Landed |
 | 8 | Acceptance e2e + live smoke | new | [Testing](testing.md) | Acceptance landed; live smoke awaits the owner |
-| 9 | Onboarding entry + built-in login | drift correction toward OO's `oo.ts` entry; pi-ai OAuth registry | [Onboarding](onboarding.md#entry-behavior) | In flight |
+| 9 | Onboarding entry + built-in login | drift correction toward OO's `oo.ts` entry; pi-ai OAuth registry | [Onboarding](onboarding.md#entry-behavior) | Landed |
 
 Packages 2, 3, and 4 may run in parallel once 1 lands; 5 needs 4; 6 needs 4 and
 5; 7 ties the seams; 8 gates the whole.
@@ -59,7 +59,9 @@ Packages 2, 3, and 4 may run in parallel once 1 lands; 5 needs 4; 6 needs 4 and
   `enrichment`, and other chief-of-staff terms are a CI grep failure in
   contracts.
 - Every `@owner-operator` identifier, `oo` binary reference, and
-  `~/.owner-operator` path is renamed at port time, not in a later pass.
+  `~/.owner-operator` path is renamed at port time, not in a later pass. One
+  deliberate exception: the onboarding auth stage names
+  `~/.owner-operator/pi/auth.json` as a legacy import source it offers to copy.
 
 ## Definition of done (per package)
 
