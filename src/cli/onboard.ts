@@ -1,9 +1,8 @@
 import readline from "node:readline/promises";
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { getOAuthProvider, getOAuthProviderInfoList, type OAuthSelectPrompt } from "@earendil-works/pi-ai/oauth";
-import { AuthStorage, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { AuthStorage, getAgentDir, ModelRegistry, type AuthCredential } from "@earendil-works/pi-coding-agent";
 import { harnessPaths, isPermissionMode, type PermissionMode, type SkillPolicy } from "@pi-template/contracts";
 import {
   AGENT_RESOURCE_CATALOG,
@@ -32,8 +31,30 @@ export interface InteractiveOnboardingIO {
 export interface CliOnboardingDependencies extends OnboardingDependencies {
   interactiveIO?: InteractiveOnboardingIO;
   standalonePiAuthPath?: string;
-  ownerOperatorAuthPath?: string;
 }
+
+interface PiImportSource {
+  agentDir: string;
+  authPath: string;
+  settingsPath: string;
+  modelsPath: string;
+}
+
+interface InteractiveAuthSelection {
+  answer: NonNullable<OnboardingAnswers["auth"]>;
+  provider: string;
+  model: string;
+}
+
+type ReviewedSetup = OnboardingAnswers & {
+  auth: NonNullable<OnboardingAnswers["auth"]>;
+  model: NonNullable<OnboardingAnswers["model"]>;
+  resources: NonNullable<OnboardingAnswers["resources"]>;
+  capabilities: NonNullable<OnboardingAnswers["capabilities"]>;
+  protectedPaths: NonNullable<OnboardingAnswers["protectedPaths"]>;
+  sandbox: NonNullable<OnboardingAnswers["sandbox"]>;
+  service: NonNullable<OnboardingAnswers["service"]>;
+};
 
 const REPEATED = new Set([
   "--protected-path", "--protected-repo", "--sandbox-read", "--sandbox-write", "--network-domain", "--skill",
@@ -71,6 +92,26 @@ function skillPolicy(mode: string, allowlist: string[]): SkillPolicy {
   throw new CliUsageError("--workspace-skills must be bundled, all, or allowlist with at least one --skill");
 }
 
+function piImportSource(authPath: string): PiImportSource {
+  const resolvedAuthPath = resolve(authPath);
+  const agentDir = dirname(resolvedAuthPath);
+  return {
+    agentDir,
+    authPath: resolvedAuthPath,
+    settingsPath: join(agentDir, "settings.json"),
+    modelsPath: join(agentDir, "models.json"),
+  };
+}
+
+function importAnswer(source: PiImportSource): NonNullable<OnboardingAnswers["auth"]> {
+  return {
+    kind: "import",
+    sourceAuthPath: source.authPath,
+    sourceSettingsPath: source.settingsPath,
+    sourceModelsPath: source.modelsPath,
+  };
+}
+
 function answersFromFlags(flags: OnboardFlags): OnboardingAnswers {
   const provider = flags.values.get("--provider");
   const authFile = flags.values.get("--auth-file");
@@ -99,7 +140,7 @@ function answersFromFlags(flags: OnboardFlags): OnboardingAnswers {
   const domains = flags.repeated.get("--network-domain") ?? [];
   return {
     auth: authFile
-      ? { kind: "import", sourceAuthPath: resolve(authFile) }
+      ? importAnswer(piImportSource(authFile))
       : apiKey && provider
         ? { kind: "credential", provider, credential: { type: "api_key", key: apiKey } }
         : undefined,
@@ -134,6 +175,8 @@ function answersFromFlags(flags: OnboardFlags): OnboardingAnswers {
 }
 
 const isAffirmativeAnswer = (value: string): boolean => ["y", "yes"].includes(value.trim().toLowerCase());
+const isNegativeAnswer = (value: string): boolean => ["n", "no"].includes(value.trim().toLowerCase());
+const isDefaultYesAnswer = (value: string): boolean => !value.trim() || isAffirmativeAnswer(value);
 
 function importableProviders(sourceAuthPath: string): string[] {
   const storage = AuthStorage.create(sourceAuthPath);
@@ -147,29 +190,66 @@ function importableProviders(sourceAuthPath: string): string[] {
   });
 }
 
-async function importedProvider(providers: readonly string[], io: InteractiveOnboardingIO): Promise<string> {
-  if (providers.length === 1) return providers[0];
-  const provider = (await io.question(`Provider id for model (${providers.join(", ")}): `)).trim();
-  if (!providers.includes(provider)) throw new CliUsageError("select a provider present in the imported authorizations");
-  return provider;
+function importedModelSelection(source: PiImportSource): { provider: string; model: string } | undefined {
+  try {
+    const settings = JSON.parse(readFileSync(source.settingsPath, "utf8")) as Record<string, unknown>;
+    const provider = typeof settings.defaultProvider === "string" ? settings.defaultProvider.trim() : "";
+    const model = typeof settings.defaultModel === "string" ? settings.defaultModel.trim() : "";
+    return provider && model ? { provider, model } : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
-async function interactiveAuth(
-  io: InteractiveOnboardingIO,
-  sourceAuthPaths: readonly string[],
-): Promise<{ answer: NonNullable<OnboardingAnswers["auth"]>; provider: string }> {
-  for (const sourceAuthPath of [...new Set(sourceAuthPaths.map((path) => resolve(path)))]) {
-    if (!existsSync(sourceAuthPath)) continue;
-    const providers = importableProviders(sourceAuthPath);
-    if (providers.length === 0) continue;
-    if (isAffirmativeAnswer(await io.question(`Copy existing Pi authorizations from ${sourceAuthPath}? [y/N] `))) {
-      return {
-        answer: { kind: "import", sourceAuthPath },
-        provider: await importedProvider(providers, io),
-      };
-    }
-  }
+function importedProvider(providers: readonly string[], preferredProvider: string | undefined): string {
+  return preferredProvider && providers.includes(preferredProvider) ? preferredProvider : providers[0]!;
+}
 
+function selectAvailableModel(
+  provider: string,
+  storage: AuthStorage,
+  modelsPath?: string,
+  preferredModel?: string,
+): string | undefined {
+  const registry = modelsPath && existsSync(modelsPath)
+    ? ModelRegistry.create(storage, modelsPath)
+    : ModelRegistry.inMemory(storage);
+  const models = registry.getAvailable().filter((model) => model.provider === provider);
+  return models.find((model) => model.id === preferredModel)?.id ?? models[0]?.id;
+}
+
+async function loginCredential(io: InteractiveOnboardingIO, providerId: string): Promise<AuthCredential> {
+  const provider = getOAuthProvider(providerId);
+  if (!provider) throw new Error(`unknown OAuth provider: ${providerId}`);
+  const select = async (prompt: OAuthSelectPrompt): Promise<string | undefined> => {
+    io.write(`${prompt.message}\n`);
+    prompt.options.forEach((option, index) => io.write(`  ${index + 1}. ${option.label}\n`));
+    const answer = (await io.question("Selection: ")).trim();
+    if (!answer) return undefined;
+    const numeric = /^\d+$/.test(answer) ? Number(answer) : undefined;
+    return numeric === undefined ? prompt.options.find(({ id }) => id === answer)?.id : prompt.options[numeric - 1]?.id;
+  };
+  const credentials = await provider.login({
+    onAuth: ({ url, instructions }) => {
+      io.write(`Open ${url}\n`);
+      if (instructions) io.write(`${instructions}\n`);
+    },
+    onDeviceCode: ({ userCode, verificationUri }) => {
+      io.write(`Open ${verificationUri} and enter code ${userCode}\n`);
+    },
+    onPrompt: async ({ message, placeholder, allowEmpty }) => {
+      const answer = await io.question(`${message}${placeholder ? ` (${placeholder})` : ""}: `);
+      if (!allowEmpty && !answer.trim()) throw new Error(`${message} is required`);
+      return answer;
+    },
+    onProgress: (message) => io.write(`${message}\n`),
+    onManualCodeInput: async () => await io.question("Paste the redirect URL: "),
+    onSelect: select,
+  });
+  return { type: "oauth", ...credentials };
+}
+
+async function freshAuthentication(io: InteractiveOnboardingIO): Promise<InteractiveAuthSelection> {
   const providers = getOAuthProviderInfoList().filter(({ available }) => available);
   io.write("Built-in provider login:\n");
   providers.forEach((provider, index) => {
@@ -183,21 +263,111 @@ async function interactiveAuth(
     const provider = (await io.question("Provider id: ")).trim();
     const apiKey = (await io.question("Provider API key: ")).trim();
     if (!provider || !apiKey) throw new CliUsageError("provider id and API key are required");
-    return { answer: { kind: "credential", provider, credential: { type: "api_key", key: apiKey } }, provider };
+    const credential: AuthCredential = { type: "api_key", key: apiKey };
+    const model = selectAvailableModel(provider, AuthStorage.inMemory({ [provider]: credential })) ??
+      (await io.question("Model id: ")).trim();
+    if (!model) throw new CliUsageError("model id is required");
+    return { answer: { kind: "credential", provider, credential }, provider, model };
   }
   const selected = numericChoice === undefined
     ? providers.find(({ id }) => id === rawChoice)
     : providers[numericChoice - 1];
   if (!selected) throw new CliUsageError("select a listed provider or enter an API key manually");
-  return { answer: { kind: "login", provider: selected.id }, provider: selected.id };
+  const credential = await loginCredential(io, selected.id);
+  const model = selectAvailableModel(selected.id, AuthStorage.inMemory({ [selected.id]: credential }));
+  if (!model) throw new CliUsageError(`no authenticated model is available for provider ${selected.id}`);
+  return {
+    answer: { kind: "credential", provider: selected.id, credential },
+    provider: selected.id,
+    model,
+  };
 }
 
-async function interactiveAnswers(
+async function interactiveAuth(
   io: InteractiveOnboardingIO,
-  sourceAuthPaths: readonly string[],
-): Promise<OnboardingAnswers> {
-  const auth = await interactiveAuth(io, sourceAuthPaths);
-  const model = (await io.question("Model id: ")).trim();
+  source: PiImportSource | undefined,
+): Promise<InteractiveAuthSelection> {
+  if (source && existsSync(source.agentDir)) {
+    const importChoice = await io.question(`Copy existing standalone Pi setup from ${source.agentDir}? [Y/n] `);
+    if (isDefaultYesAnswer(importChoice)) {
+      if (!existsSync(source.authPath)) throw new CliUsageError("the standalone Pi setup has no authorization file to import");
+      const providers = importableProviders(source.authPath);
+      if (providers.length === 0) throw new CliUsageError("the standalone Pi setup has no usable authorizations to import");
+      const importedSelection = importedModelSelection(source);
+      const provider = importedProvider(providers, importedSelection?.provider);
+      const model = selectAvailableModel(
+        provider,
+        AuthStorage.create(source.authPath),
+        source.modelsPath,
+        importedSelection?.provider === provider ? importedSelection.model : undefined,
+      );
+      if (!model) throw new CliUsageError("the standalone Pi setup has no model default for the imported provider");
+      return { answer: importAnswer(source), provider, model };
+    }
+    if (!isNegativeAnswer(importChoice)) throw new CliUsageError("answer y or n to the standalone Pi import offer");
+  }
+  return await freshAuthentication(io);
+}
+
+function protectedPaths(raw: string): string[] {
+  return raw.split(",").map((path) => path.trim()).filter(Boolean).map((path) => resolve(path));
+}
+
+function reviewDefaults(
+  home: string | undefined,
+  auth: InteractiveAuthSelection,
+  protectedPathValues: string[],
+): ReviewedSetup {
+  const paths = harnessPaths(home);
+  const root = resolve(process.cwd());
+  return {
+    auth: auth.answer,
+    model: { provider: auth.provider, model: auth.model },
+    resources: {
+      acknowledgedCatalogIds: catalogIds(AGENT_RESOURCE_CATALOG),
+      skillPolicy: { mode: "bundled", allowlist: [] },
+      approveWorkspaceContext: true,
+    },
+    capabilities: { permissionMode: "read-only" },
+    protectedPaths: { paths: protectedPathValues, repos: [] },
+    sandbox: {
+      policy: {
+        filesystem: { allowedReadRoots: [root], allowedWriteRoots: [root], deniedReadRoots: [] },
+        process: { allowSubprocesses: true },
+        network: { mode: "deny", allowedDomains: [] },
+      },
+    },
+    service: { choice: "declined" },
+  };
+}
+
+function writeReview(io: InteractiveOnboardingIO, answers: ReviewedSetup, home: string | undefined): void {
+  const paths = harnessPaths(home);
+  io.write("Setup review:\n");
+  io.write(`  Provider: ${answers.model.provider}\n`);
+  io.write(`  Model: ${answers.model.model}\n`);
+  io.write("  Resource catalog:\n");
+  for (const resource of resourceCatalogSummary()) {
+    io.write(`    ${resource.id} — ${resource.description}\n`);
+  }
+  io.write("  Skill policy: bundled\n");
+  io.write("  Permission mode: read-only\n");
+  io.write(`  Protected paths: ${answers.protectedPaths.paths.join(", ") || "none"}\n`);
+  io.write("  Workspace files to approve:\n");
+  io.write(`    ${paths.workspaceInstructions}\n`);
+  io.write(`    ${paths.workspaceMemory}\n`);
+  io.write(`  Sandbox allowed read roots: ${answers.sandbox.policy.filesystem.allowedReadRoots.join(", ")}\n`);
+  io.write(`  Sandbox allowed write roots: ${answers.sandbox.policy.filesystem.allowedWriteRoots.join(", ")}\n`);
+  io.write("  Network: deny\n");
+  io.write("  Service: declined\n");
+}
+
+async function customizedAnswers(
+  io: InteractiveOnboardingIO,
+  defaults: ReviewedSetup,
+): Promise<ReviewedSetup> {
+  const defaultModelId = defaults.model.model;
+  const model = (await io.question(`Model id [${defaultModelId}]: `)).trim() || defaultModelId;
   io.write("Bundled resources:\n");
   for (const resource of resourceCatalogSummary()) {
     io.write(`  ${resource.id} — ${resource.description}\n`);
@@ -206,7 +376,6 @@ async function interactiveAnswers(
   if (!isAffirmativeAnswer(acknowledge)) throw new CliUsageError("resource catalog was not acknowledged");
   const permissionRaw = (await io.question("Permission mode [read-only/ask/allow]: ")).trim() || "read-only";
   if (!isPermissionMode(permissionRaw)) throw new CliUsageError("permission mode must be ask, allow, or read-only");
-  const protectedRaw = (await io.question("Protected paths (comma-separated, blank for none): ")).trim();
   const workspaceContext = await io.question("Approve workspace AGENTS.md and MEMORY.md? [y/N] ");
   const serviceRaw = (await io.question("Daemon service [declined/installed]: ")).trim() || "declined";
   if (serviceRaw !== "declined" && serviceRaw !== "installed") throw new CliUsageError("service choice must be declined or installed");
@@ -218,60 +387,31 @@ async function interactiveAnswers(
         workingDirectory: resolve((await io.question("Daemon working directory: ")).trim()),
       };
   return {
-    auth: auth.answer,
-    model: { provider: auth.provider, model },
+    ...defaults,
+    model: { provider: defaults.model.provider, model },
     resources: {
       acknowledgedCatalogIds: catalogIds(AGENT_RESOURCE_CATALOG),
       skillPolicy: { mode: "bundled", allowlist: [] },
       approveWorkspaceContext: isAffirmativeAnswer(workspaceContext),
     },
     capabilities: { permissionMode: permissionRaw as PermissionMode },
-    protectedPaths: {
-      paths: protectedRaw.split(",").map((path) => path.trim()).filter(Boolean).map((path) => resolve(path)),
-      repos: [],
-    },
-    sandbox: {
-      policy: {
-        filesystem: { allowedReadRoots: [resolve(process.cwd())], allowedWriteRoots: [resolve(process.cwd())], deniedReadRoots: [] },
-        process: { allowSubprocesses: true },
-        network: { mode: "deny", allowedDomains: [] },
-      },
-    },
     service,
   };
 }
 
-function providerLogin(io: InteractiveOnboardingIO): NonNullable<OnboardingDependencies["providerLogin"]> {
-  return async (paths, providerId) => {
-    const provider = getOAuthProvider(providerId);
-    if (!provider) throw new Error(`unknown OAuth provider: ${providerId}`);
-    const select = async (prompt: OAuthSelectPrompt): Promise<string | undefined> => {
-      io.write(`${prompt.message}\n`);
-      prompt.options.forEach((option, index) => io.write(`  ${index + 1}. ${option.label}\n`));
-      const answer = (await io.question("Selection: ")).trim();
-      if (!answer) return undefined;
-      const numeric = /^\d+$/.test(answer) ? Number(answer) : undefined;
-      return numeric === undefined ? prompt.options.find(({ id }) => id === answer)?.id : prompt.options[numeric - 1]?.id;
-    };
-    const credentials = await provider.login({
-      onAuth: ({ url, instructions }) => {
-        io.write(`Open ${url}\n`);
-        if (instructions) io.write(`${instructions}\n`);
-      },
-      onDeviceCode: ({ userCode, verificationUri }) => {
-        io.write(`Open ${verificationUri} and enter code ${userCode}\n`);
-      },
-      onPrompt: async ({ message, placeholder, allowEmpty }) => {
-        const answer = await io.question(`${message}${placeholder ? ` (${placeholder})` : ""}: `);
-        if (!allowEmpty && !answer.trim()) throw new Error(`${message} is required`);
-        return answer;
-      },
-      onProgress: (message) => io.write(`${message}\n`),
-      onManualCodeInput: async () => await io.question("Paste the redirect URL: "),
-      onSelect: select,
-    });
-    AuthStorage.create(paths.piAuth).set(providerId, { type: "oauth", ...credentials });
-  };
+async function interactiveAnswers(
+  io: InteractiveOnboardingIO,
+  source: PiImportSource | undefined,
+  home: string | undefined,
+): Promise<OnboardingAnswers> {
+  const auth = await interactiveAuth(io, source);
+  const protectedRaw = (await io.question("Protected paths (comma-separated, blank for none): ")).trim();
+  const defaults = reviewDefaults(home, auth, protectedPaths(protectedRaw));
+  writeReview(io, defaults, home);
+  const acceptance = await io.question("Accept this setup? [Y/n] ");
+  if (isDefaultYesAnswer(acceptance)) return defaults;
+  if (isNegativeAnswer(acceptance)) return await customizedAnswers(io, defaults);
+  throw new CliUsageError("answer y or n to accept this setup");
 }
 
 export async function onboard(
@@ -282,7 +422,6 @@ export async function onboard(
   const {
     interactiveIO,
     standalonePiAuthPath,
-    ownerOperatorAuthPath,
     ...machineDependencies
   } = dependencies;
   if (flags.nonInteractive) return await runOnboarding(answersFromFlags(flags), machineDependencies);
@@ -294,15 +433,10 @@ export async function onboard(
   };
   try {
     const destinationAuthPath = resolve(harnessPaths(machineDependencies.home).piAuth);
-    const sourceAuthPaths = [
-      standalonePiAuthPath ?? join(getAgentDir(), "auth.json"),
-      ownerOperatorAuthPath ?? join(homedir(), ".owner-operator", "pi", "auth.json"),
-    ].filter((path) => resolve(path) !== destinationAuthPath);
-    const answers = await interactiveAnswers(io, sourceAuthPaths);
-    return await runOnboarding(answers, {
-      ...machineDependencies,
-      providerLogin: machineDependencies.providerLogin ?? providerLogin(io),
-    });
+    const standaloneSource = piImportSource(standalonePiAuthPath ?? join(getAgentDir(), "auth.json"));
+    const source = standaloneSource.authPath === destinationAuthPath ? undefined : standaloneSource;
+    const answers = await interactiveAnswers(io, source, machineDependencies.home);
+    return await runOnboarding(answers, machineDependencies);
   } finally {
     rl?.close();
   }

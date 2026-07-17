@@ -42,7 +42,12 @@ type JsonObject = Record<string, unknown>;
 export interface OnboardingAnswers {
   auth?:
     | { kind: "credential"; provider: string; credential: AuthCredential }
-    | { kind: "import"; sourceAuthPath: string }
+    | {
+        kind: "import";
+        sourceAuthPath: string;
+        sourceSettingsPath?: string;
+        sourceModelsPath?: string;
+      }
     | { kind: "login"; provider: string };
   model?: { provider: string; model: string };
   resources?: {
@@ -99,6 +104,33 @@ function writeJsonAtomic(path: string, value: unknown, mode = 0o600): void {
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   writeFileSync(temporary, JSON.stringify(value, null, 2) + "\n", { mode });
   renameSync(temporary, path);
+}
+
+function copyFileAtomic(source: string, destination: string, mode = 0o600): void {
+  mkdirSync(dirname(destination), { recursive: true });
+  const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`;
+  writeFileSync(temporary, readFileSync(source), { mode });
+  renameSync(temporary, destination);
+}
+
+function importModelSettings(source: string, destination: string): void {
+  const imported = readObject(source);
+  const defaultProvider = typeof imported.defaultProvider === "string" ? imported.defaultProvider : undefined;
+  const defaultModel = typeof imported.defaultModel === "string" ? imported.defaultModel : undefined;
+  const defaultThinkingLevel = typeof imported.defaultThinkingLevel === "string"
+    ? imported.defaultThinkingLevel
+    : undefined;
+  const enabledModels = Array.isArray(imported.enabledModels) && imported.enabledModels.every((model) => typeof model === "string")
+    ? imported.enabledModels
+    : undefined;
+  if (!defaultProvider && !defaultModel && !defaultThinkingLevel && !enabledModels) return;
+  writeJsonAtomic(destination, {
+    ...readObject(destination),
+    ...(defaultProvider ? { defaultProvider } : {}),
+    ...(defaultModel ? { defaultModel } : {}),
+    ...(defaultThinkingLevel ? { defaultThinkingLevel } : {}),
+    ...(enabledModels ? { enabledModels } : {}),
+  });
 }
 
 function currentProgress(path: string): OnboardingProgress {
@@ -187,7 +219,13 @@ export async function runOnboarding(
           } else if (answer?.kind === "import") {
             const imported = readObject(answer.sourceAuthPath);
             if (!Object.keys(imported).length) throw new Error("approved credential import contains no providers");
-            writeJsonAtomic(paths.piAuth, imported);
+            copyFileAtomic(answer.sourceAuthPath, paths.piAuth);
+            if (answer.sourceSettingsPath && existsSync(answer.sourceSettingsPath)) {
+              importModelSettings(answer.sourceSettingsPath, paths.piSettings);
+            }
+            if (answer.sourceModelsPath && existsSync(answer.sourceModelsPath)) {
+              copyFileAtomic(answer.sourceModelsPath, paths.piModels);
+            }
           } else if (answer?.kind === "login") {
             if (!answer.provider.trim()) throw new Error("provider name is required");
             if (!dependencies.providerLogin) throw new Error("provider login is not configured for this onboarding surface");
@@ -200,10 +238,14 @@ export async function runOnboarding(
           const answer = answers.model ?? selectedModel(paths);
           if (!answer?.provider.trim() || !answer.model.trim()) throw new Error("provider and model selection are required");
           const existing = readObject(paths.piSettings);
+          const enabledModels = Array.isArray(existing.enabledModels) && existing.enabledModels.every((model) => typeof model === "string")
+            ? [...new Set([...existing.enabledModels, `${answer.provider}/${answer.model}`])]
+            : undefined;
           writeJsonAtomic(paths.piSettings, {
             ...existing,
             defaultProvider: answer.provider,
             defaultModel: answer.model,
+            ...(enabledModels ? { enabledModels } : {}),
           });
           const selection = selectedModel(paths);
           if (!selection || !modelVerifier(paths, selection)) throw new Error("selected model is unavailable or unauthorized");
