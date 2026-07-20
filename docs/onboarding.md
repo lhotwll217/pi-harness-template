@@ -59,9 +59,11 @@ Onboarding is the first-run experience of the main entry point, converging on
 Owner Operator's pattern — never a subcommand the owner must discover:
 
 - Running `pi-template` in an interactive terminal with no completed marker
-  starts guided setup immediately, and a completed setup flows straight into a
-  self-started daemon and status — the owner runs one command, ever.
-  `pi-template onboard` remains the explicit revisit path.
+  starts guided setup immediately; once setup is complete, the same bare
+  command is the harness's default surface — it ensures the daemon and opens
+  the interactive agent session. The owner runs one command, ever.
+  `pi-template onboard` remains the explicit revisit path, and non-interactive
+  invocations print status for scripts.
 - Non-interactive invocations without a marker fail closed: setup-required on
   stderr and exit code 2.
 - The auth stage offers, in order: copying the global standalone Pi
