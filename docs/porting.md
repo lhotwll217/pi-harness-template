@@ -12,8 +12,9 @@ read_when:
 > **Status:** Active work plan. This page owns port process only; behavior
 > contracts live with their owning pages and win on any conflict.
 
-The MVP ports proven modules from the local Owner Operator checkout at
-`~/Development/owner-operator` (OO) into this repository, renamed and pruned.
+The MVP ports proven modules from a local checkout of
+[Owner Operator](https://github.com/lhotwll217/owner-operator) (OO) into this
+repository, renamed and pruned.
 OpenClaw patterns arrive already embedded in that code or via the pinned
 references on the owning pages.
 
