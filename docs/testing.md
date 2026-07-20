@@ -9,9 +9,11 @@ read_when:
 
 # Testing
 
-> **Status:** All four default tiers are active and green, including the
-> acceptance loop (`test/acceptance.e2e.test.ts`). The MVP gate awaits only the
-> opt-in live-model smoke run on the owner's machine.
+> **Status:** The MVP gate below is met: all four default tiers green including
+> the acceptance loop (`test/acceptance.e2e.test.ts`), and the opt-in
+> live-model smoke completed on the owner's machine — a scheduled prompt ran a
+> real provider call in a fresh isolated session and landed as a durable run
+> record.
 
 Default verification must be deterministic, model-free, and isolated from the
 owner's real harness home, credentials, sessions, and network. Live paid-model

@@ -45,7 +45,7 @@ Gateway-first: modules land behind their real authenticated transport.
 | 5 | Scheduler | `src/scheduler` | [Scheduler](scheduler.md) | Landed |
 | 6 | Agent | `src/agent` (runtime, onboarding, doctor, `query_database`, new `save_note`), sandbox adapter | [Onboarding](onboarding.md), [Security](security.md) | Landed |
 | 7 | CLI + composition | `src/cli`, `src/daemon` completion | [Architecture](architecture.md) | Landed |
-| 8 | Acceptance e2e + live smoke | new | [Testing](testing.md) | Acceptance landed; live smoke awaits the owner |
+| 8 | Acceptance e2e + live smoke | new | [Testing](testing.md) | Landed; live smoke passed on the owner's machine |
 | 9 | Onboarding entry + built-in login | drift correction toward OO's `oo.ts` entry; pi-ai OAuth registry | [Onboarding](onboarding.md#entry-behavior) | Landed |
 | 10 | Consolidated setup, no OO knowledge | one review surface; standalone-Pi-only import; forbidden-text gate | [Onboarding](onboarding.md#entry-behavior) | Landed |
 

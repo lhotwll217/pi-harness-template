@@ -1,9 +1,10 @@
 # Pi Harness Template
 
-> **Status:** All modules are implemented and the acceptance loop passes:
-> onboard, run the daemon, schedule work, and interrogate the harness through
-> its self-description primitives. The MVP gate awaits the owner's live-model
-> smoke run ([porting](docs/porting.md)).
+> **Status:** MVP. All modules are implemented, all four test tiers are green
+> including the end-to-end acceptance loop, and the live-model smoke has run on
+> a real machine: onboarding, a scheduled prompt through a fresh isolated Pi
+> session, and interrogation of the resulting durable truth
+> ([porting](docs/porting.md)).
 
 Pi Harness Template is a **running, demonstrative template**: a functional,
 self-documenting local-first harness built around the
