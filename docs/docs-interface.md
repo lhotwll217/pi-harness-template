@@ -76,10 +76,12 @@ only after choosing their authority, privacy, and compatibility contracts.
   serves docs routes before onboarding completes: they are model-free and ride
   the fail-closed rule's diagnostics exception.
 - Bootstrap commands are the one exception to Gateway traversal, by nature:
-  `pi-template daemon` hosts the Gateway, and bare `pi-template` or
-  `pi-template onboard` runs the local setup machine on first interactive use. Every data command — docs, notes, schedules, query,
-  status — traverses the Gateway, and docs commands fail with a clear
-  start-the-daemon message rather than falling back to local reads.
+  `pi-template daemon` hosts the Gateway in the foreground, and bare
+  `pi-template` or `pi-template onboard` runs the local setup machine on first
+  interactive use. Every data command — docs, notes, schedules, query,
+  status — traverses the Gateway, and when no daemon is running the command
+  starts one itself and waits for discovery rather than telling the owner to.
+  The daemon is infrastructure, never a step the owner must remember.
 - `docs query` ships in the first milestone with deliberately simple,
   deterministic ranking — term matching over titles, summaries, `read_when`
   triggers, and section headings with a transparent score. Its quality is

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DatabaseQueryAction, ScheduleRunStatus } from "@pi-template/contracts";
+import { DatabaseQueryAction, ScheduleRunStatus, harnessPaths } from "@pi-template/contracts";
 import { runOnboarding } from "../agent";
 import { startDaemon } from "../daemon";
 import { connectGateway } from "../gateway";
@@ -15,7 +15,8 @@ const executable = join(repositoryRoot, "pi-template");
 const home = mkdtempSync(join(tmpdir(), "pi-template-cli-e2e-"));
 const previousHome = process.env.PI_TEMPLATE_HOME;
 process.env.PI_TEMPLATE_HOME = home;
-const childEnvironment: NodeJS.ProcessEnv = { ...process.env, PI_TEMPLATE_HOME: home };
+// Ephemeral port: an auto-started daemon must never collide with a real one on this machine.
+const childEnvironment: NodeJS.ProcessEnv = { ...process.env, PI_TEMPLATE_HOME: home, PI_TEMPLATE_PORT: "0" };
 delete childEnvironment.NODE_USE_SYSTEM_CA;
 let daemon: Awaited<ReturnType<typeof startDaemon>> | undefined;
 
@@ -43,10 +44,19 @@ try {
     /pi-template: setup required; run `pi-template` in an interactive terminal/,
   );
 
+  // No daemon running: the command starts one itself and succeeds — docs are served
+  // pre-onboarding under the model-free diagnostics exception. The auto-started daemon
+  // is then stopped so the in-process composed daemon below owns the home.
   const noDaemon = await runCli(["docs", "list"]);
-  assert.equal(noDaemon.status, 1);
-  assert.match(noDaemon.stderr, /daemon is not running.*pi-template daemon/is);
-  assert.equal(noDaemon.stdout, "");
+  assert.equal(noDaemon.status, 0, noDaemon.stderr);
+  const autoStartedDocs = JSON.parse(noDaemon.stdout) as Array<{ id: string }>;
+  assert.ok(autoStartedDocs.some(({ id }) => id === "architecture"));
+  const autoInfo = JSON.parse(readFileSync(harnessPaths(home).daemonInfo, "utf8")) as { pid: number };
+  process.kill(autoInfo.pid, "SIGTERM");
+  for (let waited = 0; existsSync(harnessPaths(home).daemonInfo); waited += 50) {
+    if (waited > 5_000) throw new Error("auto-started daemon did not shut down");
+    await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 50));
+  }
 
   try {
     daemon = await startDaemon({

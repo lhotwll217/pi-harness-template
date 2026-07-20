@@ -5,12 +5,13 @@ import {
   harnessPaths,
   type ScheduleCreateInput,
 } from "@pi-template/contracts";
-import { connectGateway, type GatewayClient } from "../gateway/client";
+import { type GatewayClient } from "../gateway/client";
 import { CliUsageError, parseCliArgs, resolveBareInvocation } from "./args";
+import { ensureDaemon } from "./ensure-daemon";
 
 const USAGE = `Pi Harness Template
 
-  pi-template daemon
+  pi-template daemon        (foreground mode; other commands start the daemon automatically)
   pi-template onboard [--non-interactive <answer flags>]
   pi-template status
   pi-template docs list
@@ -37,13 +38,8 @@ async function outputStatus(client: GatewayClient): Promise<void> {
   output({ health: await client.health(), ready: await client.ready() });
 }
 
-async function requireGateway(): Promise<GatewayClient> {
-  const client = await connectGateway();
-  if (!client) {
-    throw new Error("daemon is not running; start `pi-template daemon`");
-  }
-  return client;
-}
+// Any command that needs the Gateway starts the daemon itself when none is running.
+const requireGateway = async (): Promise<GatewayClient> => await ensureDaemon();
 
 const delay = async (milliseconds: number): Promise<void> => {
   await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
@@ -78,7 +74,16 @@ async function run(): Promise<void> {
     }
     if (destination === "onboard") {
       const { onboard } = await import("./onboard");
-      output(await onboard([]));
+      const result = await onboard([]);
+      output(result);
+      if ((result as { complete?: boolean }).complete === true) {
+        const client = await requireGateway();
+        try {
+          await outputStatus(client);
+        } finally {
+          client.close();
+        }
+      }
       return;
     }
     const client = await requireGateway();
