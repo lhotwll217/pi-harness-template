@@ -38,6 +38,11 @@ async function outputStatus(client: GatewayClient): Promise<void> {
   output({ health: await client.health(), ready: await client.ready() });
 }
 
+async function openInteractive(client: GatewayClient): Promise<void> {
+  const { runInteractiveSession } = await import("./interactive");
+  await runInteractiveSession({ gateway: client });
+}
+
 // Any command that needs the Gateway starts the daemon itself when none is running.
 const requireGateway = async (): Promise<GatewayClient> => await ensureDaemon();
 
@@ -79,7 +84,7 @@ async function run(): Promise<void> {
       if ((result as { complete?: boolean }).complete === true) {
         const client = await requireGateway();
         try {
-          await outputStatus(client);
+          await openInteractive(client);
         } finally {
           client.close();
         }
@@ -88,8 +93,8 @@ async function run(): Promise<void> {
     }
     const client = await requireGateway();
     try {
-      await outputStatus(client);
-      process.stdout.write(`${USAGE}\n`);
+      if (destination === "interactive") await openInteractive(client);
+      else await outputStatus(client);
     } finally {
       client.close();
     }

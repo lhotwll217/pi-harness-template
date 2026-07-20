@@ -37,7 +37,7 @@ export type CliCommand =
   | { kind: "schedule-remove"; id: string }
   | { kind: "schedule-run"; id: string };
 
-export type BareInvocation = "onboard" | "setup-required" | "status";
+export type BareInvocation = "interactive" | "onboard" | "setup-required" | "status";
 
 export function resolveBareInvocation(options: { markerPath: string; isTTY: boolean }): BareInvocation {
   let marker: OnboardingMarker | undefined;
@@ -46,7 +46,7 @@ export function resolveBareInvocation(options: { markerPath: string; isTTY: bool
   } catch {
     marker = undefined;
   }
-  if (isOnboardingComplete(marker)) return "status";
+  if (isOnboardingComplete(marker)) return options.isTTY ? "interactive" : "status";
   return options.isTTY ? "onboard" : "setup-required";
 }
 

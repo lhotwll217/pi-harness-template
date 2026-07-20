@@ -1,15 +1,17 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import {
-  AuthStorage,
   createBashToolDefinition,
-  createAgentSession,
-  DefaultResourceLoader,
-  ModelRegistry,
+  createAgentSessionFromServices,
+  createAgentSessionServices,
   SessionManager,
   SettingsManager,
+  type AgentSessionServices,
+  type ResourceLoader,
+  type SessionStartEvent,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import type { Model } from "@earendil-works/pi-ai";
 import {
   ensureHarnessWorkspace,
   loadHarnessSettings,
@@ -29,8 +31,15 @@ export interface AgentResourceOptions extends CatalogToolDependencies {
 }
 
 export interface LoadedAgentResources {
-  loader: DefaultResourceLoader;
+  loader: ResourceLoader;
   settingsManager: SettingsManager;
+  tools: ToolDefinition[];
+  loadedIds: string[];
+  approvedWorkspaceSkillPaths: string[];
+}
+
+export interface HarnessSessionServices {
+  services: AgentSessionServices;
   tools: ToolDefinition[];
   loadedIds: string[];
   approvedWorkspaceSkillPaths: string[];
@@ -67,7 +76,10 @@ function sandboxPolicy(home: string): SandboxPolicy {
   }
 }
 
-export async function createAgentResources(options: AgentResourceOptions): Promise<LoadedAgentResources> {
+/** Build Pi's cwd-bound services with every ambient resource source disabled. */
+export async function createHarnessSessionServices(
+  options: AgentResourceOptions,
+): Promise<HarnessSessionServices> {
   const paths = ensureHarnessWorkspace(options.home);
   process.env.PI_CODING_AGENT_DIR = paths.piAgentDir;
   reconcilePermissionSettings(paths.home);
@@ -85,40 +97,53 @@ export async function createAgentResources(options: AgentResourceOptions): Promi
         .map((path) => ({ path, content: readFileSync(path, "utf8") }))
     : [];
 
-  const loader = new DefaultResourceLoader({
+  const services = await createAgentSessionServices({
     cwd: options.cwd,
     agentDir: paths.piAgentDir,
     settingsManager,
-    noContextFiles: true,
-    noExtensions: true,
-    noSkills: true,
-    noPromptTemplates: true,
-    noThemes: true,
-    additionalExtensionPaths: extensions,
-    additionalSkillPaths: [...skills, ...approvedWorkspaceSkillPaths],
-    additionalPromptTemplatePaths: prompts,
-    agentsFilesOverride: () => ({ agentsFiles: approvedContext }),
+    resourceLoaderOptions: {
+      noContextFiles: true,
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      additionalExtensionPaths: extensions,
+      additionalSkillPaths: [...skills, ...approvedWorkspaceSkillPaths],
+      additionalPromptTemplatePaths: prompts,
+      agentsFilesOverride: () => ({ agentsFiles: approvedContext }),
+    },
   });
-  await loader.reload();
-  const extensionErrors = loader.getExtensions().errors;
+  const extensionErrors = services.resourceLoader.getExtensions().errors;
   if (extensionErrors.length) {
     throw new Error(`failed to load approved Pi extensions: ${extensionErrors.map(({ error }) => error).join("; ")}`);
   }
   return {
-    loader,
-    settingsManager,
+    services,
     tools,
     loadedIds: catalogIds(AGENT_RESOURCE_CATALOG),
     approvedWorkspaceSkillPaths,
   };
 }
 
+export async function createAgentResources(options: AgentResourceOptions): Promise<LoadedAgentResources> {
+  const prepared = await createHarnessSessionServices(options);
+  return {
+    loader: prepared.services.resourceLoader,
+    settingsManager: prepared.services.settingsManager,
+    tools: prepared.tools,
+    loadedIds: prepared.loadedIds,
+    approvedWorkspaceSkillPaths: prepared.approvedWorkspaceSkillPaths,
+  };
+}
+
 export interface HarnessSessionOptions extends AgentResourceOptions {
   sessionManager?: SessionManager;
+  sessionStartEvent?: SessionStartEvent;
   toolsAllow?: readonly AgentToolId[];
   ephemeral?: boolean;
   sandbox?: SandboxAdapter;
   headless?: boolean;
+  model?: Model<any>;
 }
 
 function assertHeadlessApprovalPolicy(home: string): void {
@@ -131,9 +156,7 @@ function assertHeadlessApprovalPolicy(home: string): void {
 export async function createHarnessSession(options: HarnessSessionOptions) {
   const paths = ensureHarnessWorkspace(options.home);
   if (options.headless) assertHeadlessApprovalPolicy(paths.home);
-  const resources = await createAgentResources(options);
-  const authStorage = AuthStorage.create(paths.piAuth);
-  const modelRegistry = ModelRegistry.create(authStorage, paths.piModels);
+  const resources = await createHarnessSessionServices(options);
   const catalogToolNames = resources.tools.map(({ name }) => name);
   const configuredNames = [...loadHarnessSettings(paths.home).toolPosture, ...catalogToolNames];
   const enabledNames = options.toolsAllow
@@ -159,18 +182,22 @@ export async function createHarnessSession(options: HarnessSessionOptions) {
   const sessionManager = options.sessionManager ?? (options.ephemeral
     ? SessionManager.inMemory(options.cwd)
     : SessionManager.create(options.cwd, join(paths.home, "transcripts")));
-  const result = await createAgentSession({
-    cwd: options.cwd,
-    agentDir: paths.piAgentDir,
-    authStorage,
-    modelRegistry,
-    settingsManager: resources.settingsManager,
-    resourceLoader: resources.loader,
+  const result = await createAgentSessionFromServices({
+    services: resources.services,
     sessionManager,
     customTools,
     tools: enabledNames,
+    sessionStartEvent: options.sessionStartEvent,
+    model: options.model,
   });
-  return { ...result, sessionManager, toolNames: enabledNames, loadedResourceIds: resources.loadedIds };
+  return {
+    ...result,
+    services: resources.services,
+    diagnostics: resources.services.diagnostics,
+    sessionManager,
+    toolNames: enabledNames,
+    loadedResourceIds: resources.loadedIds,
+  };
 }
 
 export function configuredWorkspaceSkillNames(home?: string): string[] {
