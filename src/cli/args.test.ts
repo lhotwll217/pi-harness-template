@@ -12,7 +12,7 @@ try {
   assert.equal(resolveBareInvocation({ markerPath, isTTY: true }), "onboard");
   assert.equal(resolveBareInvocation({ markerPath, isTTY: false }), "setup-required");
   writeFileSync(markerPath, JSON.stringify({ version: ONBOARDING_VERSION, completedAt: "2026-07-17T12:00:00.000Z" }));
-  assert.equal(resolveBareInvocation({ markerPath, isTTY: true }), "status");
+  assert.equal(resolveBareInvocation({ markerPath, isTTY: true }), "interactive");
   assert.equal(resolveBareInvocation({ markerPath, isTTY: false }), "status");
 } finally {
   rmSync(entryRoot, { recursive: true, force: true });

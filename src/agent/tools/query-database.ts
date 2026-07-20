@@ -2,11 +2,11 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { QueryResult, TableDescription, TableInfo } from "../../state/query";
 
-/** Read-only State query seam injected by the daemon composition root. */
+/** Read-only query capability supplied by the surface's owning transport or composition root. */
 export interface DatabaseQueryInterface {
-  listTables(): TableInfo[];
-  describeTable(table: string): TableDescription;
-  runQuery(sql: string): QueryResult;
+  listTables(): TableInfo[] | Promise<TableInfo[]>;
+  describeTable(table: string): TableDescription | Promise<TableDescription>;
+  runQuery(sql: string): QueryResult | Promise<QueryResult>;
 }
 
 const textResult = (value: unknown) => ({
@@ -32,14 +32,13 @@ export function createQueryDatabaseTool(query: DatabaseQueryInterface) {
       sql: Type.Optional(Type.String({ description: "SELECT statement for query." })),
     }),
     async execute(_id, params) {
-      if (params.action === "list_tables") return textResult(query.listTables());
+      if (params.action === "list_tables") return textResult(await query.listTables());
       if (params.action === "describe_table") {
         if (!params.table?.trim()) throw new Error("describe_table needs a table name");
-        return textResult(query.describeTable(params.table));
+        return textResult(await query.describeTable(params.table));
       }
       if (!params.sql?.trim()) throw new Error("query needs a SQL SELECT statement");
-      return textResult(query.runQuery(params.sql));
+      return textResult(await query.runQuery(params.sql));
     },
   });
 }
-

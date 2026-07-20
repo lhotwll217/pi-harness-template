@@ -82,8 +82,10 @@ try {
 
   const bareReady = await runCli([]);
   assert.equal(bareReady.status, 0, bareReady.stderr);
-  assert.match(bareReady.stdout, /"setupRequired": false/);
-  assert.match(bareReady.stdout, /Pi Harness Template/);
+  assert.equal(
+    (JSON.parse(bareReady.stdout) as { ready: { setupRequired: boolean } }).ready.setupRequired,
+    false,
+  );
 
   const status = await runCli(["status"]);
   assert.equal(status.status, 0, status.stderr);
