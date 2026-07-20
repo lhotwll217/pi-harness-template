@@ -118,7 +118,7 @@ src/
   scheduler/   triggers, queue, and isolated execution (implemented)
   gateway/     authenticated loopback transport, routes, and client (implemented)
   daemon/      composition, lifecycle, and service management (implemented)
-  cli/         the pi-template executable (implemented)
+  cli/         the pi-template executable and interactive session (implemented)
 ```
 
 ## Harness-core exclusions
