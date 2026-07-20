@@ -26,6 +26,10 @@ interface OnboardFlags {
 export interface InteractiveOnboardingIO {
   question(prompt: string): Promise<string>;
   write(value: string): void;
+  /** Resolve a pending question with an empty line — used when an OAuth browser
+   * callback wins the race and the manual-paste prompt would otherwise swallow
+   * the next typed line. */
+  flushPendingQuestion?(): void;
 }
 
 export interface CliOnboardingDependencies extends OnboardingDependencies {
@@ -221,6 +225,7 @@ function selectAvailableModel(
 async function loginCredential(io: InteractiveOnboardingIO, providerId: string): Promise<AuthCredential> {
   const provider = getOAuthProvider(providerId);
   if (!provider) throw new Error(`unknown OAuth provider: ${providerId}`);
+  let manualInputPending = false;
   const select = async (prompt: OAuthSelectPrompt): Promise<string | undefined> => {
     io.write(`${prompt.message}\n`);
     prompt.options.forEach((option, index) => io.write(`  ${index + 1}. ${option.label}\n`));
@@ -229,7 +234,7 @@ async function loginCredential(io: InteractiveOnboardingIO, providerId: string):
     const numeric = /^\d+$/.test(answer) ? Number(answer) : undefined;
     return numeric === undefined ? prompt.options.find(({ id }) => id === answer)?.id : prompt.options[numeric - 1]?.id;
   };
-  const credentials = await provider.login({
+  const loginOptions: Parameters<typeof provider.login>[0] = {
     onAuth: ({ url, instructions }) => {
       io.write(`Open ${url}\n`);
       if (instructions) io.write(`${instructions}\n`);
@@ -243,10 +248,26 @@ async function loginCredential(io: InteractiveOnboardingIO, providerId: string):
       return answer;
     },
     onProgress: (message) => io.write(`${message}\n`),
-    onManualCodeInput: async () => await io.question("Paste the redirect URL: "),
+    onManualCodeInput: async () => {
+      manualInputPending = true;
+      try {
+        return await io.question("Paste the redirect URL (or press Enter once the browser finishes): ");
+      } finally {
+        manualInputPending = false;
+      }
+    },
     onSelect: select,
-  });
-  return { type: "oauth", ...credentials };
+  };
+  try {
+    const credentials = await provider.login(loginOptions);
+    return { type: "oauth", ...credentials };
+  } finally {
+    // The provider races the browser callback against manual paste and does not cancel
+    // the loser: whenever the flow ends (callback won, or the exchange failed) with the
+    // paste prompt still pending, it would swallow the next typed line. Resolve it with
+    // an empty line so the question queue is clear.
+    if (manualInputPending) io.flushPendingQuestion?.();
+  }
 }
 
 async function freshAuthentication(io: InteractiveOnboardingIO): Promise<InteractiveAuthSelection> {
@@ -273,14 +294,22 @@ async function freshAuthentication(io: InteractiveOnboardingIO): Promise<Interac
     ? providers.find(({ id }) => id === rawChoice)
     : providers[numericChoice - 1];
   if (!selected) throw new CliUsageError("select a listed provider or enter an API key manually");
-  const credential = await loginCredential(io, selected.id);
-  const model = selectAvailableModel(selected.id, AuthStorage.inMemory({ [selected.id]: credential }));
-  if (!model) throw new CliUsageError(`no authenticated model is available for provider ${selected.id}`);
-  return {
-    answer: { kind: "credential", provider: selected.id, credential },
-    provider: selected.id,
-    model,
-  };
+  // A failed login attempt (expired or already-consumed code, state mismatch, network)
+  // must never kill the resumable flow: report one line and re-offer the menu.
+  try {
+    const credential = await loginCredential(io, selected.id);
+    const model = selectAvailableModel(selected.id, AuthStorage.inMemory({ [selected.id]: credential }));
+    if (!model) throw new Error(`no authenticated model is available for provider ${selected.id}`);
+    return {
+      answer: { kind: "credential", provider: selected.id, credential },
+      provider: selected.id,
+      model,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    io.write(`\nLogin did not complete: ${message.split("\n")[0]}\nChoose again, or press Ctrl-C to exit.\n`);
+    return await freshAuthentication(io);
+  }
 }
 
 async function interactiveAuth(
@@ -430,6 +459,7 @@ export async function onboard(
   const io: InteractiveOnboardingIO = interactiveIO ?? {
     question: async (prompt) => await rl!.question(prompt),
     write: (value) => process.stdout.write(value),
+    flushPendingQuestion: () => rl!.write("\n"),
   };
   try {
     const destinationAuthPath = resolve(harnessPaths(machineDependencies.home).piAuth);
