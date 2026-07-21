@@ -248,13 +248,54 @@ try {
   assert.equal(readFileSync(standaloneSettings, "utf8"), settingsBytes);
   assert.equal(readFileSync(standaloneModels, "utf8"), modelsBytes);
 
+  // Agent-operated login: --no-browser routes the provider's method choice to device-code
+  // without a human picking, so an agent driving the terminal never hits the browser
+  // callback. The fake provider offers both methods and records which the flow chose.
+  let chosenLoginMethod: string | undefined;
+  registerOAuthProvider({
+    id: "anthropic",
+    name: "Faux Method Provider",
+    async login(options) {
+      chosenLoginMethod = await options.onSelect({
+        message: "Select login method:",
+        options: [
+          { id: "browser", label: "Browser login (default)" },
+          { id: "device_code", label: "Device code login (headless)" },
+        ],
+      });
+      return { access: "device-access", refresh: "device-refresh", expires: 4_102_444_800_000 };
+    },
+    async refreshToken(credentials) { return credentials; },
+    getApiKey(credentials) { return credentials.access; },
+  });
+  try {
+    const deviceHome = join(root, "device-home");
+    const deviceInteraction = scriptedInteraction(["anthropic", "", ""]); // provider, protected paths, accept
+    const deviceDependencies = passingOnboardingDependencies(deviceHome);
+    delete deviceDependencies.authVerifier;
+    deviceDependencies.modelVerifier = () => true;
+    const deviceResult = await onboard(["--no-browser"], {
+      ...deviceDependencies,
+      interactiveIO: deviceInteraction.io,
+      standalonePiAuthPath: join(root, "absent-standalone-device", "auth.json"),
+    });
+    assert.equal(deviceResult.complete, true);
+    assert.equal(chosenLoginMethod, "device_code", "--no-browser selects device-code login");
+    assert.match(deviceInteraction.transcript(), /Device code login.*--no-browser/s);
+    // The method was auto-chosen: only the provider pick was asked, never a method "Selection:".
+    assert.ok(!deviceInteraction.questions().includes("Selection: "),
+      "device-code method is chosen without asking");
+  } finally {
+    unregisterOAuthProvider("anthropic");
+  }
+
   const forbiddenTerm = ["owner", "operator"].join("-");
   const forbiddenOccurrences = ["src", "test"].flatMap(filesBelow).filter((path) =>
     readFileSync(path, "utf8").toLowerCase().includes(forbiddenTerm),
   );
   assert.deepEqual(forbiddenOccurrences, []);
 
-  process.stdout.write("ok — consolidated onboarding imports, authenticates, customizes, and honors explicit flags\n");
+  process.stdout.write("ok — consolidated onboarding imports, authenticates, customizes, routes --no-browser to device-code, and honors explicit flags\n");
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

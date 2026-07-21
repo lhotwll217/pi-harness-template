@@ -46,6 +46,40 @@ contract—such as new bundled capabilities or materially different protected-pa
 rules—must reopen the relevant review instead of silently grandfathering the old
 marker.
 
+## Agent-operated onboarding
+
+The north star is minimizing friction for the human to start interacting. One
+path to that is letting an agent the owner already uses — a coding agent in
+their terminal — drive this same onboarding flow on their behalf: "download
+this and set it up." There is no separate agent mode. The agent operates the
+ordinary flow, answering the same questions and reviewing the same setup a
+person would; onboarding is written to be operable that way.
+
+This is a valid, supported option **when the product and its trust boundary
+allow it**, and it is a trade the owner makes deliberately:
+
+- The driving agent must be granted the capabilities to operate the flow.
+- That agent becomes an **information broker** — it sees the answers and the
+  auth handoff. Convenience is weighed against trusting the middle agent with
+  that visibility.
+
+Onboarding is never reduced to a switch: an agent that drives it still goes
+through every stage, and the sandbox stage still runs its real enforcement
+probe and fails closed. Automation changes *who operates the flow*, never
+*whether the verification happens*.
+
+### The login handoff (`--no-browser`)
+
+The one step that structurally assumes a human is provider login: the default
+browser flow opens a page and waits on a localhost callback. An agent driving a
+terminal cannot complete that. `pi-template onboard --no-browser` (or the
+`PI_TEMPLATE_NO_BROWSER` environment variable) routes login to the provider's
+device-code flow instead — the harness prints a URL and a short code, the owner
+approves on any device, and polling completes with no callback and no redirect
+URL to paste. The agent relays the URL and code to the owner; nothing else in
+the flow needs a human. The interactive default stays browser login, which is
+the better experience for a person at a laptop.
+
 ## Readiness
 
 Readiness should report effective roots, provider/model availability, selected

@@ -17,6 +17,7 @@ import { CliUsageError } from "./args";
 
 interface OnboardFlags {
   nonInteractive: boolean;
+  noBrowser: boolean;
   acknowledgeResources: boolean;
   approveWorkspaceContext: boolean;
   values: Map<string, string>;
@@ -72,10 +73,14 @@ function parseFlags(argv: readonly string[]): OnboardFlags {
   const values = new Map<string, string>();
   const repeated = new Map<string, string[]>();
   let nonInteractive = false;
+  // Agent-operated / no-local-browser onboarding routes login to Pi's device-code flow
+  // instead of the localhost browser callback (docs/onboarding.md#agent-operated-onboarding).
+  let noBrowser = process.env.PI_TEMPLATE_NO_BROWSER === "1";
   let acknowledgeResources = false;
   let approveWorkspaceContext = false;
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
+    if (flag === "--no-browser") { noBrowser = true; continue; }
     if (flag === "--non-interactive") { nonInteractive = true; continue; }
     if (flag === "--acknowledge-resources") { acknowledgeResources = true; continue; }
     if (flag === "--approve-workspace-context") { approveWorkspaceContext = true; continue; }
@@ -86,7 +91,7 @@ function parseFlags(argv: readonly string[]): OnboardFlags {
     else if (values.has(flag)) throw new CliUsageError(`${flag} may be provided only once`);
     else values.set(flag, value);
   }
-  return { nonInteractive, acknowledgeResources, approveWorkspaceContext, values, repeated };
+  return { nonInteractive, noBrowser, acknowledgeResources, approveWorkspaceContext, values, repeated };
 }
 
 function skillPolicy(mode: string, allowlist: string[]): SkillPolicy {
@@ -222,11 +227,27 @@ function selectAvailableModel(
   return models.find((model) => model.id === preferredModel)?.id ?? models[0]?.id;
 }
 
-async function loginCredential(io: InteractiveOnboardingIO, providerId: string): Promise<AuthCredential> {
+const looksLikeDeviceCodeOption = (option: { id: string; label: string }): boolean =>
+  /device/i.test(option.id) || /device/i.test(option.label);
+
+async function loginCredential(
+  io: InteractiveOnboardingIO,
+  providerId: string,
+  preferDeviceCode: boolean,
+): Promise<AuthCredential> {
   const provider = getOAuthProvider(providerId);
   if (!provider) throw new Error(`unknown OAuth provider: ${providerId}`);
   let manualInputPending = false;
   const select = async (prompt: OAuthSelectPrompt): Promise<string | undefined> => {
+    // Headless / agent-operated login: skip the human choice and take the device-code
+    // method (no localhost browser callback) when the provider offers one.
+    if (preferDeviceCode) {
+      const deviceOption = prompt.options.find(looksLikeDeviceCodeOption);
+      if (deviceOption) {
+        io.write(`${prompt.message}\n  → ${deviceOption.label} (--no-browser)\n`);
+        return deviceOption.id;
+      }
+    }
     io.write(`${prompt.message}\n`);
     prompt.options.forEach((option, index) => io.write(`  ${index + 1}. ${option.label}\n`));
     const answer = (await io.question("Selection: ")).trim();
@@ -270,7 +291,10 @@ async function loginCredential(io: InteractiveOnboardingIO, providerId: string):
   }
 }
 
-async function freshAuthentication(io: InteractiveOnboardingIO): Promise<InteractiveAuthSelection> {
+async function freshAuthentication(
+  io: InteractiveOnboardingIO,
+  preferDeviceCode: boolean,
+): Promise<InteractiveAuthSelection> {
   const providers = getOAuthProviderInfoList().filter(({ available }) => available);
   io.write("Built-in provider login:\n");
   providers.forEach((provider, index) => {
@@ -297,7 +321,7 @@ async function freshAuthentication(io: InteractiveOnboardingIO): Promise<Interac
   // A failed login attempt (expired or already-consumed code, state mismatch, network)
   // must never kill the resumable flow: report one line and re-offer the menu.
   try {
-    const credential = await loginCredential(io, selected.id);
+    const credential = await loginCredential(io, selected.id, preferDeviceCode);
     const model = selectAvailableModel(selected.id, AuthStorage.inMemory({ [selected.id]: credential }));
     if (!model) throw new Error(`no authenticated model is available for provider ${selected.id}`);
     return {
@@ -308,13 +332,14 @@ async function freshAuthentication(io: InteractiveOnboardingIO): Promise<Interac
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     io.write(`\nLogin did not complete: ${message.split("\n")[0]}\nChoose again, or press Ctrl-C to exit.\n`);
-    return await freshAuthentication(io);
+    return await freshAuthentication(io, preferDeviceCode);
   }
 }
 
 async function interactiveAuth(
   io: InteractiveOnboardingIO,
   source: PiImportSource | undefined,
+  preferDeviceCode: boolean,
 ): Promise<InteractiveAuthSelection> {
   if (source && existsSync(source.agentDir)) {
     const importChoice = await io.question(`Copy existing standalone Pi setup from ${source.agentDir}? [Y/n] `);
@@ -335,7 +360,7 @@ async function interactiveAuth(
     }
     if (!isNegativeAnswer(importChoice)) throw new CliUsageError("answer y or n to the standalone Pi import offer");
   }
-  return await freshAuthentication(io);
+  return await freshAuthentication(io, preferDeviceCode);
 }
 
 function protectedPaths(raw: string): string[] {
@@ -432,8 +457,9 @@ async function interactiveAnswers(
   io: InteractiveOnboardingIO,
   source: PiImportSource | undefined,
   home: string | undefined,
+  preferDeviceCode: boolean,
 ): Promise<OnboardingAnswers> {
-  const auth = await interactiveAuth(io, source);
+  const auth = await interactiveAuth(io, source, preferDeviceCode);
   const protectedRaw = (await io.question("Protected paths (comma-separated, blank for none): ")).trim();
   const defaults = reviewDefaults(home, auth, protectedPaths(protectedRaw));
   writeReview(io, defaults, home);
@@ -465,7 +491,7 @@ export async function onboard(
     const destinationAuthPath = resolve(harnessPaths(machineDependencies.home).piAuth);
     const standaloneSource = piImportSource(standalonePiAuthPath ?? join(getAgentDir(), "auth.json"));
     const source = standaloneSource.authPath === destinationAuthPath ? undefined : standaloneSource;
-    const answers = await interactiveAnswers(io, source, machineDependencies.home);
+    const answers = await interactiveAnswers(io, source, machineDependencies.home, flags.noBrowser);
     return await runOnboarding(answers, machineDependencies);
   } finally {
     rl?.close();
