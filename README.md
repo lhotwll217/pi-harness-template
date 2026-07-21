@@ -110,6 +110,7 @@ its own call. See [Documentation interface](docs/docs-interface.md) and
 - [State and sessions](docs/state-and-sessions.md) — durable truth and continuity.
 - [Scheduler](docs/scheduler.md) — durable isolated prompt and command runs.
 - [Extensibility](docs/extensibility.md) — Pi-native extension seams.
+- [Workspace](docs/workspace.md) — bundled capability versus owner-authored opinion.
 - [Self-documentation](docs/self-documentation.md) — how the repository teaches itself.
 - [Documentation interface](docs/docs-interface.md) — the planned public docs surface.
 - [Testing](docs/testing.md) — intended verification tiers and contracts.
