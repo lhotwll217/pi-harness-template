@@ -11,6 +11,7 @@ import {
   type ScheduledPromptRunRequest,
 } from "@pi-template/contracts";
 import type { CatalogToolDependencies } from "./resource-catalog";
+import { piTemplateIdentityPrompt } from "./resource-catalog";
 import { createHarnessSession } from "./runtime";
 
 export interface PromptSessionFactoryInput {
@@ -19,6 +20,7 @@ export interface PromptSessionFactoryInput {
   transcriptDir: string;
   toolsAllow: readonly AgentToolId[];
   headless: true;
+  systemPromptOverride: () => string;
   provenance: {
     origin: "scheduler";
     caller: "scheduler";
@@ -92,6 +94,7 @@ function realSessionFactory(resources: CatalogToolDependencies): PromptSessionFa
       sessionManager: manager,
       toolsAllow: input.toolsAllow,
       headless: true,
+      systemPromptOverride: input.systemPromptOverride,
     });
     if (!input.headless) throw new Error("scheduled prompt sessions must be headless");
     // Print mode has no UI context. The permission extension therefore selects its denying
@@ -142,6 +145,7 @@ export function createScheduledPromptRunner(options: ScheduledPromptRunnerOption
       transcriptDir,
       toolsAllow,
       headless: true,
+      systemPromptOverride: piTemplateIdentityPrompt,
       provenance: {
         origin: "scheduler",
         caller: "scheduler",

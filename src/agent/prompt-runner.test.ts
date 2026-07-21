@@ -9,6 +9,7 @@ import {
   type ScheduledPromptRunRequest,
 } from "@pi-template/contracts";
 import { createScheduledPromptRunner, type PromptSessionFactory } from "./prompt-runner";
+import { piTemplateIdentityPrompt } from "./resource-catalog";
 
 const dir = mkdtempSync(join(tmpdir(), "pi-template-prompt-runner-"));
 const created: Array<{
@@ -16,6 +17,7 @@ const created: Array<{
   tools: readonly AgentToolId[];
   headless: boolean;
   transcriptDir: string;
+  systemPrompt: string;
   provenance: Parameters<PromptSessionFactory>[0]["provenance"];
 }> = [];
 let serial = 0;
@@ -28,6 +30,7 @@ const sessions: PromptSessionFactory = async (input) => {
     tools: input.toolsAllow,
     headless: input.headless,
     transcriptDir: input.transcriptDir,
+    systemPrompt: input.systemPromptOverride(),
     provenance: input.provenance,
   });
   let aborted = false;
@@ -78,6 +81,7 @@ try {
   ]);
   assert.ok(created.every(({ headless }) => headless));
   assert.ok(created.every(({ transcriptDir }) => transcriptDir === join(dir, "transcripts")));
+  assert.ok(created.every(({ systemPrompt }) => systemPrompt === piTemplateIdentityPrompt()));
   assert.deepEqual(created[0]?.provenance, {
     origin: "scheduler",
     caller: "scheduler",

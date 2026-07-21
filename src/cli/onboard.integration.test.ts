@@ -79,6 +79,7 @@ try {
   const importedPaths = harnessPaths(importedHome);
   assert.match(transcript, /fixture-provider/);
   assert.match(transcript, /imported-model/);
+  assert.match(transcript, /prompt:identity.*Define the Pi Harness Template agent/s);
   assert.match(transcript, /tool:query_database.*Read-only progressive disclosure/s);
   assert.match(transcript, /tool:save_note.*Persist the notes worked example/s);
   assert.match(transcript, /extension:permission-system.*Apply the reviewed Pi permission policy/s);

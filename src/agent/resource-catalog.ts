@@ -43,6 +43,10 @@ export type AgentResourceCatalogEntry =
     };
 
 const permissionPackage = "@gotgenes/pi-permission-system";
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const identityPromptPath = join(repositoryRoot, "src", "agent", "prompts", "pi-template.md");
+
+export const piTemplateIdentityPrompt = (): string => readFileSync(identityPromptPath, "utf8");
 
 /** Resolve the package-declared Pi extension instead of relying on ambient package discovery. */
 export function permissionSystemExtensionPath(): string {
@@ -69,6 +73,13 @@ export function permissionSystemExtensionPath(): string {
 
 /** Ordered source for runtime loading, onboarding review, diagnostics, and exact-set tests. */
 export const AGENT_RESOURCE_CATALOG: readonly AgentResourceCatalogEntry[] = Object.freeze([
+  {
+    id: "prompt:identity",
+    kind: "prompt",
+    name: "identity",
+    description: "Define the Pi Harness Template agent and its bundled capability policy.",
+    path: identityPromptPath,
+  },
   {
     id: `tool:${AgentToolId.QueryDatabase}`,
     kind: "tool",
