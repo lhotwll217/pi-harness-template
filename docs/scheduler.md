@@ -61,7 +61,7 @@ allowlist used for that occurrence.
 
 ## Permissions
 
-Scheduled prompts are headless. Their capability catalog is explicitly narrowed,
+Scheduled prompts are headless. Their tool set is explicitly narrowed,
 and any operation that needs interactive approval is denied unless onboarding
 established a separate reviewed headless rule. The task directory may supply
 trusted task policy subject to the global security contract.

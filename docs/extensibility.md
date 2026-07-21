@@ -9,11 +9,11 @@ read_when:
 
 # Extensibility
 
-> **Status:** The ordered resource catalog and exact-set loading are
-> implemented (`src/agent/resource-catalog.ts`); the design rules below govern
+> **Status:** The agent definition and exact-set loading are
+> implemented (`src/agent/agent-definition.ts`); the design rules below govern
 > everything added to it.
 
-The template uses three extension seams and does not invent a fourth:
+The template uses three extension seams:
 
 1. **Pi resources** — prompts, tools, skills, and Pi-native extensions loaded by
    the owned agent runtime.
@@ -25,12 +25,56 @@ The template uses three extension seams and does not invent a fourth:
 ## Pi resources
 
 Bundled resources live under the future agent owner and appear in one explicit,
-ordered catalog. The catalog is the source for loading, onboarding review,
+ordered agent definition — the standard bundle of system prompt, tools, and extensions. The definition is the source for loading, onboarding review,
 diagnostics, and exact-set tests. Ambient project extensions, skills, and prompts
 are not loaded automatically.
 
 Pi already owns its extension lifecycle. The harness must not add another plugin
 runtime, discovery convention, or package registry beside it.
+
+### Choosing a Pi seam
+
+Pi provides one mechanism per extension intent. Route new behavior to the
+matching seam instead of designing local infrastructure; each mechanism is
+specified in the named document inside the pinned
+`@earendil-works/pi-coding-agent` package:
+
+- **Workflow knowledge** the model should load on demand → a **skill**
+  (`docs/skills.md`; Pi implements the
+  [Agent Skills standard](https://agentskills.io/specification)).
+- **A new callable capability** with typed input and output → a **tool**
+  (a `kind: "tool"` definition entry, or `pi.registerTool()` inside an extension).
+- **Lifecycle or interactive behavior** — intercepting tool calls, custom
+  commands, user prompts, custom rendering → an **extension**
+  (`docs/extensions.md`).
+- **A new client surface** — web UI, IDE, automation pipeline → the **SDK**
+  (`createAgentSession`, `docs/sdk.md`) or **RPC mode** (`docs/rpc.md`). The
+  harness Gateway and CLI are adapters of this kind.
+- **Reusable behavior shared across installations** → search existing **Pi
+  packages** first (`docs/packages.md`; installable from npm or git — there is
+  no central registry), per the repository's do-not-reinvent rule.
+
+When intent is unclear, ask **who owns the trigger**:
+
+- Pi owns it (a turn starts, a tool is called, a command is entered) →
+  extension.
+- The model requests a standalone operation → tool.
+- The agent follows a composable workflow → skill.
+- The harness owns durable behavior → application module behind a contract.
+- A particular client displays it → that surface's adapter.
+
+A feature may span several seams; classify each piece separately. An extension
+is the Pi-facing adapter: its handlers translate Pi events into calls on
+harness modules, so the durable behavior survives if the adapter is removed. Durable
+state, scheduling, and Gateway operations stay in their owning modules; in
+particular, Pi's session-entry persistence records session state, not durable
+truth, which keeps the single-durable-writer rule intact.
+
+This is already how the bundled capabilities are integrated: the permission
+extension (which also carries the sensitive-path privacy rules), the defined
+tools, and the identity prompt each enter through their native Pi seam and the
+explicit agent definition — never through ambient discovery. Whatever seam produces the
+resource, the agent definition still decides whether it loads.
 
 ## Application adapters
 
@@ -58,6 +102,6 @@ product surface is self-description — the
 
 ## Open decisions
 
-- The initial ordered resource catalog format.
+- The agent definition entry format.
 - Which adapters are required for the first supported operating system.
 - How a product declares enabled resources without creating another plugin system.

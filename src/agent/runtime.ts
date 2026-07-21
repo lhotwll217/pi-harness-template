@@ -19,14 +19,14 @@ import {
   type AgentToolId,
 } from "@pi-template/contracts";
 import {
-  AGENT_RESOURCE_CATALOG,
-  catalogIds,
+  AGENT_DEFINITION,
+  definitionIds,
   piTemplateIdentityPrompt,
-  type CatalogToolDependencies,
-} from "./resource-catalog";
+  type AgentToolDependencies,
+} from "./agent-definition";
 import { createSandboxAdapter, type SandboxAdapter, type SandboxPolicy } from "./sandbox";
 
-export interface AgentResourceOptions extends CatalogToolDependencies {
+export interface AgentResourceOptions extends AgentToolDependencies {
   home?: string;
   cwd: string;
   systemPromptOverride?: () => string;
@@ -87,9 +87,9 @@ export async function createHarnessSessionServices(
   reconcilePermissionSettings(paths.home);
   const settingsManager = SettingsManager.create(paths.workspace, paths.piAgentDir, { projectTrusted: false });
   const approvedWorkspaceSkillPaths = safeWorkspaceSkillPaths(paths.home);
-  const extensions = AGENT_RESOURCE_CATALOG.filter((entry) => entry.kind === "extension").map((entry) => entry.path());
-  const skills = AGENT_RESOURCE_CATALOG.filter((entry) => entry.kind === "skill").map((entry) => entry.path);
-  const tools = AGENT_RESOURCE_CATALOG
+  const extensions = AGENT_DEFINITION.filter((entry) => entry.kind === "extension").map((entry) => entry.path());
+  const skills = AGENT_DEFINITION.filter((entry) => entry.kind === "skill").map((entry) => entry.path);
+  const tools = AGENT_DEFINITION
     .filter((entry) => entry.kind === "tool")
     .map((entry) => entry.create(options)) as ToolDefinition[];
   const approvedContext = workspaceContextApproved(paths.home)
@@ -122,7 +122,7 @@ export async function createHarnessSessionServices(
   return {
     services,
     tools,
-    loadedIds: catalogIds(AGENT_RESOURCE_CATALOG),
+    loadedIds: definitionIds(AGENT_DEFINITION),
     approvedWorkspaceSkillPaths,
   };
 }
@@ -159,8 +159,8 @@ export async function createHarnessSession(options: HarnessSessionOptions) {
   const paths = ensureHarnessWorkspace(options.home);
   if (options.headless) assertHeadlessApprovalPolicy(paths.home);
   const resources = await createHarnessSessionServices(options);
-  const catalogToolNames = resources.tools.map(({ name }) => name);
-  const configuredNames = [...loadHarnessSettings(paths.home).toolPosture, ...catalogToolNames];
+  const definedToolNames = resources.tools.map(({ name }) => name);
+  const configuredNames = [...loadHarnessSettings(paths.home).toolPosture, ...definedToolNames];
   const enabledNames = options.toolsAllow
     ? options.toolsAllow.filter((name) => configuredNames.includes(name))
     : configuredNames;

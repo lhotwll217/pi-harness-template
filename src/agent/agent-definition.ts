@@ -7,18 +7,18 @@ import { createQueryDatabaseTool } from "./tools/query-database";
 import type { NoteWriter } from "./tools/save-note";
 import { createSaveNoteTool } from "./tools/save-note";
 
-export interface CatalogToolDependencies {
+export interface AgentToolDependencies {
   query: DatabaseQueryInterface;
   notes: NoteWriter;
 }
 
-export type AgentResourceCatalogEntry =
+export type AgentDefinitionEntry =
   | {
       id: `tool:${AgentToolId}`;
       kind: "tool";
       name: AgentToolId;
       description: string;
-      create(dependencies: CatalogToolDependencies): ReturnType<typeof createQueryDatabaseTool> | ReturnType<typeof createSaveNoteTool>;
+      create(dependencies: AgentToolDependencies): ReturnType<typeof createQueryDatabaseTool> | ReturnType<typeof createSaveNoteTool>;
     }
   | {
       id: `extension:${string}`;
@@ -72,7 +72,7 @@ export function permissionSystemExtensionPath(): string {
 }
 
 /** Ordered source for runtime loading, onboarding review, diagnostics, and exact-set tests. */
-export const AGENT_RESOURCE_CATALOG: readonly AgentResourceCatalogEntry[] = Object.freeze([
+export const AGENT_DEFINITION: readonly AgentDefinitionEntry[] = Object.freeze([
   {
     id: "prompt:identity",
     kind: "prompt",
@@ -85,14 +85,14 @@ export const AGENT_RESOURCE_CATALOG: readonly AgentResourceCatalogEntry[] = Obje
     kind: "tool",
     name: AgentToolId.QueryDatabase,
     description: "Read-only progressive disclosure over durable harness state.",
-    create: ({ query }: CatalogToolDependencies) => createQueryDatabaseTool(query),
+    create: ({ query }: AgentToolDependencies) => createQueryDatabaseTool(query),
   },
   {
     id: `tool:${AgentToolId.SaveNote}`,
     kind: "tool",
     name: AgentToolId.SaveNote,
     description: "Persist the notes worked example through the State writer.",
-    create: ({ notes }: CatalogToolDependencies) => createSaveNoteTool(notes),
+    create: ({ notes }: AgentToolDependencies) => createSaveNoteTool(notes),
   },
   {
     id: "extension:permission-system",
@@ -103,15 +103,15 @@ export const AGENT_RESOURCE_CATALOG: readonly AgentResourceCatalogEntry[] = Obje
   },
 ]);
 
-export const catalogIds = (catalog: readonly AgentResourceCatalogEntry[]): string[] =>
-  catalog.map(({ id }) => id);
+export const definitionIds = (definition: readonly AgentDefinitionEntry[]): string[] =>
+  definition.map(({ id }) => id);
 
-export interface AgentResourceCatalogSummary {
+export interface AgentDefinitionSummary {
   id: string;
-  kind: AgentResourceCatalogEntry["kind"];
+  kind: AgentDefinitionEntry["kind"];
   name: string;
   description: string;
 }
 
-export const resourceCatalogSummary = (): AgentResourceCatalogSummary[] =>
-  AGENT_RESOURCE_CATALOG.map(({ id, kind, name, description }) => ({ id, kind, name, description }));
+export const agentDefinitionSummary = (): AgentDefinitionSummary[] =>
+  AGENT_DEFINITION.map(({ id, kind, name, description }) => ({ id, kind, name, description }));

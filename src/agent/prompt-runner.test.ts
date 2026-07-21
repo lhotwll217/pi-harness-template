@@ -9,7 +9,7 @@ import {
   type ScheduledPromptRunRequest,
 } from "@pi-template/contracts";
 import { createScheduledPromptRunner, type PromptSessionFactory } from "./prompt-runner";
-import { piTemplateIdentityPrompt } from "./resource-catalog";
+import { piTemplateIdentityPrompt } from "./agent-definition";
 
 const dir = mkdtempSync(join(tmpdir(), "pi-template-prompt-runner-"));
 const created: Array<{

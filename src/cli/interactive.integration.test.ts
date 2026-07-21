@@ -9,7 +9,7 @@ import {
   ensureHarnessWorkspace,
   saveHarnessSettings,
 } from "@pi-template/contracts";
-import { AGENT_RESOURCE_CATALOG, catalogIds, piTemplateIdentityPrompt } from "../agent";
+import { AGENT_DEFINITION, definitionIds, piTemplateIdentityPrompt } from "../agent";
 import {
   assertInteractiveTerminal,
   createInteractiveSessionRuntime,
@@ -102,13 +102,13 @@ try {
     },
   });
 
-  assert.deepEqual(runtime.loadedResourceIds, catalogIds(AGENT_RESOURCE_CATALOG));
+  assert.deepEqual(runtime.loadedResourceIds, definitionIds(AGENT_DEFINITION));
   assert.deepEqual(runtime.runtime.services.resourceLoader.getSkills().skills, []);
   assert.deepEqual(runtime.runtime.services.resourceLoader.getPrompts().prompts, []);
   const loadedExtensions = runtime.runtime.services.resourceLoader.getExtensions().extensions;
   assert.deepEqual(
     loadedExtensions.map(({ resolvedPath }) => resolvedPath),
-    AGENT_RESOURCE_CATALOG
+    AGENT_DEFINITION
       .filter((entry) => entry.kind === "extension")
       .map((entry) => entry.path()),
   );
@@ -126,11 +126,11 @@ try {
   assert.ok(activeTools.includes("write"));
   assert.ok(activeTools.includes("query_database"));
   assert.ok(activeTools.includes("save_note"));
-  const catalogToolNames = AGENT_RESOURCE_CATALOG
+  const definedToolNames = AGENT_DEFINITION
     .filter((entry) => entry.kind === "tool")
     .map(({ name }) => name);
-  assert.deepEqual(catalogToolNames, ["query_database", "save_note"]);
-  assert.ok(catalogToolNames.every((name) => runtime?.runtime.session.getToolDefinition(name)));
+  assert.deepEqual(definedToolNames, ["query_database", "save_note"]);
+  assert.ok(definedToolNames.every((name) => runtime?.runtime.session.getToolDefinition(name)));
   const permissionConfig = readFileSync(paths.piPermissionConfig, "utf8");
   assert.ok(permissionConfig.includes(protectedRoot));
 

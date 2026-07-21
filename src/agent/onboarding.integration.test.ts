@@ -7,7 +7,7 @@ import {
   harnessPaths,
   type OnboardingProgress,
 } from "@pi-template/contracts";
-import { catalogIds, AGENT_RESOURCE_CATALOG } from "./resource-catalog";
+import { definitionIds, AGENT_DEFINITION } from "./agent-definition";
 import {
   OnboardingStageError,
   runOnboarding,
@@ -62,7 +62,7 @@ const completeAnswers = (): OnboardingAnswers => ({
   auth: { kind: "credential", provider: "fake", credential: { type: "api_key", key: "test-secret" } },
   model: { provider: "fake", model: "deterministic-model" },
   resources: {
-    acknowledgedCatalogIds: catalogIds(AGENT_RESOURCE_CATALOG),
+    acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION),
     skillPolicy: { mode: "bundled", allowlist: [] },
     approveWorkspaceContext: true,
   },

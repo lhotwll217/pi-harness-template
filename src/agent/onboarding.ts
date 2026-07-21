@@ -34,7 +34,7 @@ import {
 } from "@pi-template/contracts";
 import { createLaunchdServiceAdapter, type DaemonServiceAdapter } from "../daemon/ensure";
 import { runDoctor } from "./doctor";
-import { AGENT_RESOURCE_CATALOG, catalogIds } from "./resource-catalog";
+import { AGENT_DEFINITION, definitionIds } from "./agent-definition";
 import { createSandboxAdapter, type SandboxAdapter, type SandboxPolicy, type SandboxVerification } from "./sandbox";
 
 type JsonObject = Record<string, unknown>;
@@ -51,7 +51,7 @@ export interface OnboardingAnswers {
     | { kind: "login"; provider: string };
   model?: { provider: string; model: string };
   resources?: {
-    acknowledgedCatalogIds: string[];
+    acknowledgedDefinitionIds: string[];
     skillPolicy: SkillPolicy;
     approveWorkspaceContext: boolean;
   };
@@ -253,9 +253,9 @@ export async function runOnboarding(
         }
         case "resources": {
           const answer = requireAnswer(stage, answers.resources);
-          const expected = catalogIds(AGENT_RESOURCE_CATALOG);
-          if (!sameJson(answer.acknowledgedCatalogIds, expected)) {
-            throw new Error("resource review must acknowledge the exact ordered catalog");
+          const expected = definitionIds(AGENT_DEFINITION);
+          if (!sameJson(answer.acknowledgedDefinitionIds, expected)) {
+            throw new Error("resource review must acknowledge the exact agent definition");
           }
           saveHarnessSettings(paths.home, { skillPolicy: answer.skillPolicy });
           writeJsonAtomic(resolve(paths.home, "resource-approvals.json"), {

@@ -24,7 +24,7 @@ interactive commands, the daemon, and headless scheduled work.
 1. Create the harness home and agent workspace without overwriting owner files.
 2. Authenticate a provider or import credentials through an explicit approved flow.
 3. Select and verify model settings.
-4. Review the [ordered catalog](extensibility.md#pi-resources) of bundled prompts,
+4. Review the [agent definition](extensibility.md#pi-resources) of bundled prompts,
    tools, skills, and extensions, then explicitly approve any owner-installed or
    workspace-provided resources eligible for loading.
 5. Choose a capability and approval posture.
@@ -109,7 +109,7 @@ Owner Operator's pattern — never a subcommand the owner must discover:
   authenticates the harness like any other fresh tool.
 - Guided setup is consolidated onto one review surface: after the import offer
   and a dedicated protected-paths question, every remaining choice — provider
-  and model, the exact resource catalog, permission mode, skill policy,
+  and model, the exact agent definition, permission mode, skill policy,
   workspace approval, sandbox defaults, and service — is shown together and
   accepted with a single confirmation. Declining the summary drops into
   per-question customization. Consolidation never skips a stage predicate or

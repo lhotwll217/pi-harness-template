@@ -14,7 +14,7 @@ const textResult = (value: unknown) => ({
   details: undefined,
 });
 
-/** Progressive disclosure: catalog first, schema second, bounded SELECT last. */
+/** Progressive disclosure: table list first, schema second, bounded SELECT last. */
 export function createQueryDatabaseTool(query: DatabaseQueryInterface) {
   return defineTool({
     name: "query_database",

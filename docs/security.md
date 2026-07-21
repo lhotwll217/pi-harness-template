@@ -33,13 +33,13 @@ diagnostics must not call a permission decision a sandbox.
 Interactive runs may ask the owner when policy allows. Headless runs cannot
 manufacture consent: an operation that would require approval in an interactive
 session is denied unless a separately reviewed headless policy grants it.
-Scheduled runs also narrow their capability catalog to the tools declared by the
+Scheduled runs also narrow their tool set to the tools declared by the
 schedule snapshot.
 
 ## Explicit resource loading
 
 The Pi runtime must begin with ambient context, prompts, skills, and extensions
-disabled. It then loads a harness-owned ordered catalog plus explicitly approved
+disabled. It then loads the harness-owned agent definition plus explicitly approved
 workspace resources. A task working directory may carry trusted task policy, but
 its mere presence does not make arbitrary executable extensions safe.
 

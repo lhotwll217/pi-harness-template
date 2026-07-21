@@ -6,11 +6,11 @@ import {
   createAgentSessionRuntime,
 } from "@earendil-works/pi-coding-agent";
 import { ONBOARDING_VERSION, harnessPaths } from "@pi-template/contracts";
-import type { CatalogToolDependencies } from "./resource-catalog";
+import type { AgentToolDependencies } from "./agent-definition";
 import { createHarnessSession } from "./runtime";
 import type { SandboxAdapter } from "./sandbox";
 
-export interface InteractiveHarnessRuntimeOptions extends CatalogToolDependencies {
+export interface InteractiveHarnessRuntimeOptions extends AgentToolDependencies {
   home?: string;
   cwd?: string;
   model?: Model<any>;

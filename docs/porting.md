@@ -49,7 +49,7 @@ Gateway-first: modules land behind their real authenticated transport.
 | 9 | Onboarding entry + built-in login | drift correction toward OO's `oo.ts` entry; pi-ai OAuth registry | [Onboarding](onboarding.md#entry-behavior) | Landed |
 | 10 | Consolidated setup, no OO knowledge | one review surface; standalone-Pi-only import; forbidden-text gate | [Onboarding](onboarding.md#entry-behavior) | Landed |
 | 11 | Interactive session | OO's `interactive.ts` front door over the owned runtime | [Onboarding](onboarding.md#entry-behavior) | Landed |
-| 12 | Bundled identity prompt | OO's `ownerOperatorPrompt` pattern; catalog `kind: prompt` | [Workspace](workspace.md) | Landed |
+| 12 | Bundled identity prompt | OO's `ownerOperatorPrompt` pattern; agent-definition `kind: prompt` | [Workspace](workspace.md) | Landed |
 
 Packages 2, 3, and 4 may run in parallel once 1 lands; 5 needs 4; 6 needs 4 and
 5; 7 ties the seams; 8 gates the whole.

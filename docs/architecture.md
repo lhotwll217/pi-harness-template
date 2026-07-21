@@ -100,7 +100,7 @@ remains an open decision. See [State and sessions](state-and-sessions.md).
 
 Onboarding must complete before headless or model-driven work is permitted.
 Capabilities, approvals, protected data, and operating-system enforcement are
-separate controls. Pi resources are loaded from an explicit ordered catalog;
+separate controls. Pi resources are loaded from one explicit agent definition;
 ambient project resources are not automatically trusted. See
 [Security](security.md) and [Onboarding](onboarding.md).
 

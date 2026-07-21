@@ -7,7 +7,7 @@ import {
   loadHarnessSettings,
   type OnboardingProgress,
 } from "@pi-template/contracts";
-import { resourceCatalogSummary } from "./resource-catalog";
+import { agentDefinitionSummary } from "./agent-definition";
 import { configuredWorkspaceSkillNames } from "./runtime";
 
 type JsonObject = Record<string, unknown>;
@@ -85,7 +85,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
     model: { available: modelAvailable, selected },
     resources: {
       reviewed: progress.version === ONBOARDING_VERSION && !!progress.stages?.resources,
-      bundled: resourceCatalogSummary().map(({ id }) => id),
+      bundled: agentDefinitionSummary().map(({ id }) => id),
       workspaceSkills: configuredWorkspaceSkillNames(paths.home),
       workspaceContext: readObject(join(paths.home, "resource-approvals.json")).workspaceContext === true,
     },

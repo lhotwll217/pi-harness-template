@@ -14,7 +14,7 @@ import {
   type GatewayEvent,
   type OnboardingMarker,
 } from "@pi-template/contracts";
-import { createScheduledPromptRunner, runDoctor, type CatalogToolDependencies } from "../agent";
+import { createScheduledPromptRunner, runDoctor, type AgentToolDependencies } from "../agent";
 import { createDocsCatalog } from "../docs-catalog/docs-catalog";
 import { startGateway, type RunningGateway } from "../gateway/server";
 import { Scheduler, type SchedulerOptions } from "../scheduler";
@@ -37,7 +37,7 @@ export interface RunningDaemon {
   fingerprint: string;
   state: State;
   scheduler: Scheduler;
-  toolDependencies: CatalogToolDependencies;
+  toolDependencies: AgentToolDependencies;
   close(): Promise<void>;
 }
 
@@ -103,7 +103,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
     describeTable: (table: string) => describeTable(table, dbPath),
     runQuery: (sql: string) => runQuery(sql, dbPath),
   };
-  const toolDependencies: CatalogToolDependencies = { query, notes: state };
+  const toolDependencies: AgentToolDependencies = { query, notes: state };
   let scheduler: Scheduler;
   let docs: ReturnType<typeof createDocsCatalog>;
   try {

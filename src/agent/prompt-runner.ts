@@ -10,8 +10,8 @@ import {
   type ScheduleExecutionResult,
   type ScheduledPromptRunRequest,
 } from "@pi-template/contracts";
-import type { CatalogToolDependencies } from "./resource-catalog";
-import { piTemplateIdentityPrompt } from "./resource-catalog";
+import type { AgentToolDependencies } from "./agent-definition";
+import { piTemplateIdentityPrompt } from "./agent-definition";
 import { createHarnessSession } from "./runtime";
 
 export interface PromptSessionFactoryInput {
@@ -49,7 +49,7 @@ export type PromptSessionFactory = (input: PromptSessionFactoryInput) => Promise
 export interface ScheduledPromptRunnerOptions {
   home?: string;
   sessions?: PromptSessionFactory;
-  resources?: CatalogToolDependencies;
+  resources?: AgentToolDependencies;
   readiness?: () => boolean;
 }
 
@@ -82,7 +82,7 @@ function latestAssistant(messages: readonly unknown[]): unknown {
     !!message && typeof message === "object" && (message as { role?: unknown }).role === "assistant");
 }
 
-function realSessionFactory(resources: CatalogToolDependencies): PromptSessionFactory {
+function realSessionFactory(resources: AgentToolDependencies): PromptSessionFactory {
   return async (input) => {
     const manager = SessionManager.create(input.cwd, input.transcriptDir);
     manager.appendCustomEntry("pi-template-provenance", input.provenance);

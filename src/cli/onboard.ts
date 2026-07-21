@@ -5,9 +5,9 @@ import { getOAuthProvider, getOAuthProviderInfoList, type OAuthSelectPrompt } fr
 import { AuthStorage, getAgentDir, ModelRegistry, type AuthCredential } from "@earendil-works/pi-coding-agent";
 import { harnessPaths, isPermissionMode, type PermissionMode, type SkillPolicy } from "@pi-template/contracts";
 import {
-  AGENT_RESOURCE_CATALOG,
-  catalogIds,
-  resourceCatalogSummary,
+  AGENT_DEFINITION,
+  definitionIds,
+  agentDefinitionSummary,
   runOnboarding,
   type OnboardingAnswers,
   type OnboardingDependencies,
@@ -155,7 +155,7 @@ function answersFromFlags(flags: OnboardFlags): OnboardingAnswers {
         : undefined,
     model: provider && model ? { provider, model } : undefined,
     resources: flags.acknowledgeResources ? {
-      acknowledgedCatalogIds: catalogIds(AGENT_RESOURCE_CATALOG),
+      acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION),
       skillPolicy: skillPolicy(flags.values.get("--workspace-skills") ?? "bundled", flags.repeated.get("--skill") ?? []),
       approveWorkspaceContext: flags.approveWorkspaceContext,
     } : undefined,
@@ -378,7 +378,7 @@ function reviewDefaults(
     auth: auth.answer,
     model: { provider: auth.provider, model: auth.model },
     resources: {
-      acknowledgedCatalogIds: catalogIds(AGENT_RESOURCE_CATALOG),
+      acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION),
       skillPolicy: { mode: "bundled", allowlist: [] },
       approveWorkspaceContext: true,
     },
@@ -400,8 +400,8 @@ function writeReview(io: InteractiveOnboardingIO, answers: ReviewedSetup, home: 
   io.write("Setup review:\n");
   io.write(`  Provider: ${answers.model.provider}\n`);
   io.write(`  Model: ${answers.model.model}\n`);
-  io.write("  Resource catalog:\n");
-  for (const resource of resourceCatalogSummary()) {
+  io.write("  Agent definition:\n");
+  for (const resource of agentDefinitionSummary()) {
     io.write(`    ${resource.id} — ${resource.description}\n`);
   }
   io.write("  Skill policy: bundled\n");
@@ -423,11 +423,11 @@ async function customizedAnswers(
   const defaultModelId = defaults.model.model;
   const model = (await io.question(`Model id [${defaultModelId}]: `)).trim() || defaultModelId;
   io.write("Bundled resources:\n");
-  for (const resource of resourceCatalogSummary()) {
+  for (const resource of agentDefinitionSummary()) {
     io.write(`  ${resource.id} — ${resource.description}\n`);
   }
-  const acknowledge = await io.question("Acknowledge this exact resource catalog? [y/N] ");
-  if (!isAffirmativeAnswer(acknowledge)) throw new CliUsageError("resource catalog was not acknowledged");
+  const acknowledge = await io.question("Acknowledge this exact agent definition? [y/N] ");
+  if (!isAffirmativeAnswer(acknowledge)) throw new CliUsageError("agent definition was not acknowledged");
   const permissionRaw = (await io.question("Permission mode [read-only/ask/allow]: ")).trim() || "read-only";
   if (!isPermissionMode(permissionRaw)) throw new CliUsageError("permission mode must be ask, allow, or read-only");
   const workspaceContext = await io.question("Approve workspace AGENTS.md and MEMORY.md? [y/N] ");
@@ -444,7 +444,7 @@ async function customizedAnswers(
     ...defaults,
     model: { provider: defaults.model.provider, model },
     resources: {
-      acknowledgedCatalogIds: catalogIds(AGENT_RESOURCE_CATALOG),
+      acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION),
       skillPolicy: { mode: "bundled", allowlist: [] },
       approveWorkspaceContext: isAffirmativeAnswer(workspaceContext),
     },

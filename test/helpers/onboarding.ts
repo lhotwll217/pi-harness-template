@@ -1,6 +1,6 @@
 import {
-  AGENT_RESOURCE_CATALOG,
-  catalogIds,
+  AGENT_DEFINITION,
+  definitionIds,
   type OnboardingAnswers,
   type OnboardingDependencies,
 } from "../../src/agent";
@@ -10,7 +10,7 @@ export function testOnboardingAnswers(root: string): OnboardingAnswers {
     auth: { kind: "credential", provider: "fake", credential: { type: "api_key", key: "test-secret" } },
     model: { provider: "fake", model: "deterministic-model" },
     resources: {
-      acknowledgedCatalogIds: catalogIds(AGENT_RESOURCE_CATALOG),
+      acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION),
       skillPolicy: { mode: "bundled", allowlist: [] },
       approveWorkspaceContext: false,
     },

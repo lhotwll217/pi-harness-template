@@ -184,7 +184,7 @@ try {
   assert.equal(customized.complete, true);
   assert.equal(customInteraction.questions().length, 8);
   assert.equal(customInteraction.questions()[3], "Model id [imported-model]: ");
-  assert.equal(customInteraction.questions()[4], "Acknowledge this exact resource catalog? [y/N] ");
+  assert.equal(customInteraction.questions()[4], "Acknowledge this exact agent definition? [y/N] ");
   assert.equal(customInteraction.questions()[5], "Permission mode [read-only/ask/allow]: ");
   assert.equal(customInteraction.questions()[6], "Approve workspace AGENTS.md and MEMORY.md? [y/N] ");
   assert.equal(customInteraction.questions()[7], "Daemon service [declined/installed]: ");

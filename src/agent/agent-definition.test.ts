@@ -4,16 +4,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ensureHarnessWorkspace } from "@pi-template/contracts";
 import {
-  AGENT_RESOURCE_CATALOG,
-  catalogIds,
+  AGENT_DEFINITION,
+  definitionIds,
   piTemplateIdentityPrompt,
-} from "./resource-catalog";
+} from "./agent-definition";
 import { createAgentResources, createHarnessSession } from "./runtime";
 
-const dir = mkdtempSync(join(tmpdir(), "pi-template-resource-catalog-"));
+const dir = mkdtempSync(join(tmpdir(), "pi-template-agent-definition-"));
 const home = join(dir, "home");
 const cwd = join(dir, "task");
-const expectedCatalogIds = [
+const expectedDefinitionIds = [
   "prompt:identity",
   "tool:query_database",
   "tool:save_note",
@@ -43,8 +43,8 @@ try {
     },
   });
 
-  assert.deepEqual(catalogIds(AGENT_RESOURCE_CATALOG), expectedCatalogIds);
-  assert.deepEqual(resources.loadedIds, expectedCatalogIds);
+  assert.deepEqual(definitionIds(AGENT_DEFINITION), expectedDefinitionIds);
+  assert.deepEqual(resources.loadedIds, expectedDefinitionIds);
   assert.deepEqual(resources.tools.map(({ name }) => name), ["query_database", "save_note"]);
   assert.deepEqual(resources.loader.getSkills().skills, []);
   assert.deepEqual(resources.loader.getPrompts().prompts, []);
@@ -109,7 +109,7 @@ try {
     /headless.*auto-approval/i,
   );
 
-  process.stdout.write("ok — exact catalog rejects ambient resources and loads only approved workspace context\n");
+  process.stdout.write("ok — exact agent definition rejects ambient resources and loads only approved workspace context\n");
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

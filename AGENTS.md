@@ -12,6 +12,8 @@ not describe planned behavior as implemented.
 - **Keep a chain of context.** Route readers from this file to the README, from
   the README to the owning page, and from each page to narrower contracts.
 - **Name things for what they are.** Avoid generic files and catch-all pages.
+  A name should import a mental model the reader already has: use the term the
+  field has converged on, and coin one only when the concept is genuinely new.
 - **Keep one durable owner.** Point to an existing contract instead of restating
   it in README, prompts, comments, or another page.
 - **Write for progressive discovery.** A reader should be able to stop after the

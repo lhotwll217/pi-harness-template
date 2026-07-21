@@ -12,14 +12,14 @@ read_when:
 > **Status:** Implemented. The owner workspace exists
 > (`~/.pi-template/workspace`) and the bundled identity prompt
 > (`src/agent/prompts/pi-template.md`) is wired into every session surface and
-> listed in the resource catalog.
+> listed in the agent definition.
 
 The harness agent is configured from two places with one rule dividing them.
 
 ## Bundled resources: capability, not personality
 
-The [ordered catalog](extensibility.md#pi-resources) of bundled prompts, tools,
-skills, and extensions is opinionated toward exactly one thing: **optimizing
+The [agent definition](extensibility.md#pi-resources) — the bundled prompts, tools,
+skills, and extensions — is opinionated toward exactly one thing: **optimizing
 the agent for the harness domain and its capabilities.** The bundled identity
 prompt tells the agent what it is, what system it operates — durable state and
 its record families, the read-only query surface, notes, schedules and runs,
@@ -48,7 +48,7 @@ content only after explicit approval during onboarding, per the
 
 For any new resource, ask: *would every owner of this harness want the agent
 to behave this way?* Yes — it is a capability concern and may be bundled,
-subject to catalog review. No — it is an opinion and belongs in a workspace
+subject to definition review. No — it is an opinion and belongs in a workspace
 (or, for a product built on the template, in that product's own bundle, judged
 by the same question against that product's owners).
 
