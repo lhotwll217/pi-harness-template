@@ -9,9 +9,10 @@ read_when:
 
 # Workspace
 
-> **Status:** Contract for the boundary. The owner workspace exists
-> (`~/.pi-template/workspace`); the bundled identity prompt is landing (see
-> [Porting](porting.md)).
+> **Status:** Implemented. The owner workspace exists
+> (`~/.pi-template/workspace`) and the bundled identity prompt
+> (`src/agent/prompts/pi-template.md`) is wired into every session surface and
+> listed in the resource catalog.
 
 The harness agent is configured from two places with one rule dividing them.
 
