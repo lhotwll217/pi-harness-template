@@ -9,7 +9,7 @@ import {
   ensureHarnessWorkspace,
   saveHarnessSettings,
 } from "@pi-template/contracts";
-import { AGENT_RESOURCE_CATALOG, catalogIds } from "../agent";
+import { AGENT_RESOURCE_CATALOG, catalogIds, piTemplateIdentityPrompt } from "../agent";
 import {
   assertInteractiveTerminal,
   createInteractiveSessionRuntime,
@@ -116,6 +116,9 @@ try {
     { path: paths.workspaceInstructions, content: instructions },
     { path: paths.workspaceMemory, content: memory },
   ]);
+  assert.ok(runtime.runtime.session.systemPrompt.startsWith(piTemplateIdentityPrompt().trimEnd()));
+  assert.match(runtime.runtime.session.systemPrompt, /list_tables.*describe_table.*bounded `SELECT`/s);
+  assert.match(runtime.runtime.session.systemPrompt, /single State writer/);
 
   const activeTools = runtime.runtime.session.getActiveToolNames();
   assert.ok(activeTools.includes("read"));

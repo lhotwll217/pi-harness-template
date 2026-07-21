@@ -21,6 +21,7 @@ import {
 import {
   AGENT_RESOURCE_CATALOG,
   catalogIds,
+  piTemplateIdentityPrompt,
   type CatalogToolDependencies,
 } from "./resource-catalog";
 import { createSandboxAdapter, type SandboxAdapter, type SandboxPolicy } from "./sandbox";
@@ -28,6 +29,7 @@ import { createSandboxAdapter, type SandboxAdapter, type SandboxPolicy } from ".
 export interface AgentResourceOptions extends CatalogToolDependencies {
   home?: string;
   cwd: string;
+  systemPromptOverride?: () => string;
 }
 
 export interface LoadedAgentResources {
@@ -87,7 +89,6 @@ export async function createHarnessSessionServices(
   const approvedWorkspaceSkillPaths = safeWorkspaceSkillPaths(paths.home);
   const extensions = AGENT_RESOURCE_CATALOG.filter((entry) => entry.kind === "extension").map((entry) => entry.path());
   const skills = AGENT_RESOURCE_CATALOG.filter((entry) => entry.kind === "skill").map((entry) => entry.path);
-  const prompts = AGENT_RESOURCE_CATALOG.filter((entry) => entry.kind === "prompt").map((entry) => entry.path);
   const tools = AGENT_RESOURCE_CATALOG
     .filter((entry) => entry.kind === "tool")
     .map((entry) => entry.create(options)) as ToolDefinition[];
@@ -109,7 +110,8 @@ export async function createHarnessSessionServices(
       noThemes: true,
       additionalExtensionPaths: extensions,
       additionalSkillPaths: [...skills, ...approvedWorkspaceSkillPaths],
-      additionalPromptTemplatePaths: prompts,
+      systemPromptOverride: options.systemPromptOverride ?? piTemplateIdentityPrompt,
+      appendSystemPromptOverride: () => [],
       agentsFilesOverride: () => ({ agentsFiles: approvedContext }),
     },
   });
