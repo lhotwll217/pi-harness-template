@@ -58,6 +58,15 @@ if (command.kind === "schedule-add") {
 assert.throws(() => parseCliArgs(["schedule", "add", "--every", "nope", "--prompt", "x"]), /duration/);
 assert.throws(() => parseCliArgs(["schedule", "add", "--every", "1m"]), /payload/);
 assert.throws(() => parseCliArgs(["schedule", "add", "--cron", "* * * * *", "--prompt", "x"]), /--tz/);
+assert.deepEqual(parseCliArgs(["prompt", "who", "are", "you"]), {
+  kind: "prompt", message: "who are you", json: false,
+});
+assert.deepEqual(parseCliArgs(["prompt", "--json", "who are you"]), {
+  kind: "prompt", message: "who are you", json: true,
+});
+assert.throws(() => parseCliArgs(["prompt"]), /prompt message/);
+assert.throws(() => parseCliArgs(["prompt", "--json"]), /prompt message/);
+
 assert.throws(() => parseCliArgs(["frobnicate"]), /unknown command/);
 
 process.stdout.write("ok — CLI arguments preserve exact command argv and selected command surface\n");

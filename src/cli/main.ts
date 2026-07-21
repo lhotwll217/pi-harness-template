@@ -1,8 +1,11 @@
+import { readFileSync } from "node:fs";
 import {
   DatabaseQueryAction,
   ScheduleKind,
   ScheduleRunStatus,
   harnessPaths,
+  isOnboardingComplete,
+  type OnboardingMarker,
   type ScheduleCreateInput,
 } from "@pi-template/contracts";
 import { type GatewayClient } from "../gateway/client";
@@ -13,6 +16,7 @@ const USAGE = `Pi Harness Template
 
   pi-template daemon        (foreground mode; other commands start the daemon automatically)
   pi-template onboard [--non-interactive <answer flags>]
+  pi-template prompt <message> [--json]   (headless single turn with the harness agent)
   pi-template status
   pi-template docs list
   pi-template docs read <id>
@@ -41,6 +45,18 @@ async function outputStatus(client: GatewayClient): Promise<void> {
 async function openInteractive(client: GatewayClient): Promise<void> {
   const { runInteractiveSession } = await import("./interactive");
   await runInteractiveSession({ gateway: client });
+}
+
+function requireOnboarded(): void {
+  let marker: OnboardingMarker | undefined;
+  try {
+    marker = JSON.parse(readFileSync(harnessPaths().onboardingMarker, "utf8")) as OnboardingMarker;
+  } catch {
+    marker = undefined;
+  }
+  if (!isOnboardingComplete(marker)) {
+    throw new Error("setup required before talking to the agent; run `pi-template` in an interactive terminal");
+  }
 }
 
 // Any command that needs the Gateway starts the daemon itself when none is running.
@@ -112,6 +128,21 @@ async function run(): Promise<void> {
   if (command.kind === "onboard") {
     const { onboard } = await import("./onboard");
     output(await onboard(command.argv));
+    return;
+  }
+  if (command.kind === "prompt") {
+    requireOnboarded();
+    const { runPromptSession } = await import("./interactive");
+    const client = await requireGateway();
+    try {
+      process.exitCode = await runPromptSession({
+        gateway: client,
+        message: command.message,
+        json: command.json,
+      });
+    } finally {
+      client.close();
+    }
     return;
   }
 

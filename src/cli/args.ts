@@ -24,6 +24,7 @@ export type CliCommand =
   | { kind: "help" }
   | { kind: "daemon" }
   | { kind: "onboard"; argv: string[] }
+  | { kind: "prompt"; message: string; json: boolean }
   | { kind: "status" }
   | { kind: "doctor" }
   | { kind: "docs-list" }
@@ -130,6 +131,14 @@ export function parseCliArgs(argv: readonly string[]): CliCommand {
   const [command, action, ...rest] = argv;
   if (command === "daemon" && action === undefined) return { kind: "daemon" };
   if (command === "onboard") return { kind: "onboard", argv: argv.slice(1) };
+  if (command === "prompt") {
+    const words = [action, ...rest].filter((word): word is string => word !== undefined && word !== "--json");
+    return {
+      kind: "prompt",
+      message: required(words.join(" "), "prompt message"),
+      json: argv.includes("--json"),
+    };
+  }
   if (command === "status" && action === undefined) return { kind: "status" };
   if (command === "doctor" && action === undefined) return { kind: "doctor" };
 

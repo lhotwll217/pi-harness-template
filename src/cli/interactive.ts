@@ -2,6 +2,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import {
   InteractiveMode,
   initTheme,
+  runPrintMode,
 } from "@earendil-works/pi-coding-agent";
 import { DatabaseQueryAction } from "@pi-template/contracts";
 import { createInteractiveHarnessRuntime } from "../agent/interactive-runtime";
@@ -71,6 +72,31 @@ export interface InteractiveTerminalCapabilities {
 export function assertInteractiveTerminal(capabilities: InteractiveTerminalCapabilities): void {
   if (!capabilities.stdinTTY || !capabilities.stdoutTTY || !capabilities.rawInput) {
     throw new Error("interactive session requires an interactive terminal");
+  }
+}
+
+export interface PromptSessionOptions extends InteractiveSessionOptions {
+  /** The single message to send to the harness agent. */
+  message: string;
+  /** Emit the full JSON event stream instead of only the final text answer. */
+  json?: boolean;
+}
+
+/**
+ * The headless agent-conversation surface: send one prompt to the harness agent over the
+ * owned runtime and identity, and stream the answer to stdout — no TUI. This is the seam
+ * a script or another agent uses; the interactive session is the human one. Returns the
+ * process exit code from Pi's print mode.
+ */
+export async function runPromptSession(options: PromptSessionOptions): Promise<number> {
+  const { runtime } = await createInteractiveSessionRuntime(options);
+  try {
+    return await runPrintMode(runtime, {
+      mode: options.json ? "json" : "text",
+      initialMessage: options.message,
+    });
+  } finally {
+    await runtime.dispose();
   }
 }
 
