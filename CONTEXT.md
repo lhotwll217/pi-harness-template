@@ -29,10 +29,10 @@ The person a micro harness serves and answers to. Apps are built for them,
 boundaries are set by them, and the agent's work is auditable to them.
 
 **System prompt**:
-The agent's standing instructions: who it is, what it is for, and the
-judgment its **Specialty** demands — what matters, what to do first, when to
-stop and ask the **User**. The part of the specialty that is know-how rather
-than capability.
+The agent's identity and overall mission, general guidance on behavior and
+tone, and a high-level layout of the harness environment: workspace
+structure and what tools exist. Stays short and pragmatic — orientation the
+agent needs on every turn, with depth left to **Specialized skills**.
 
 **Specialized skills**:
 Domain procedures the agent loads when a task calls for them, rather than
