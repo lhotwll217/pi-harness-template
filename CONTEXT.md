@@ -47,10 +47,13 @@ part a travel-planning harness has and an SEO harness does not. Built on
 _Avoid_: custom tools, product tools
 
 **Domain data model**:
-The slice of durable state belonging to the **Specialty**: a lasting,
-auditable record of what the agent did and what was derived from it. The
-primitives make state durable; the domain data model decides what is worth
-keeping.
+The **Specialty**'s own vocabulary made durable: the facts it observes, and
+the judgment derived from them — attributed to whoever formed it, agent or
+**User**, and kept as history rather than overwritten. It is where the
+specialty stops being prompt text and becomes something any consumer can
+query and audit. Owner Operator's triage vocabulary lives here: a thread's
+state, priority, and next steps, versioned, each version recording whether a
+poll, the model, or the owner decided it.
 _Avoid_: schema, tables (those are its implementation)
 
 **Harness primitive**:
