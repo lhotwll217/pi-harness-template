@@ -1,0 +1,96 @@
+# Pi Harness Template — Domain Glossary
+
+Language pinned during design sessions. Glossary only — behavior and
+implementation live in [docs/](docs/).
+
+## Language
+
+**Agent**:
+The autonomous actor and the identity a **User** deals with. It decides and
+acts; it does not own the infrastructure it runs on.
+
+**Harness**:
+The infrastructure, context system, and environment purpose-built to enable
+an **Agent**: sessions, tools, permissions, workspace, and durable state.
+The field's converged term — pi, Claude Code, Codex, and OpenClaw are all
+harnesses. One agent may work across several.
+
+**Micro harness**:
+A specialized **Agent** together with the **Harness** built for it: a
+**System prompt**, **Specialized skills**, **Specialized tools**, and a
+**Domain data model** on a core set of **Harness primitives**, shared across
+**External consumers** and shown to its **User** through purpose-built
+**Apps**.
+"Micro" scopes the agent's **Specialty**, not code size or ambition; the
+primitives beneath are what make the specialty dependable.
+_Avoid_: mini harness, template harness, framework
+
+**Specialty**:
+What a micro harness is for — travel planning, SEO, language learning — not
+the list of things it can do. This template's specialty is teaching how to
+build a micro harness by being one.
+
+**User**:
+The person a micro harness serves and answers to. Apps are built for them,
+boundaries are set by them, and the agent's work is auditable to them.
+
+**System prompt**:
+The agent's identity and overall mission, general guidance on behavior and
+tone, and a high-level layout of the harness environment: workspace
+structure and what tools exist. Stays short and pragmatic — orientation the
+agent needs on every turn, with depth left to **Specialized skills**.
+
+**Specialized skills**:
+Domain procedures the agent loads when a task calls for them, rather than
+carrying in its **System prompt** at all times. They keep the specialty deep
+without making the agent read everything it knows on every turn.
+_Avoid_: playbooks, workflows
+
+**Specialized tools**:
+The domain-specific tools that let the agent act in its **Specialty** — the
+part a travel-planning harness has and an SEO harness does not. Built on
+**Harness primitives**, never in place of them.
+_Avoid_: custom tools, product tools
+
+**Domain data model**:
+The **Specialty**'s system of record: typed, validated, queryable state with
+real structure. A travel-planning harness has a trip with dates, and
+accommodations belonging to it — each with a title, link, and status, its
+own dates constrained to the trip's window. Usually written by
+**Specialized tools** and **Specialized skills**, and read by anything that
+needs it, an **App** included.
+
+State earns a place here when it has relationships, when rules must hold
+across records, or when its history matters — an accommodation moving from
+considered to booked, when it moved, and what it replaced.
+_Avoid_: schema, tables (those are its implementation)
+
+**Harness primitive**:
+A capability any specialty depends on and none should reinvent: durable state
+and sessions with provenance, scheduled runs in fresh isolated sessions,
+onboarding that fails closed, explicit security boundaries, self-description,
+and a **Public interface**.
+_Avoid_: feature, module (those are implementation units, not capabilities)
+
+**Public interface**:
+What the agent and its primitives can do, stated so that anything outside can
+find out and ask, without knowing how the micro harness is built. It takes
+whatever form suits a consumer, and one micro harness may offer several at
+once; what it answers does not change with the form.
+_Avoid_: operation surface, command set
+
+**External consumer**:
+Anything outside the micro harness that uses it through the **Public
+interface** — the **User** at a terminal, a script, an **App**, another agent, an
+**External harness**. No consumer gets a privileged path in.
+
+**External harness**:
+A kind of **External consumer**: another harness using this one, taught by a
+small skill rather than injected tool schemas.
+_Avoid_: client, integration
+
+**App**:
+A UI purpose-built for the specialty's use case, giving the **User** a tailored
+view of the agent and its primitives. An **External consumer** like any other
+— an app renders and requests; it holds no behavior of its own.
+_Avoid_: frontend, client (both imply the app owns part of the harness)
