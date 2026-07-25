@@ -11,33 +11,44 @@ permissions, and durable state. The field's converged term — pi, Claude Code,
 and Codex are all harnesses.
 
 **Micro harness**:
-A harness with one behavioral **Specialty**, built from the shared **Harness
-primitives**. "Micro" scopes behavior, not code size or ambition: the
-architecture beneath is what makes the specialty trustworthy.
+A specialized agent, backed by a core set of **Harness primitives**, shared
+across **External consumers** and shown to a person through purpose-built
+**Apps**. "Micro" scopes the agent's **Specialty**, not code size or ambition;
+the primitives beneath are what make the specialty dependable.
 _Avoid_: mini harness, template harness, framework
 
 **Specialty**:
 The single behavioral scope that identifies a micro harness, statable in one
-sentence. A harness whose specialty needs more than one sentence is a
-generalist harness or a framework. This template's specialty: teach how to
-build a micro harness by being one.
+sentence. A specialty needing more than one sentence belongs to a generalist
+harness or a framework. This template's specialty: teach how to build a micro
+harness by being one.
 
 **Harness primitive**:
-A capability every serious harness needs regardless of specialty: durable
-state and sessions with provenance, scheduled runs in fresh isolated
-sessions, onboarding that fails closed, explicit security boundaries,
-self-description, and a **Public interface**.
+A capability any specialty depends on and none should reinvent: durable state
+and sessions with provenance, scheduled runs in fresh isolated sessions,
+onboarding that fails closed, explicit security boundaries, self-description,
+and a **Public interface**.
 _Avoid_: feature, module (those are implementation units, not capabilities)
 
 **Public interface**:
-What the harness can do, stated so that something outside it can find out
-and ask, without knowing how the harness is built. Its callers are humans,
-its own agent, and **External harnesses**. It takes whatever form suits a
-caller, and one harness may offer several at once; what the harness answers
-does not change with the form.
+What the agent and its primitives can do, stated so that anything outside can
+find out and ask, without knowing how the micro harness is built. It takes
+whatever form suits a consumer, and one micro harness may offer several at
+once; what it answers does not change with the form.
 _Avoid_: operation surface, command set
 
+**External consumer**:
+Anything outside the micro harness that uses it through the **Public
+interface** — a person at a terminal, a script, an **App**, another agent, an
+**External harness**. No consumer gets a privileged path in.
+
 **External harness**:
-Any other harness acting as a caller of this one through the **Public
-interface**, taught by a small skill rather than injected tool schemas.
+A kind of **External consumer**: another harness using this one, taught by a
+small skill rather than injected tool schemas.
 _Avoid_: client, integration
+
+**App**:
+A UI purpose-built for the specialty's use case, giving a person a tailored
+view of the agent and its primitives. An **External consumer** like any other
+— an app renders and requests; it holds no behavior of its own.
+_Avoid_: frontend, client (both imply the app owns part of the harness)
