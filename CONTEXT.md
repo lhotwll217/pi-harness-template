@@ -18,11 +18,9 @@ the primitives beneath are what make the specialty dependable.
 _Avoid_: mini harness, template harness, framework
 
 **Specialty**:
-The behavioral scope that identifies a micro harness — what it is for, not
-the list of things it can do. A specialty is coherent: its capabilities
-follow from one another, and a person can say what the harness is for
-without enumerating features. This template's specialty: teach how to build
-a micro harness by being one.
+What a micro harness is for — travel planning, SEO, language learning — not
+the list of things it can do. This template's specialty is teaching how to
+build a micro harness by being one.
 
 **Harness primitive**:
 A capability any specialty depends on and none should reinvent: durable state
