@@ -11,16 +11,34 @@ permissions, and durable state. The field's converged term — pi, Claude Code,
 and Codex are all harnesses.
 
 **Micro harness**:
-A specialized agent, backed by a core set of **Harness primitives**, shared
-across **External consumers** and shown to a person through purpose-built
-**Apps**. "Micro" scopes the agent's **Specialty**, not code size or ambition;
-the primitives beneath are what make the specialty dependable.
+An agent specialized by its **Specialized tools** and **Domain data model**,
+backed by a core set of **Harness primitives**, shared across **External
+consumers** and shown to its **User** through purpose-built **Apps**.
+"Micro" scopes the agent's **Specialty**, not code size or ambition; the
+primitives beneath are what make the specialty dependable.
 _Avoid_: mini harness, template harness, framework
 
 **Specialty**:
 What a micro harness is for — travel planning, SEO, language learning — not
 the list of things it can do. This template's specialty is teaching how to
 build a micro harness by being one.
+
+**User**:
+The person a micro harness serves and answers to. Apps are built for them,
+boundaries are set by them, and the agent's work is auditable to them.
+
+**Specialized tools**:
+The domain-specific tools that let the agent act in its **Specialty** — the
+part a travel-planning harness has and an SEO harness does not. Built on
+**Harness primitives**, never in place of them.
+_Avoid_: custom tools, product tools
+
+**Domain data model**:
+The slice of durable state belonging to the **Specialty**: a lasting,
+auditable record of what the agent did and what was derived from it. The
+primitives make state durable; the domain data model decides what is worth
+keeping.
+_Avoid_: schema, tables (those are its implementation)
 
 **Harness primitive**:
 A capability any specialty depends on and none should reinvent: durable state
@@ -38,7 +56,7 @@ _Avoid_: operation surface, command set
 
 **External consumer**:
 Anything outside the micro harness that uses it through the **Public
-interface** — a person at a terminal, a script, an **App**, another agent, an
+interface** — the **User** at a terminal, a script, an **App**, another agent, an
 **External harness**. No consumer gets a privileged path in.
 
 **External harness**:
@@ -47,7 +65,7 @@ small skill rather than injected tool schemas.
 _Avoid_: client, integration
 
 **App**:
-A UI purpose-built for the specialty's use case, giving a person a tailored
+A UI purpose-built for the specialty's use case, giving the **User** a tailored
 view of the agent and its primitives. An **External consumer** like any other
 — an app renders and requests; it holds no behavior of its own.
 _Avoid_: frontend, client (both imply the app owns part of the harness)
