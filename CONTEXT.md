@@ -41,6 +41,6 @@ is not.
 _Avoid_: operation surface, command set
 
 **External harness**:
-Any other harness acting as a caller of this one through the operation
-interface, taught by a small skill rather than injected tool schemas.
+Any other harness acting as a caller of this one through the **Public
+interface**, taught by a small skill rather than injected tool schemas.
 _Avoid_: client, integration
