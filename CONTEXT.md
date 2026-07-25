@@ -55,9 +55,8 @@ own dates constrained to the trip's window. Usually written by
 needs it, an **App** included.
 
 State earns a place here when it has relationships, when rules must hold
-across records, or when how it changed over time matters. Recorded change
-is what lets the **User** and the agent see how the specialty reached its
-current state.
+across records, or when its history matters — an accommodation moving from
+considered to booked, when it moved, and what it replaced.
 _Avoid_: schema, tables (those are its implementation)
 
 **Harness primitive**:
