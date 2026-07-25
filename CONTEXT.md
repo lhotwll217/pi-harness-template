@@ -51,9 +51,8 @@ The **Specialty**'s own vocabulary made durable: the facts it observes, and
 the judgment derived from them — attributed to whoever formed it, agent or
 **User**, and kept as history rather than overwritten. It is where the
 specialty stops being prompt text and becomes something any consumer can
-query and audit. Owner Operator's triage vocabulary lives here: a thread's
-state, priority, and next steps, versioned, each version recording whether a
-poll, the model, or the owner decided it.
+query and audit: a travel-planning harness keeps trips, options considered,
+and why one was chosen — not just the messages that produced them.
 _Avoid_: schema, tables (those are its implementation)
 
 **Harness primitive**:
