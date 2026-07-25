@@ -30,14 +30,11 @@ self-description, and a **Public interface**.
 _Avoid_: feature, module (those are implementation units, not capabilities)
 
 **Public interface**:
-How the harness is driven from outside — by a human, its own agent, or an
-**External harness** — without embedding it. Model-free, discoverable in
-pieces rather than as one schema dump, with reads and mutations
-distinguishable. Usually a CLI, because a shell costs no model context and
-every caller already has one; an MCP server is the alternative where a
-caller cannot shell out, at the cost of resident tool schemas. The form is
-a product choice; each operation keeping one implementation of its behavior
-is not.
+What the harness can do, stated so that something outside it can find out
+and ask, without knowing how the harness is built. Its callers are humans,
+its own agent, and **External harnesses**. It takes whatever form suits a
+caller, and one harness may offer several at once; what the harness answers
+does not change with the form.
 _Avoid_: operation surface, command set
 
 **External harness**:
