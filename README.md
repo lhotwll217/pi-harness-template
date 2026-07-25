@@ -35,23 +35,22 @@ Pinned definitions live in [`CONTEXT.md`](CONTEXT.md).
 
 ## Why build one
 
-Most agent work does not need a micro harness. A normal harness with a
-workspace folder and a few local skills is often enough, and costs almost
-nothing to set up.
+Most agent work does not need a micro harness. A general harness with a
+dedicated workspace folder and a few local skills is often enough, and costs
+almost nothing to set up.
 
-Reach for a micro harness when one of these holds:
+Reach for a micro harness when that is not enough — the more of these hold,
+the more of the primitives here you would otherwise rediscover:
 
-- **The domain needs a real data model.** State with relationships, rules that
-  must hold across records, or history that matters — a trip and the
-  accommodations under it, each with a status and dates that have to fall
-  inside the trip's window. Files and transcripts cannot enforce that; a schema
-  can.
-- **The work has to be always on.** Something must run when nobody is watching,
-  on a schedule or a trigger, and leave a durable record rather than a message
-  in a thread someone has to find.
-
-If neither holds, use a folder and some skills. If both do, the primitives here
-are the parts you would otherwise rediscover.
+- **You need a durable system of record with depth** — state that can be
+  queried and audited reliably, not reconstructed from files and transcripts.
+- **You want the agent to perform specialized actions** — operations that are
+  complex and may have side effects, like updating the system of record.
+- **You want the agent always on** — ready to be triggered by an event or a
+  schedule to perform specialized actions with no one present.
+- **You want external consumers** — a custom app or UI, a script, another
+  agent — interacting with the system of record or using the specialized
+  actions.
 
 ## Harness primitives
 
