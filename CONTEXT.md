@@ -18,10 +18,11 @@ the primitives beneath are what make the specialty dependable.
 _Avoid_: mini harness, template harness, framework
 
 **Specialty**:
-The single behavioral scope that identifies a micro harness, statable in one
-sentence. A specialty needing more than one sentence belongs to a generalist
-harness or a framework. This template's specialty: teach how to build a micro
-harness by being one.
+The behavioral scope that identifies a micro harness — what it is for, not
+the list of things it can do. A specialty is coherent: its capabilities
+follow from one another, and a person can say what the harness is for
+without enumerating features. This template's specialty: teach how to build
+a micro harness by being one.
 
 **Harness primitive**:
 A capability any specialty depends on and none should reinvent: durable state
