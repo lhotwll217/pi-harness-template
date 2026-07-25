@@ -5,16 +5,22 @@ implementation live in [docs/](docs/).
 
 ## Language
 
+**Agent**:
+The autonomous actor and the identity a **User** deals with. It decides and
+acts; it does not own the infrastructure it runs on.
+
 **Harness**:
-The runtime that hosts an agent and mediates its work: sessions, tools,
-permissions, and durable state. The field's converged term — pi, Claude Code,
-and Codex are all harnesses.
+The infrastructure, context system, and environment purpose-built to enable
+an **Agent**: sessions, tools, permissions, workspace, and durable state.
+The field's converged term — pi, Claude Code, Codex, and OpenClaw are all
+harnesses. One agent may work across several.
 
 **Micro harness**:
-An agent specialized by its **System prompt**, **Specialized skills**,
-**Specialized tools**, and **Domain data model**, backed by a core set of
-**Harness primitives**, shared across **External consumers** and shown to
-its **User** through purpose-built **Apps**.
+A specialized **Agent** together with the **Harness** built for it: a
+**System prompt**, **Specialized skills**, **Specialized tools**, and a
+**Domain data model** on a core set of **Harness primitives**, shared across
+**External consumers** and shown to its **User** through purpose-built
+**Apps**.
 "Micro" scopes the agent's **Specialty**, not code size or ambition; the
 primitives beneath are what make the specialty dependable.
 _Avoid_: mini harness, template harness, framework
