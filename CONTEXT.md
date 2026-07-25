@@ -30,10 +30,12 @@ self-description, and an **Operation surface**.
 _Avoid_: feature, module (those are implementation units, not capabilities)
 
 **Operation surface**:
-The model-free, progressively discoverable interface through which any caller
+The model-free, progressively discoverable interface through which a caller
 invokes harness primitives — here, the `pi-template` CLI traversing the
 authenticated Gateway. Reads and mutations are explicit and distinguishable.
-Term shared with Owner Operator's external operation interface work.
+A surface adapts transport and presentation; behavior belongs to the
+**Single-sourced operation** beneath it. Term shared with Owner Operator's
+external operation interface work.
 _Avoid_: API, tool schema, command set
 
 **Caller**:
@@ -44,9 +46,19 @@ and presentation needs.
 **Single-sourced operation**:
 An operation with exactly one implementation of its behavior, validation,
 permission policy, and structured result, regardless of how many callers
-reach it. Surfaces are adapters over it and cannot drift. This is the
-invariant a micro harness must hold.
+reach it. This is the invariant a micro harness must hold. It is a
+maintained property, not a structural guarantee: a typed seam stops a
+caller from getting the *shape* of a call wrong, but only single
+implementation stops two callers from disagreeing about what the call
+*means*. **Surface drift** is the failure mode.
 _Avoid_: shared operation (ambiguous — sharing behavior, not exposure)
+
+**Surface drift**:
+Two callers of the same conceptual operation behaving differently because
+one of them re-derived behavior instead of invoking it — a duplicated
+timeout, a second definition of "complete", direct schema knowledge in an
+adapter. Compiles cleanly; diverges silently.
+_Avoid_: inconsistency, bug
 
 **Caller parity**:
 A design lens, not a requirement: for a given operation, ask which **Callers**
@@ -63,6 +75,11 @@ surface, taught by a small skill rather than injected tool schemas.
 _Avoid_: client, integration
 
 ## Flagged ambiguities
+
+- **Surface drift** is present, not hypothetical: `src/cli/main.ts`
+  (`completedRun`) owns raw `schedule_runs` SQL, its own quote escaping, and
+  a 660-second completion deadline. "Wait for a schedule run to finish" is an
+  operation the Gateway does not expose, so the CLI re-derived it.
 
 - "product decision" — partially resolved: *which* operations reach *which*
   callers stays a product decision; *whether* an operation surface exists and
