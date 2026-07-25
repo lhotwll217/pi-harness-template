@@ -47,12 +47,17 @@ part a travel-planning harness has and an SEO harness does not. Built on
 _Avoid_: custom tools, product tools
 
 **Domain data model**:
-The **Specialty**'s own vocabulary made durable: the facts it observes, and
-the judgment derived from them — attributed to whoever formed it, agent or
-**User**, and kept as history rather than overwritten. It is where the
-specialty stops being prompt text and becomes something any consumer can
-query and audit: a travel-planning harness keeps trips, options considered,
-and why one was chosen — not just the messages that produced them.
+The **Specialty**'s system of record: typed, validated, queryable state with
+real structure. A travel-planning harness has a trip with dates, and
+accommodations belonging to it — each with a title, link, and status, its
+own dates constrained to the trip's window. Usually written by
+**Specialized tools** and **Specialized skills**, and read by anything that
+needs it, an **App** included.
+
+State earns a place here when it has relationships, when rules must hold
+across records, or when how it changed over time matters. Recorded change
+is what lets the **User** and the agent see how the specialty reached its
+current state.
 _Avoid_: schema, tables (those are its implementation)
 
 **Harness primitive**:
