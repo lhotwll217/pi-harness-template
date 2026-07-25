@@ -11,9 +11,10 @@ permissions, and durable state. The field's converged term — pi, Claude Code,
 and Codex are all harnesses.
 
 **Micro harness**:
-An agent specialized by its **Specialized tools** and **Domain data model**,
-backed by a core set of **Harness primitives**, shared across **External
-consumers** and shown to its **User** through purpose-built **Apps**.
+An agent specialized by its **System prompt**, **Specialized skills**,
+**Specialized tools**, and **Domain data model**, backed by a core set of
+**Harness primitives**, shared across **External consumers** and shown to
+its **User** through purpose-built **Apps**.
 "Micro" scopes the agent's **Specialty**, not code size or ambition; the
 primitives beneath are what make the specialty dependable.
 _Avoid_: mini harness, template harness, framework
@@ -26,6 +27,18 @@ build a micro harness by being one.
 **User**:
 The person a micro harness serves and answers to. Apps are built for them,
 boundaries are set by them, and the agent's work is auditable to them.
+
+**System prompt**:
+The agent's standing instructions: who it is, what it is for, and the
+judgment its **Specialty** demands — what matters, what to do first, when to
+stop and ask the **User**. The part of the specialty that is know-how rather
+than capability.
+
+**Specialized skills**:
+Domain procedures the agent loads when a task calls for them, rather than
+carrying in its **System prompt** at all times. They keep the specialty deep
+without making the agent read everything it knows on every turn.
+_Avoid_: playbooks, workflows
 
 **Specialized tools**:
 The domain-specific tools that let the agent act in its **Specialty** — the
