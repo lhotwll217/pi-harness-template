@@ -26,19 +26,21 @@ build a micro harness by being one.
 A capability every serious harness needs regardless of specialty: durable
 state and sessions with provenance, scheduled runs in fresh isolated
 sessions, onboarding that fails closed, explicit security boundaries,
-self-description, and an **Operation surface**.
+self-description, and a **Public interface**.
 _Avoid_: feature, module (those are implementation units, not capabilities)
 
-**Operation surface**:
-The model-free, progressively discoverable interface through which a caller
-invokes harness primitives — here, the `pi-template` CLI over the
-authenticated Gateway. Reads and mutations stay distinguishable, and each
-operation keeps one implementation of its behavior no matter how many
-surfaces reach it. Which operations reach which callers is a product
-decision; whether behavior is duplicated to serve them is not.
-_Avoid_: API, tool schema, command set
+**Public interface**:
+How the harness is driven from outside — by a human, its own agent, or an
+**External harness** — without embedding it. Model-free, discoverable in
+pieces rather than as one schema dump, with reads and mutations
+distinguishable. Usually a CLI, because a shell costs no model context and
+every caller already has one; an MCP server is the alternative where a
+caller cannot shell out, at the cost of resident tool schemas. The form is
+a product choice; each operation keeping one implementation of its behavior
+is not.
+_Avoid_: operation surface, command set
 
 **External harness**:
 Any other harness acting as a caller of this one through the operation
-surface, taught by a small skill rather than injected tool schemas.
+interface, taught by a small skill rather than injected tool schemas.
 _Avoid_: client, integration
