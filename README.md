@@ -7,15 +7,15 @@
 > ([porting](docs/porting.md)).
 
 A **micro harness** is a specialized agent together with the harness built for
-it — a system prompt, skills, tools, and a domain data model on a core of
-harness primitives — shared across external consumers and shown to its user
+it — a system prompt, skills, tools, and a domain data model — shared across
+external consumers and shown to its user
 through purpose-built apps.
 
 This repository is a running example of one, built on the
 [Pi agent ecosystem](https://pi.dev/). Its specialty is teaching how to build a
 micro harness by being one: start it, ask how a harness works, and it answers
-by routing you through its own code and documentation. Every primitive exists
-to be read, run, and copied.
+by routing you through its own code and documentation. Every part exists to be
+read, run, and copied.
 
 ## Concepts
 
@@ -23,8 +23,7 @@ An **agent** is the autonomous actor and the identity a **user** deals with. A
 **harness** is the infrastructure, context system, and environment purpose-built
 to enable it. What makes an agent a specialist is its **system prompt**,
 **specialized skills**, **specialized tools**, and **domain data model** — its
-**specialty**. What makes a specialty dependable is the **harness primitives**
-beneath it.
+**specialty**. What makes a specialty dependable is the harness beneath it.
 
 Everything outside the micro harness is an **external consumer** — a person at
 a terminal, a script, an **app**, another agent, another **harness** — and each
@@ -39,8 +38,7 @@ Most agent work does not need a micro harness. A general harness with a
 dedicated workspace folder and a few local skills is often enough, and costs
 almost nothing to set up.
 
-Reach for a micro harness when that is not enough — the more of these hold,
-the more of the primitives here you would otherwise rediscover:
+Reach for a micro harness when that is not enough:
 
 - **You need a durable system of record with depth** — state that can be
   queried and audited reliably, not reconstructed from files and transcripts.
@@ -51,25 +49,6 @@ the more of the primitives here you would otherwise rediscover:
 - **You want external consumers** — a custom app or UI, a script, another
   agent — interacting with the system of record or using the specialized
   actions.
-
-## Harness primitives
-
-The capabilities any specialty depends on and none should reinvent:
-
-- **Durable state and sessions**, with provenance.
-- **Scheduled runs**, each in a fresh isolated session with a durable run
-  record.
-- **Onboarding** that is versioned, resumable, and fails closed.
-- **Explicit security boundaries** — capabilities, approvals, privacy policy,
-  and operating system enforcement kept separate.
-- **Self-description**, so the harness can explain itself to a person or an
-  agent.
-- **A public interface**, so anything outside can discover what the harness
-  does and ask it, in whatever form suits the consumer.
-- **Live state for consumers**, so an app subscribes to change instead of
-  polling and stays current while owning no behavior of its own.
-
-What you write on top is the specialty.
 
 ## Using it
 
