@@ -46,9 +46,10 @@ without making the agent read everything it knows on every turn.
 _Avoid_: playbooks, workflows
 
 **Specialized tools**:
-The domain-specific tools that let the agent act in its **Specialty** — the
-part a travel-planning harness has and an SEO harness does not. Built on what
-the **Harness** provides, never in place of it.
+The typed actions that let the agent act in its **Specialty**: each one names
+a domain operation, validates its input, and records its effect in the
+**Domain data model** — a travel-planning harness has tools that add an
+accommodation under a trip and move it from considered to booked.
 _Avoid_: custom tools, product tools
 
 **Domain data model**:
