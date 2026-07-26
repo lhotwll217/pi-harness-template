@@ -94,7 +94,7 @@ publication.
 ## Product surfaces
 
 The harness core may provide a Gateway client and selected CLI commands, but a
-product chooses which primitives it exposes. Sessions, schedules, state, events,
+product chooses which capabilities it exposes. Sessions, schedules, state, events,
 or model intelligence are not automatically public APIs. The template's own
 product surface is self-description — the
 [documentation interface](docs-interface.md) and the

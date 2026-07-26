@@ -23,7 +23,7 @@ skills, and extensions — is opinionated toward exactly one thing: **optimizing
 the agent for the harness domain and its capabilities.** The bundled identity
 prompt tells the agent what it is, what system it operates — durable state and
 its record families, the read-only query surface, notes, schedules and runs,
-the documentation catalog — and how to use those primitives well. Bundled
+the documentation catalog — and how to use those capabilities well. Bundled
 content earns its place by making the agent competent at *being this harness*;
 it never encodes a particular owner's workflow, style, or domain.
 

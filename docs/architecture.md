@@ -13,8 +13,8 @@ read_when:
 > skeleton exist; the source map below marks each module.
 
 Pi Harness Template is a local-first harness core for Pi-based products. The
-harness core is responsible for lifecycle, trust, continuity, and automation
-primitives, and every module doubles as a demonstration a product can copy. The
+harness core is responsible for lifecycle, trust, continuity, and automation,
+and every module doubles as a demonstration a product can copy. The
 product using the harness owns user experience, domain workflows, and any public
 surface beyond the explicitly chosen harness interfaces. The template's own
 chosen surface is self-description: the

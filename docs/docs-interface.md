@@ -2,7 +2,7 @@
 title: "Documentation interface"
 summary: "The planned CLI, Gateway, and agent-facing catalog for progressive documentation access"
 read_when:
-  - Designing the first public harness primitive
+  - Designing the harness's first public surface
   - Exposing documentation to another harness or coding agent
   - Defining stable machine-readable documentation output
 ---
@@ -14,7 +14,7 @@ read_when:
 > under the model-free diagnostics exception), and the `pi-template docs`
 > CLI commands.
 
-The first planned public harness primitive is documentation discovery:
+The first public harness surface is documentation discovery:
 
 ```text
 pi-template docs list
@@ -24,11 +24,10 @@ pi-template docs query <question>
 
 It demonstrates how a harness can let another harness or coding agent inspect
 its capabilities progressively without making every internal subsystem public.
-Surfacing harness primitives through a command-line interface for external
+Surfacing harness capabilities through a command-line interface for external
 agents can be valuable, but **doing this is a product decision** — the template
 makes that decision for itself because self-description is its demonstrative
-product; a product built on the harness makes its own call. Its sibling
-primitive is the
+product; a product built on the harness makes its own call. Its sibling is the
 [read-only query surface](state-and-sessions.md#read-only-query-surface) over
 durable state.
 
@@ -66,7 +65,7 @@ Exact schemas belong with the future executable contract, not in this outline.
 ## Boundary
 
 This example does not require sessions, schedules, state, events, or model
-intelligence to become public CLI APIs. A product may expose those primitives
+intelligence to become public CLI APIs. A product may expose those capabilities
 only after choosing their authority, privacy, and compatibility contracts.
 
 ## Decided

@@ -13,7 +13,7 @@ read_when:
 > (`src/docs-catalog`), the `docs:list` script, and automated drift checks are
 > implemented. Runtime transports (CLI and Gateway routes) remain planned.
 
-Self-documentation is the template's product primitive, and it works at two
+Self-documentation is the template's product surface, and it works at two
 levels. At rest, another coding agent enters the repository, learns only what it
 needs, and follows stable links to deeper contracts. At runtime, the running
 harness describes itself: ask it how to build a harness like it and it answers

@@ -13,7 +13,7 @@ read_when:
 > injected clock, timer, and prompt runner. The real Pi prompt runner arrives
 > with the agent module.
 
-Scheduling is a harness-core primitive because time, durable state, permissions,
+Scheduling belongs in the harness core because time, durable state, permissions,
 process cleanup, and crash recovery are difficult to retrofit safely. State owns
 schedule and run records. The scheduler owns time and execution. The daemon owns
 lifecycle. The Gateway exposes only the selected protocol surface.

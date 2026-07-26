@@ -18,11 +18,10 @@ harnesses. One agent may work across several.
 **Micro harness**:
 A specialized **Agent** together with the **Harness** built for it: a
 **System prompt**, **Specialized skills**, **Specialized tools**, and a
-**Domain data model** on a core set of **Harness primitives**, shared across
-**External consumers** and shown to its **User** through purpose-built
-**Apps**.
+**Domain data model**, shared across **External consumers** and shown to its
+**User** through purpose-built **Apps**.
 "Micro" scopes the agent's **Specialty**, not code size or ambition; the
-primitives beneath are what make the specialty dependable.
+harness beneath is what makes the specialty dependable.
 _Avoid_: mini harness, template harness, framework
 
 **Specialty**:
@@ -48,8 +47,8 @@ _Avoid_: playbooks, workflows
 
 **Specialized tools**:
 The domain-specific tools that let the agent act in its **Specialty** — the
-part a travel-planning harness has and an SEO harness does not. Built on
-**Harness primitives**, never in place of them.
+part a travel-planning harness has and an SEO harness does not. Built on what
+the **Harness** provides, never in place of it.
 _Avoid_: custom tools, product tools
 
 **Domain data model**:
@@ -65,15 +64,8 @@ across records, or when its history matters — an accommodation moving from
 considered to booked, when it moved, and what it replaced.
 _Avoid_: schema, tables (those are its implementation)
 
-**Harness primitive**:
-A capability any specialty depends on and none should reinvent: durable state
-and sessions with provenance, scheduled runs in fresh isolated sessions,
-onboarding that fails closed, explicit security boundaries, self-description,
-and a **Public interface**.
-_Avoid_: feature, module (those are implementation units, not capabilities)
-
 **Public interface**:
-What the agent and its primitives can do, stated so that anything outside can
+What the agent and its harness can do, stated so that anything outside can
 find out and ask, without knowing how the micro harness is built. It takes
 whatever form suits a consumer, and one micro harness may offer several at
 once; what it answers does not change with the form.
@@ -91,6 +83,6 @@ _Avoid_: client, integration
 
 **App**:
 A UI purpose-built for the specialty's use case, giving the **User** a tailored
-view of the agent and its primitives. An **External consumer** like any other
+view of the agent and its harness. An **External consumer** like any other
 — an app renders and requests; it holds no behavior of its own.
 _Avoid_: frontend, client (both imply the app owns part of the harness)

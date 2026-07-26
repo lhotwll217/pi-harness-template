@@ -49,7 +49,7 @@ descriptions come from a git-tracked schema-docs module versioned with the
 writers, never from the database file, so the documentation is a reviewed
 prompt surface and drift between code and store is visible as an undocumented
 column. Alongside the [documentation interface](docs-interface.md), this is one
-of the template's two demonstrative self-description primitives.
+of the template's two demonstrative self-description surfaces.
 
 ## Session concepts
 
