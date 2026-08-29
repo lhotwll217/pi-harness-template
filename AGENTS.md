@@ -28,3 +28,15 @@ not describe planned behavior as implemented.
   preserves the required invariant.
 - **Make durable text independent.** Docs, comments, and prompts must make sense
   without the conversation that produced them.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in this repository's GitHub Issues. See
+[`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md).
+
+### Domain docs
+
+Single-context: one root [`CONTEXT.md`](CONTEXT.md) plus `docs/adr/`. See
+[`docs/agents/domain.md`](docs/agents/domain.md).
