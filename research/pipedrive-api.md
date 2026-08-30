@@ -235,6 +235,37 @@ budget** shared by all users in the company account (this is a metering
   the start.
   Source: https://developers.pipedrive.com/docs/api/v1/Leads
 
+## 7. Official MCP server (addendum, 2026-08-30)
+
+Pipedrive ships a **native, first-party MCP server** (launched 2026; in
+Claude's official connector marketplace since 2026-08-18). It connects over
+**OAuth** — no token or server URL configuration — and exposes read/write
+tools over deals, contacts/organizations, pipelines, activities, and notes,
+scoped by the connecting Pipedrive user's own permissions. No official CLI
+exists; community MCP servers (self-hosted, token-auth) also exist but are
+redundant next to the native one.
+Sources: https://www.pipedrive.com/en/features/mcp-server,
+https://support.pipedrive.com/en/article/mcp,
+https://www.pipedrive.com/en/newsroom/pipedrive-mcp-connector-is-now-available-in-claudes-official-marketplace
+
+**Implication for the spec**: there are now two integration paths, and they
+serve different runtimes rather than competing:
+
+- **Native MCP** — zero-build, OAuth, permission-scoped. The right path
+  wherever the runtime speaks MCP (Claude.ai / Claude Code connectors; the
+  harness itself *if* Pi's tool surface can mount a remote MCP server — an
+  open template question, since the inventory found no third-party API seam
+  at all).
+- **REST + API token** (the body of this document) — the path for
+  harness-native specialized tools, scheduled/headless runs where an OAuth
+  browser flow is unavailable, and anywhere tool shape must be pinned by the
+  bundle rather than inherited from Pipedrive's MCP tool list.
+
+The spec should prefer the native MCP where the runtime supports it and keep
+the REST facts here as the fallback contract; the choice lands with the
+specialized-tools section of the buildable spec (#12), gated on whether the
+harness can consume remote MCP servers.
+
 ## Recommendation for the MVP spec
 
 - **Auth**: company API token of a dedicated agent user, sent as
