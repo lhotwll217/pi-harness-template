@@ -324,7 +324,7 @@ export async function runOnboarding(
           break;
         }
         case "model": {
-          const answer = answers.model;
+          const answer = answers.model ?? selectedModel(paths);
           if (!answer?.provider.trim() || !answer.model.trim()) throw new Error("provider and model selection are required");
           const existing = readObject(paths.piSettings);
           const enabledModels = Array.isArray(existing.enabledModels) && existing.enabledModels.every((model) => typeof model === "string")

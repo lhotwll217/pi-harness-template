@@ -304,6 +304,12 @@ try {
   });
   assert.equal(readFileSync(standaloneSettings, "utf8"), settingsBytes);
 
+  const importedDefaultHome = join(root, "imported-default-home");
+  assert.equal((await onboard([
+    "--non-interactive", "--auth-file", standaloneAuth, "--permission", "allow", "--service", "declined", "--acknowledge-resources",
+  ], passingOnboardingDependencies(importedDefaultHome))).complete, true);
+  assert.equal(JSON.parse(readFileSync(harnessPaths(importedDefaultHome).piSettings, "utf8")).defaultModel, "imported-model");
+
   const manualHome = join(root, "manual-home");
   const manualInteraction = scriptedInteraction([
     "manual", "custom-provider", "manual-secret", "custom-model", "", "",
