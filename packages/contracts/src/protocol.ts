@@ -59,6 +59,7 @@ export interface GatewayApi {
   updateSchedule(id: string, input: ScheduleCreateInput): Promise<ScheduleDefinition>;
   deleteSchedule(id: string): Promise<void>;
   runSchedule(id: string): Promise<ScheduleRun>;
+  getScheduleRun(id: string): Promise<ScheduleRun>;
   queryDatabase(request: DatabaseQueryRequest): Promise<DatabaseQueryResponse>;
   subscribe(listener: (event: GatewayEvent) => void): () => void;
   close(): void;

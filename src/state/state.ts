@@ -211,6 +211,10 @@ export class State {
     return this.db.listRuns(scheduleId);
   }
 
+  runById(id: string): ScheduleRun | undefined {
+    return this.db.runById(id);
+  }
+
   close(): void {
     this.db.close();
   }

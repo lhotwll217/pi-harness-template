@@ -75,7 +75,7 @@ export function addHarnessCommands(program: Command): void {
       message: (message as string[]).join(" "),
       json: options.json === true,
     }));
-  }).option("--json", "stream Pi's JSON event log instead of the answer text");
+  }).option("--json", "stream Pi's JSON event log instead of the answer text").allowUnknownOption();
 
   verb(program, "daemon", "run the daemon in the foreground (other commands start it automatically)", {
     useWhen: "debugging the daemon or running it under a service manager; every other command starts it when needed.",

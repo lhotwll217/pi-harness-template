@@ -33,5 +33,5 @@ export function addDocs(program: Command): void {
   }, async ({ args: [question] }) => await withGateway(async (client) => {
     await emit(await client.queryDocs((question as string[]).join(" ")));
     return 0;
-  }));
+  })).passThroughOptions().allowUnknownOption();
 }

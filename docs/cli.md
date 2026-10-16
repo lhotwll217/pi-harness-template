@@ -40,6 +40,14 @@ event stream; `daemon` runs in the foreground; bare `pi-template` follows the
 [entry behavior](onboarding.md#entry-behavior). JSON by default and JSON
 usage errors follow Stitcher `914a47b` and `75db0d9`.
 
+## Arguments
+
+Words after a verb reach it as typed. `notes add`, `docs query`, and `prompt`
+join their words into one text, dash words included; `prompt` still reads its
+own `--json`. `schedule add` runs the command after `--` exactly as given,
+refuses any other stray word, and refuses a flag given twice. `--help` before
+the text still prints help.
+
 ## Help is the guidance
 
 Each verb's help ends in one shape: when to use it, what to use instead, what

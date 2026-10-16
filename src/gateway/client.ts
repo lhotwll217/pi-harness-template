@@ -128,6 +128,7 @@ export function gatewayClient(info: DaemonInfo): GatewayClient {
       send<ScheduleDefinition>("PUT", `/schedules/${encodeURIComponent(id)}`, input),
     deleteSchedule: (id: string) => remove(`/schedules/${encodeURIComponent(id)}`),
     runSchedule: (id: string) => send<ScheduleRun>("POST", `/schedules/${encodeURIComponent(id)}/run`, {}),
+    getScheduleRun: (id: string) => json<ScheduleRun>(`/schedule-runs/${encodeURIComponent(id)}`),
     queryDatabase: (request: DatabaseQueryRequest) =>
       send<DatabaseQueryResponse>("POST", "/query-database", request),
     listDocs: () => json<DocsCatalogEntry[]>("/docs"),

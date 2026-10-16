@@ -91,6 +91,32 @@ try {
     error: "schedule add needs one payload: --prompt <text> or -- <argv...>",
     hint: scheduleUsage,
   });
+  for (const [typo, words] of [["node", "node task.mjs"], ["promt", "promt x"]] as const) {
+    usageError(["schedule", "add", "--every", "1h", ...words.split(" ")], {
+      error: `unexpected argument '${typo}'; put the command to run after --`,
+      hint: scheduleUsage,
+    });
+  }
+  for (const [flag, value, payload] of [
+    ["--at <iso>", "2026-10-01T09:00:00Z", ["--prompt", "x"]],
+    ["--every <duration>", "1h", ["--prompt", "x"]],
+    ["--cron <expr>", "0 9 * * *", ["--tz", "UTC", "--prompt", "x"]],
+    ["--tz <zone>", "UTC", ["--cron", "0 9 * * *", "--prompt", "x"]],
+    ["--name <name>", "twice", ["--every", "1h", "--prompt", "x"]],
+    ["--prompt <text>", "x", ["--every", "1h"]],
+    ["--timeout <seconds>", "10", ["--every", "1h", "--prompt", "x"]],
+  ] as const) {
+    const [long] = flag.split(" ");
+    usageError(["schedule", "add", ...payload, long!, value, long!, value], {
+      error: `option '${flag}' argument '${value}' is invalid. ${long} may be provided only once`,
+      hint: scheduleUsage,
+    });
+  }
+  const promptWithDash = piTemplate("prompt", "how", "do", "I", "use", "-v");
+  assert.equal(promptWithDash.status, 1, "a dash word is part of the prompt, so parsing reaches the setup check");
+  assert.deepEqual(JSON.parse(promptWithDash.stderr), {
+    error: "setup required before talking to the agent; run `pi-template` in an interactive terminal",
+  });
   usageError(["frobnicate"], { error: "unknown command 'frobnicate'", hint: "`pi-template --help` lists its commands." });
   assert.equal(existsSync(harnessPaths(home).daemonInfo), false, "help and usage errors never start the daemon");
 } finally {

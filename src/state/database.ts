@@ -416,7 +416,7 @@ export class StateDatabase {
     return rows.map((row) => ({ ...row }));
   }
 
-  private runById(id: string): ScheduleRun | undefined {
+  runById(id: string): ScheduleRun | undefined {
     const row = this.db.prepare(`${this.runProjection()} WHERE id = ?`).get(id) as unknown as ScheduleRun | undefined;
     return row ? { ...row } : undefined;
   }

@@ -14,7 +14,7 @@ export function addNotes(program: Command): void {
   }, async ({ args: [body] }) => await withGateway(async (client) => {
     await emit(await client.createNote({ body: (body as string[]).join(" ") }));
     return 0;
-  }));
+  })).passThroughOptions().allowUnknownOption();
 
   verb(notes, "list", "every note, newest first", {
     examples: ["pi-template notes list"],

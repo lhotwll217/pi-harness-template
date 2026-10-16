@@ -23,12 +23,14 @@ Which command answers what:
 
 export function harnessProgram(): Command {
   // Settings are inherited by every subcommand created after them, so they come first. A fixed
-  // help width keeps embedded help identical to what a terminal prints.
+  // help width keeps embedded help identical to what a terminal prints. Positional options hand
+  // each verb its words exactly as typed, `--` included.
   const program = new Command("pi-template")
     .description(ROUTING)
     .usage("<command> [<verb>] [args]")
     .configureHelp({ helpWidth: 100 })
     .exitOverride()
+    .enablePositionalOptions()
     .allowExcessArguments(false)
     .showSuggestionAfterError();
   addDb(program);
