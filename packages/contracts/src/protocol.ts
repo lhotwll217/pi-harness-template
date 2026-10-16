@@ -4,6 +4,7 @@ import type { ScheduleCreateInput, ScheduleDefinition, ScheduleRun } from "./sch
 
 // Distinct from Owner Operator's 47711 so both daemons can coexist on one machine.
 export const DEFAULT_DAEMON_PORT = 47811;
+export const DAEMON_PROBE_TIMEOUT_MS = 1_000;
 
 export interface DaemonInfo {
   port: number;
@@ -20,6 +21,8 @@ export interface DaemonHealth {
   startedAt: string;
   fingerprint: string;
   stale: boolean;
+  /** The checkout the daemon runs from; a client in another checkout is served by this code. */
+  repoRoot: string;
 }
 
 export interface DaemonReady {

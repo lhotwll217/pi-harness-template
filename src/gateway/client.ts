@@ -35,19 +35,26 @@ export class GatewayRequestError extends Error {
   }
 }
 
-export interface GatewayProbe {
-  info: DaemonInfo;
-  health: DaemonHealth;
-  ready: DaemonReady;
-}
+export type GatewayProbe =
+  | { kind: "absent" }
+  | { kind: "reachable"; info: DaemonInfo; health: DaemonHealth; ready: DaemonReady }
+  | { kind: "unreachable"; info: DaemonInfo; cause: unknown };
 
 function readDaemonInfo(): DaemonInfo | null {
-  try { return JSON.parse(readFileSync(harnessPaths().daemonInfo, "utf8")) as DaemonInfo; } catch { return null; }
+  try {
+    const info = JSON.parse(readFileSync(harnessPaths().daemonInfo, "utf8")) as DaemonInfo | null;
+    const valid = info && Number.isSafeInteger(info.pid) && info.pid > 0 &&
+      Number.isInteger(info.port) && info.port > 0 && info.port <= 65_535;
+    return valid ? info : null;
+  } catch {
+    return null;
+  }
 }
 
 interface GatewayJsonOptions {
   init?: RequestInit;
   acceptStatuses?: readonly number[];
+  signal?: AbortSignal;
 }
 
 async function gatewayJson<T>(
@@ -60,6 +67,7 @@ async function gatewayJson<T>(
   const response = await fetch(`http://127.0.0.1:${info.port}${path}`, {
     ...options.init,
     headers,
+    ...(options.signal ? { signal: options.signal } : {}),
   });
   if (!response.ok && !options.acceptStatuses?.includes(response.status)) {
     let body: unknown;
@@ -69,24 +77,34 @@ async function gatewayJson<T>(
   return await response.json() as T;
 }
 
-export async function probeGateway(): Promise<GatewayProbe | null> {
+export interface GatewayProbeOptions {
+  signal?: AbortSignal;
+}
+
+export async function probeGateway(options: GatewayProbeOptions = {}): Promise<GatewayProbe> {
   const info = readDaemonInfo();
-  if (!info?.authToken) return null;
+  if (!info) return { kind: "absent" };
   try {
-    const health = await gatewayJson<DaemonHealth>(info, "/health");
-    const ready = await gatewayJson<DaemonReady>(info, "/ready", { acceptStatuses: [503] });
-    if (health.pid !== info.pid || health.fingerprint !== info.fingerprint) return null;
-    return { info, health, ready };
-  } catch {
-    return null;
+    if (!info.authToken) throw new Error("daemon discovery has no authentication token");
+    const health = await gatewayJson<DaemonHealth>(info, "/health", { signal: options.signal });
+    const ready = await gatewayJson<DaemonReady>(info, "/ready", { acceptStatuses: [503], signal: options.signal });
+    if (health.pid !== info.pid || health.fingerprint !== info.fingerprint) {
+      throw new Error("Gateway identity does not match daemon discovery");
+    }
+    return { kind: "reachable", info, health, ready };
+  } catch (cause) {
+    return { kind: "unreachable", info, cause };
   }
 }
 
 /** Connect to an authenticated live daemon, including one with setup still required. */
-export async function connectGateway(): Promise<GatewayClient | null> {
-  const probe = await probeGateway();
-  if (!probe) return null;
-  const { info } = probe;
+export async function connectGateway(options: GatewayProbeOptions = {}): Promise<GatewayClient | null> {
+  const probe = await probeGateway(options);
+  return probe.kind === "reachable" ? gatewayClient(probe.info) : null;
+}
+
+/** A client for the daemon a reachable probe found. */
+export function gatewayClient(info: DaemonInfo): GatewayClient {
   const json = <T>(path: string, init?: RequestInit): Promise<T> => gatewayJson<T>(info, path, { init });
   const send = <T>(method: "POST" | "PUT", path: string, body: unknown): Promise<T> => json<T>(path, {
     method,

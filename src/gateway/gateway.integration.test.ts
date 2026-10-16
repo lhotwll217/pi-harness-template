@@ -20,6 +20,7 @@ const health: DaemonHealth = {
   startedAt: "2026-01-01T00:00:00.000Z",
   fingerprint: "test-fingerprint",
   stale: false,
+  repoRoot: "/test/checkout",
 };
 let setupRequired = true;
 const readiness = (): DaemonReady => ({
