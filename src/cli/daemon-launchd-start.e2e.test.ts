@@ -37,9 +37,7 @@ const started = new Set<number>();
 const helpers = new Set<ChildProcess>();
 
 // Emulates one launchd job: `print` reports its pid, `kickstart` starts it only when it is not
-// running and `-k` kills it first. A file named after a subcommand in TEST_LAUNCHD overrides
-// its next calls, one line each: an exit code, "hang", "start-stalled-job" (a job that runs but
-// never publishes its discovery record), or "default" for the unchanged behavior.
+// running and `-k` kills it first.
 const fakeLaunchctl = `#!/usr/bin/env node
 const { appendFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
 const { spawn } = require("node:child_process");
@@ -115,7 +113,8 @@ const succeeded = (result: CliResult): DaemonHealth => {
   return body.health;
 };
 const status = async (): Promise<DaemonHealth> => succeeded(await runCli(["status"]));
-const overrideOnce = (subcommand: string, ...behaviors: string[]): void =>
+type LaunchctlBehavior = "default" | "hang" | "start-stalled-job" | `${number}`;
+const overrideNextCalls = (subcommand: string, ...behaviors: LaunchctlBehavior[]): void =>
   writeFileSync(join(launchd, subcommand), behaviors.join("\n"));
 const discovery = (): DaemonInfo => JSON.parse(readFileSync(paths.daemonInfo, "utf8")) as DaemonInfo;
 
@@ -230,7 +229,7 @@ try {
   console.log("ok — a launchd daemon whose record was removed is explained, not killed");
 
   await kill(restarted.pid);
-  overrideOnce("kickstart", "113");
+  overrideNextCalls("kickstart", "113");
   const bootstrapped = await status();
   assert.notEqual(bootstrapped.pid, restarted.pid);
   assert.deepEqual(launchctlCalls(), [
@@ -243,7 +242,7 @@ try {
   console.log("ok — an installed but unloaded LaunchAgent is bootstrapped, then kickstarted");
 
   await kill(bootstrapped.pid);
-  overrideOnce("kickstart", "start-stalled-job");
+  overrideNextCalls("kickstart", "start-stalled-job");
   const stalledStart = await runCli(["status"]);
   const stalledPid = Number(readFileSync(join(launchd, "pid"), "utf8"));
   started.add(stalledPid);
@@ -258,8 +257,8 @@ try {
   await kill(stalledPid);
   console.log("ok — a launchd job this command started that never becomes ready points at the log");
 
-  overrideOnce("kickstart", "113");
-  overrideOnce("bootstrap", "5");
+  overrideNextCalls("kickstart", "113");
+  overrideNextCalls("bootstrap", "5");
   const bootstrappedElsewhere = await status();
   assert.notEqual(bootstrappedElsewhere.pid, bootstrapped.pid);
   assert.deepEqual(launchctlCalls(), [
@@ -273,9 +272,9 @@ try {
   console.log("ok — a LaunchAgent another command bootstrapped first is kickstarted");
 
   await kill(bootstrappedElsewhere.pid);
-  overrideOnce("kickstart", "113");
-  overrideOnce("bootstrap", "5");
-  overrideOnce("print", "default", "113");
+  overrideNextCalls("kickstart", "113");
+  overrideNextCalls("bootstrap", "5");
+  overrideNextCalls("print", "default", "113");
   const startsBeforeFailures = daemonStarts();
   const notBootstrapped = await runCli(["status"]);
   assert.equal(notBootstrapped.status, 1);
@@ -288,13 +287,13 @@ try {
     `print ${target}`,
   ]);
 
-  overrideOnce("kickstart", "1");
+  overrideNextCalls("kickstart", "1");
   const failed = await runCli(["status"]);
   assert.equal(failed.status, 1);
   assert.equal(failed.stderr, `pi-template: Command failed: launchctl kickstart ${target}\n\n`);
   assert.deepEqual(launchctlCalls(), [`print ${target}`, `enable ${target}`, `kickstart ${target}`]);
 
-  overrideOnce("kickstart", "hang");
+  overrideNextCalls("kickstart", "hang");
   const hung = await runCli(["status"]);
   assert.equal(hung.status, 1, "a hung launchctl is abandoned instead of hanging the command");
   assert.equal(hung.stderr, `pi-template: Command failed: launchctl kickstart ${target}\n\n`);

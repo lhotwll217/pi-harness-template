@@ -38,7 +38,6 @@ const output = (value: unknown): void => {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 };
 
-// Reports the probe that confirmed the daemon: a daemon that stalls after it cannot hang `status`.
 function outputStatus(client: ConfirmedGatewayClient): void {
   output({ health: client.probe.health, ready: client.probe.ready });
 }

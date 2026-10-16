@@ -31,11 +31,8 @@ export interface LaunchdServiceOptions {
 
 // Matches the sandbox probe's bound (src/agent/sandbox/anthropic-sandbox.ts); launchctl answers in milliseconds.
 const LAUNCHCTL_TIMEOUT_MS = 5_000;
-// The daemon has no shutdown bound of its own (a draining scheduler waits out each run's timeout), so
-// the plist's ExitTimeOut bounds it: launchd sends SIGKILL this long after SIGTERM. 5 s is launchd's
-// default for user agents as `launchctl print` reports it; the plist pins it.
-const DAEMON_EXIT_TIMEOUT_SECONDS = 5;
-// bootout returns only after the job exits.
+// launchd's default ExitTimeOut for user agents, as `launchctl print` reports it; pinned in the plist.
+export const DAEMON_EXIT_TIMEOUT_SECONDS = 5;
 const BOOTOUT_TIMEOUT_MS = DAEMON_EXIT_TIMEOUT_SECONDS * 1_000 + LAUNCHCTL_TIMEOUT_MS;
 const execFileAsync = async (file: string, args: string[], timeoutMs = LAUNCHCTL_TIMEOUT_MS): Promise<{ stdout: string }> =>
   await promisify(execFileCallback)(file, args, { timeout: timeoutMs });
@@ -44,6 +41,7 @@ const launchctlReportsNotLoaded = (error: unknown): boolean => {
   const code = (error as { code?: string | number }).code;
   return code !== undefined && LAUNCHCTL_NOT_LOADED_CODES.has(code);
 };
+const launchctlTimedOut = (error: unknown): boolean => (error as { killed?: boolean }).killed === true;
 
 const escapeXml = (value: string): string => value
   .replaceAll("&", "&amp;")
@@ -118,8 +116,7 @@ export function createLaunchdServiceAdapter(options: LaunchdServiceOptions = {})
       if (uid === undefined) throw new Error("launchd service installation requires a Unix user id");
       const domain = `gui/${uid}`;
       await execFile("launchctl", ["bootout", domain, plist], BOOTOUT_TIMEOUT_MS).catch((error: unknown) => {
-        // A job that is not loaded fails bootout harmlessly; any other failure surfaces at bootstrap.
-        if (!(error as { killed?: boolean }).killed) return;
+        if (!launchctlTimedOut(error)) return;
         throw new Error(
           `launchctl bootout did not finish within ${BOOTOUT_TIMEOUT_MS / 1_000}s while stopping the running daemon; ` +
             "wait for it to exit, then retry",

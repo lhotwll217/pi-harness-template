@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  DAEMON_EXIT_TIMEOUT_SECONDS,
   LaunchdOwnership,
   createLaunchdServiceAdapter,
   daemonLaunchAgent,
@@ -80,7 +81,6 @@ try {
   mkdirSync(entityHome);
   writeFileSync(plistPath, daemonLaunchAgent({ home: entityHome, executable: "/install/pi-template", workingDirectory: "/install" }));
   assert.equal(launchdManagesHome(entityHome, root), true, "XML entities in the plist's home entry are decoded");
-  // The plist as `plutil -convert xml1` rewrites it: keys sorted, one tag per line, tab indents.
   writeFileSync(plistPath, `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -114,16 +114,15 @@ try {
   const bin = join(root, "bin");
   const launchctlLog = join(root, "launchctl.log");
   mkdirSync(bin);
-  // Stands in for launchd stopping a job that uses its whole ExitTimeOut: bootout returns only
-  // after the job exits, and bootstrap fails while the old job is still loaded.
-  writeFileSync(join(bin, "launchctl"), `#!/bin/sh
+  const launchctlStoppingAJobThatUsesItsWholeExitTimeOut = `#!/bin/sh
 echo "$1" >> "${launchctlLog}"
 case "$1" in
-  bootout) touch "${root}/booting-out"; sleep 5.5; rm "${root}/booting-out" ;;
+  bootout) touch "${root}/booting-out"; sleep ${DAEMON_EXIT_TIMEOUT_SECONDS + 0.5}; rm "${root}/booting-out" ;;
   bootstrap) [ -e "${root}/booting-out" ] && { echo "Bootstrap failed: 5: Input/output error" >&2; exit 5; } ;;
 esac
 exit 0
-`);
+`;
+  writeFileSync(join(bin, "launchctl"), launchctlStoppingAJobThatUsesItsWholeExitTimeOut);
   chmodSync(join(bin, "launchctl"), 0o755);
   const path = process.env.PATH;
   process.env.PATH = `${bin}:${path ?? ""}`;
