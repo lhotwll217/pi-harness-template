@@ -78,6 +78,12 @@ interface DamagedRecords {
   settings?: string;
 }
 
+interface SandboxFlags {
+  enabled?: boolean;
+  readRoots?: string[];
+  writeRoots?: string[];
+}
+
 type ReviewedSetup = OnboardingAnswers & {
   auth: NonNullable<OnboardingAnswers["auth"]>;
   model: NonNullable<OnboardingAnswers["model"]>;
@@ -124,6 +130,14 @@ function parseFlags(argv: readonly string[]): OnboardFlags {
     else values.set(flag, value);
   }
   return { nonInteractive, noBrowser, acknowledgeResources, approveWorkspaceContext, sandboxEnabled, values, repeated };
+}
+
+function sandboxFlags(flags: OnboardFlags): SandboxFlags {
+  return {
+    enabled: flags.sandboxEnabled,
+    readRoots: flags.repeated.get("--sandbox-read")?.map((path) => resolve(path)),
+    writeRoots: flags.repeated.get("--sandbox-write")?.map((path) => resolve(path)),
+  };
 }
 
 function skillPolicy(mode: string, allowlist: string[]): SkillPolicy {
@@ -177,10 +191,9 @@ function answersFromFlags(flags: OnboardFlags, recorded: OnboardingAnswers): Onb
     throw new CliUsageError("--service installed requires --executable and --working-directory");
   }
   const recordedPolicy = recorded.sandbox?.policy;
-  const readRoots = flags.repeated.get("--sandbox-read")?.map((path) => resolve(path)) ??
-    recordedPolicy?.filesystem.allowedReadRoots ?? [resolve(process.cwd())];
-  const writeRoots = flags.repeated.get("--sandbox-write")?.map((path) => resolve(path)) ??
-    recordedPolicy?.filesystem.allowedWriteRoots ?? [resolve(process.cwd())];
+  const sandbox = sandboxFlags(flags);
+  const readRoots = sandbox.readRoots ?? recordedPolicy?.filesystem.allowedReadRoots ?? [resolve(process.cwd())];
+  const writeRoots = sandbox.writeRoots ?? recordedPolicy?.filesystem.allowedWriteRoots ?? [resolve(process.cwd())];
   const domains = flags.repeated.get("--network-domain");
   const workspaceSkills = flags.values.get("--workspace-skills");
   const skills = flags.repeated.get("--skill");
@@ -209,7 +222,7 @@ function answersFromFlags(flags: OnboardFlags, recorded: OnboardingAnswers): Onb
     },
     sandbox: {
       policy: {
-        enabled: flags.sandboxEnabled ?? recordedPolicy?.enabled ?? false,
+        enabled: sandbox.enabled ?? recordedPolicy?.enabled ?? false,
         filesystem: {
           allowedReadRoots: readRoots,
           allowedWriteRoots: writeRoots,
@@ -433,7 +446,7 @@ function reviewDefaults(
   auth: InteractiveAuthSelection,
   protectedPathValues: string[],
   recorded: OnboardingAnswers,
-  sandboxEnabled: boolean | undefined,
+  sandbox: SandboxFlags,
 ): ReviewedSetup {
   const root = resolve(process.cwd());
   const policy = recorded.sandbox?.policy ?? {
@@ -452,7 +465,15 @@ function reviewDefaults(
     },
     capabilities: recorded.capabilities ?? { permissionMode: DEFAULT_PERMISSION_MODE },
     protectedPaths: { paths: protectedPathValues, repos: recorded.protectedPaths?.repos ?? [] },
-    sandbox: { policy: { ...policy, enabled: sandboxEnabled ?? policy.enabled } },
+    sandbox: { policy: {
+      ...policy,
+      enabled: sandbox.enabled ?? policy.enabled,
+      filesystem: {
+        ...policy.filesystem,
+        allowedReadRoots: sandbox.readRoots ?? policy.filesystem.allowedReadRoots,
+        allowedWriteRoots: sandbox.writeRoots ?? policy.filesystem.allowedWriteRoots,
+      },
+    } },
     service: recorded.service ?? { choice: "declined" },
   };
 }
@@ -560,7 +581,7 @@ async function interactiveAnswers(
   preferDeviceCode: boolean,
   createRuntime: CreateModelRuntime,
   recorded: OnboardingAnswers,
-  sandboxEnabled: boolean | undefined,
+  sandbox: SandboxFlags,
   damaged: DamagedRecords,
 ): Promise<OnboardingAnswers> {
   const auth = await interactiveAuth(io, source, preferDeviceCode, createRuntime);
@@ -590,7 +611,7 @@ async function interactiveAnswers(
       replaced = { ...replaced, service: choice === "declined" ? { choice } : await installedService(io, false) };
     }
   }
-  const defaults = reviewDefaults(auth, protectedPathValues, replaced, sandboxEnabled);
+  const defaults = reviewDefaults(auth, protectedPathValues, replaced, sandbox);
   writeReview(io, defaults, home, damaged);
   const acceptance = await io.question("Accept this setup? [Y/n] ");
   if (isDefaultYesAnswer(acceptance)) return defaults;
@@ -648,7 +669,7 @@ export async function onboard(
     const standaloneSource = piImportSource(standalonePiAuthPath ?? join(getAgentDir(), "auth.json"));
     const source = standaloneSource.authPath === destinationAuthPath ? undefined : standaloneSource;
     const answers = await interactiveAnswers(
-      io, source, machineDependencies.home, flags.noBrowser, createModelRuntime, recorded, flags.sandboxEnabled,
+      io, source, machineDependencies.home, flags.noBrowser, createModelRuntime, recorded, sandboxFlags(flags),
       { protectedPaths: unreadableProtectedPaths(home), settings: unreadablePermissionMode(home) },
     );
     return await runOnboarding(answers, machineDependencies);

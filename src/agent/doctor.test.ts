@@ -20,7 +20,7 @@ try {
   writeFileSync(join(home, "sandbox-verification.json"), JSON.stringify({ ok: true, reason: "verified" }));
   const policy = {
     enabled: true,
-    filesystem: { allowedReadRoots: [home], allowedWriteRoots: [home], deniedReadRoots: [] },
+    filesystem: { allowedReadRoots: [paths.workspace], allowedWriteRoots: [paths.workspace], deniedReadRoots: [] },
     process: { allowSubprocesses: true },
     network: { mode: "deny", allowedDomains: [] },
   };

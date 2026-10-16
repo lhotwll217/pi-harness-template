@@ -23,7 +23,7 @@ try {
   const paths = ensureHarnessWorkspace(home);
   seedFauxProviderHome(paths, faux.getModel());
   writeFileSync(join(home, "sandbox.json"), JSON.stringify({
-    filesystem: { allowedReadRoots: [root], allowedWriteRoots: [root], deniedReadRoots: [] },
+    filesystem: { allowedReadRoots: [cwd], allowedWriteRoots: [cwd], deniedReadRoots: [] },
     process: { allowSubprocesses: true },
     network: { mode: "deny", allowedDomains: [] },
   }));

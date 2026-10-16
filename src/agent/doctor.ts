@@ -10,7 +10,7 @@ import {
 } from "@pi-template/contracts";
 import { agentDefinitionSummary } from "./agent-definition";
 import { configuredWorkspaceSkillNames, protectedPathsProblem } from "./runtime";
-import { readSandboxPolicy } from "./sandbox";
+import { homeInWriteRootsProblem, readSandboxPolicy } from "./sandbox";
 
 type JsonObject = Record<string, unknown>;
 
@@ -63,7 +63,10 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
   let sandbox: DoctorReport["checks"]["sandbox"];
   try {
     const policy = readSandboxPolicy(paths.home);
-    sandbox = !policy
+    const writeRootProblem = policy && homeInWriteRootsProblem(paths.home, policy);
+    sandbox = writeRootProblem
+      ? { enabled: true, verified: false, reason: writeRootProblem }
+      : !policy
       ? { enabled: false, verified: false, reason: "no sandbox policy; bash runs on the host" }
       : !policy.enabled
       ? { enabled: false, verified: false, reason: "turned off in sandbox.json; bash runs on the host" }

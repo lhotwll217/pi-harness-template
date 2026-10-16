@@ -1,3 +1,4 @@
+import { harnessPaths } from "@pi-template/contracts";
 import {
   AGENT_DEFINITION,
   definitionIds,
@@ -5,7 +6,8 @@ import {
   type OnboardingDependencies,
 } from "../../src/agent";
 
-export function testOnboardingAnswers(root: string): OnboardingAnswers {
+export function testOnboardingAnswers(home: string): OnboardingAnswers {
+  const { workspace } = harnessPaths(home);
   return {
     auth: { kind: "credential", provider: "fake", credential: { type: "api_key", key: "test-secret" } },
     model: { provider: "fake", model: "deterministic-model" },
@@ -19,7 +21,7 @@ export function testOnboardingAnswers(root: string): OnboardingAnswers {
     sandbox: {
       policy: {
         enabled: true,
-        filesystem: { allowedReadRoots: [root], allowedWriteRoots: [root], deniedReadRoots: [] },
+        filesystem: { allowedReadRoots: [workspace], allowedWriteRoots: [workspace], deniedReadRoots: [] },
         process: { allowSubprocesses: true },
         network: { mode: "deny", allowedDomains: [] },
       },

@@ -57,7 +57,7 @@ const dependencies = (): OnboardingDependencies => ({
 
 const policy = {
   enabled: true,
-  filesystem: { allowedReadRoots: [root], allowedWriteRoots: [root], deniedReadRoots: [] },
+  filesystem: { allowedReadRoots: [join(root, "task")], allowedWriteRoots: [join(root, "task")], deniedReadRoots: [] },
   process: { allowSubprocesses: true },
   network: { mode: "deny" as const, allowedDomains: [] },
 };

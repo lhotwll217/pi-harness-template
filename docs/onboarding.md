@@ -60,6 +60,13 @@ settings no longer record it), and lists the damaged file in the review.
 Non-interactive onboarding without `--permission` takes the recorded mode, or
 `allow` on a new home.
 
+With the sandbox on, onboarding refuses, before anything is written, a write
+root that contains the harness home, whether given with `--sandbox-write`, taken
+from the working directory, or kept from the recorded `sandbox.json`; the
+message names the root and the home. Both modes honor `--sandbox-read` and
+`--sandbox-write`. The rule and its reason are in
+[security](security.md#write-roots-stay-outside-the-harness-home).
+
 ## Fail-closed rule
 
 Until the current onboarding contract is complete, the daemon may expose

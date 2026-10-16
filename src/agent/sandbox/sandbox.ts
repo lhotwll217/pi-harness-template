@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { basename, dirname, join, parse, resolve, sep } from "node:path";
 import { harnessPaths } from "@pi-template/contracts";
 
 export interface SandboxFilesystemPolicy {
@@ -98,6 +99,48 @@ export function readSandboxPolicy(home: string): SandboxPolicy | undefined {
   const policy = validPolicy(value);
   if (!policy) throw new Error(`sandbox policy is invalid under ${home}`);
   return policy;
+}
+
+function realLocation(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    const parent = dirname(path);
+    return parent === path ? path : join(realLocation(parent), basename(path));
+  }
+}
+
+function homeAndLinksToIt(home: string): string[] {
+  const spelled = resolve(home);
+  const locations = [spelled, realLocation(spelled)];
+  const { root } = parse(spelled);
+  let prefix = root;
+  for (const part of spelled.slice(root.length).split(sep).filter(Boolean)) {
+    prefix = join(prefix, part);
+    let link = false;
+    try {
+      link = lstatSync(prefix).isSymbolicLink();
+    } catch {
+      break;
+    }
+    if (link) locations.push(prefix, join(realLocation(dirname(prefix)), basename(prefix)));
+  }
+  return locations;
+}
+
+const containsPath = (root: string, path: string): boolean =>
+  path === root || path.startsWith(root.endsWith(sep) ? root : root + sep);
+
+export function homeInWriteRootsProblem(home: string, policy: SandboxPolicy): string | undefined {
+  if (!policy.enabled) return undefined;
+  const locations = homeAndLinksToIt(home);
+  const root = policy.filesystem.allowedWriteRoots.find((writeRoot) => {
+    const spellings = [resolve(writeRoot), realLocation(resolve(writeRoot))];
+    return spellings.some((spelling) => locations.some((location) => containsPath(spelling, location)));
+  });
+  return root && `sandbox write root ${root} contains the harness home ${home}, ` +
+    "so sandboxed bash could rewrite the files that set its own limits. " +
+    "Record write roots outside the home: `pi-template onboard --sandbox-write <dir>`, or turn the sandbox off with `--sandbox-off`";
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

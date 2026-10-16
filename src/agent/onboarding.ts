@@ -37,6 +37,7 @@ import { runDoctor } from "./doctor";
 import { AGENT_DEFINITION, definitionIds } from "./agent-definition";
 import {
   createSandboxAdapter,
+  homeInWriteRootsProblem,
   readSandboxPolicy,
   sandboxPolicyPath,
   type SandboxAdapter,
@@ -279,6 +280,8 @@ export async function runOnboarding(
     const report = await runDoctor({ home });
     return { ok: report.ok, reason: report.ok ? "doctor passed" : "one or more doctor checks failed" };
   });
+  const writeRootProblem = answers.sandbox && homeInWriteRootsProblem(paths.home, answers.sandbox.policy);
+  if (writeRootProblem) throw new OnboardingStageError("sandbox", writeRootProblem);
   let progress = currentProgress(paths.onboardingProgress);
   const existingMarker = readObject(paths.onboardingMarker) as Partial<OnboardingMarker>;
   if (

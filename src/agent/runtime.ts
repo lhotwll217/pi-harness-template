@@ -29,7 +29,14 @@ import {
   piTemplateIdentityPrompt,
   type AgentToolDependencies,
 } from "./agent-definition";
-import { commandEnvironment, createSandboxAdapter, readSandboxPolicy, type SandboxAdapter } from "./sandbox";
+import {
+  commandEnvironment,
+  createSandboxAdapter,
+  homeInWriteRootsProblem,
+  readSandboxPolicy,
+  type SandboxAdapter,
+  type SandboxPolicy,
+} from "./sandbox";
 
 export interface AgentResourceOptions extends AgentToolDependencies {
   home?: string;
@@ -81,9 +88,12 @@ export function protectedPathsProblem(home: string): string | undefined {
     "(non-interactive: `pi-template onboard --non-interactive --protected-path <dir>`)";
 }
 
-function assertProtectedPathsReadable(home: string): void {
-  const problem = protectedPathsProblem(home);
-  if (problem) throw new Error(problem);
+function assertSessionCanStart(home: string): void {
+  const protectedProblem = protectedPathsProblem(home);
+  if (protectedProblem) throw new Error(protectedProblem);
+  const policy = readSandboxPolicy(home);
+  const writeRootProblem = policy && homeInWriteRootsProblem(home, policy);
+  if (writeRootProblem) throw new Error(writeRootProblem);
 }
 
 /** Build Pi's cwd-bound services with every ambient resource source disabled. */
@@ -91,7 +101,7 @@ export async function createHarnessSessionServices(
   options: AgentResourceOptions,
 ): Promise<HarnessSessionServices> {
   const paths = ensureHarnessWorkspace(options.home);
-  assertProtectedPathsReadable(paths.home);
+  assertSessionCanStart(paths.home);
   process.env.PI_CODING_AGENT_DIR = paths.piAgentDir;
   reconcilePermissionSettings(paths.home);
   const settingsManager = SettingsManager.create(paths.workspace, paths.piAgentDir, { projectTrusted: false });
@@ -164,6 +174,20 @@ function assertHeadlessApprovalPolicy(home: string): void {
   }
 }
 
+export function enforcedSandboxPolicy(home: string, policy: SandboxPolicy): SandboxPolicy {
+  // The sandbox resolves symlinks only in paths that exist; a control file not yet written
+  // must still be denied under the home's real path, the one the kernel matches.
+  const paths = harnessPaths(realpathSync(home));
+  return {
+    ...policy,
+    filesystem: {
+      ...policy.filesystem,
+      deniedReadRoots: [...new Set([...policy.filesystem.deniedReadRoots, paths.piAgentDir])],
+      deniedWriteRoots: harnessControlPaths(paths),
+    },
+  };
+}
+
 function bashOperations(home: string, sandbox: SandboxAdapter): BashOperations {
   const policy = readSandboxPolicy(home);
   if (!policy?.enabled) {
@@ -173,17 +197,7 @@ function bashOperations(home: string, sandbox: SandboxAdapter): BashOperations {
         await local.exec(command, cwd, { ...execution, env: commandEnvironment(execution.env ?? process.env) }),
     };
   }
-  // The sandbox resolves symlinks only in paths that exist; a control file not yet written
-  // must still be denied under the home's real path, the one the kernel matches.
-  const paths = harnessPaths(realpathSync(home));
-  const enforced = {
-    ...policy,
-    filesystem: {
-      ...policy.filesystem,
-      deniedReadRoots: [...new Set([...policy.filesystem.deniedReadRoots, paths.piAgentDir])],
-      deniedWriteRoots: harnessControlPaths(paths),
-    },
-  };
+  const enforced = enforcedSandboxPolicy(home, policy);
   return {
     exec: async (command, cwd, execution) => {
       const { exitCode, timedOut } = await sandbox.execute(enforced, {
@@ -203,7 +217,7 @@ function bashOperations(home: string, sandbox: SandboxAdapter): BashOperations {
 
 export async function createHarnessSession(options: HarnessSessionOptions) {
   const paths = ensureHarnessWorkspace(options.home);
-  assertProtectedPathsReadable(paths.home);
+  assertSessionCanStart(paths.home);
   if (options.headless) assertHeadlessApprovalPolicy(paths.home);
   const resources = await createHarnessSessionServices(options);
   const definedToolNames = resources.tools.map(({ name }) => name);

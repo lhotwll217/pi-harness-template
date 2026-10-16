@@ -30,7 +30,9 @@ async function runTwoTimedCommands(name: string, sandboxEnabled: boolean): Promi
   const cwd = join(root, name, "task");
   const paths = ensureHarnessWorkspace(home);
   seedFauxProviderHome(paths, faux.getModel());
-  writeFileSync(join(home, "sandbox.json"), JSON.stringify({ ...policy, enabled: sandboxEnabled }));
+  writeFileSync(join(home, "sandbox.json"), JSON.stringify({
+    ...policy, enabled: sandboxEnabled, filesystem: { allowedReadRoots: [cwd], allowedWriteRoots: [cwd], deniedReadRoots: [] },
+  }));
   mkdirSync(cwd);
   saveHarnessSettings(home, { permissionMode: "allow" });
 

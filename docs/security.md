@@ -134,6 +134,8 @@ Onboarding writes `false` for a new home; `pi-template onboard --sandbox` turns
 it on and `--sandbox-off` turns it off again. A rerun without either flag keeps
 the recorded choice. A home with no `sandbox.json` is off, and a `sandbox.json`
 written before the field existed stays on, because it was enforced when written.
+One that does not parse, or lacks part of its policy, stops every session and
+fails `pi-template doctor`.
 
 On, bash runs through the adapter and onboarding runs the probe. Off, bash runs
 on the host with the owner's permissions through Pi's local executor, and
@@ -149,15 +151,41 @@ which onboarding records in `sandbox.json`'s read denials. Whatever
 read denials and every control file, the state database included, to its write
 denials, without saving either to the file. It names them under the home's real
 path, so a control file not yet written is covered when the home is reached
-through a symlink such as macOS `/var`. So no command can turn the sandbox off,
-change the permission mode, protected paths, or approvals, or add a schedule
-the daemon would run on the host. Reads outside `pi/` and the protected paths
+through a symlink such as macOS `/var`. These denials back up the
+[write-root rule](#write-roots-stay-outside-the-harness-home); neither is
+removed. Reads outside `pi/` and the protected paths
 are allowed by design, so bash can still read `daemon.json`, which
 `pi-template` needs to reach the daemon. Off, a command
 reaches everything the owner can except a literal protected path, so a glob or
 `python3 -c` with a path it builds itself reads the model credentials.
 `pi-template doctor` reads `sandbox.json` itself and reports `sandbox.enabled`,
 so a hand edit shows at once.
+
+### Write roots stay outside the harness home
+
+With the sandbox on, no write root may contain the harness home. A root
+contains the home when it is the home or an ancestor of it, compared both as
+spelled and by real path (so `/tmp` and `/private/tmp` are one place), or of any
+symlink on the path the home is spelled through, wherever that link lives.
+Onboarding refuses such a root before writing anything, naming the root and
+the home. Every sandboxed session (interactive, `pi-template prompt`, and
+scheduled) refuses to start over a `sandbox.json` that records one, legacy and
+hand-edited files included, with the same message and the recovery
+`pi-template onboard --sandbox-write <dir>`; `pi-template doctor` reports not
+ready. A write root inside the home, such as its `workspace/`, is allowed.
+
+Denying each dangerous path under such a root did not hold. Three audits each
+escaped the sandbox through a write root that contained the home: a glob that
+the path rules could not match edited `sandbox.json`; a schedule written into
+`state.db` ran on the host; and with the home reached through a symlink inside
+the write root, bash replaced the link with one to a home whose `sandbox.json`
+was off, so the next session ran bash unsandboxed and the daemon would run that
+home's schedules. Removing the shared precondition closes the class rather
+than the next path in it.
+
+The rule covers the harness home only. A write root that contains another
+place the host later runs from, such as `~/Library/LaunchAgents` or the
+`pi-template` checkout, is the owner's choice.
 
 ## Audit and provenance
 
