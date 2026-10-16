@@ -166,8 +166,6 @@ try {
     entry.data?.taskDirectory === cwd &&
     entry.data?.trustPolicyVersion === ONBOARDING_VERSION));
 
-  // Importing the same standalone Pi transcript twice keeps both sessions: each import
-  // lands under a filename no transcript uses yet, and neither copy is overwritten.
   const standaloneDir = join(root, "standalone-sessions");
   const standalone = SessionManager.create(cwd, standaloneDir);
   standalone.appendMessage({ role: "user", content: "from standalone Pi", timestamp: 0 });

@@ -109,7 +109,7 @@ export async function runInteractiveSession(options: InteractiveSessionOptions):
   const { runtime } = await createInteractiveSessionRuntime(options);
   try {
     initTheme(runtime.services.settingsManager.getTheme(), true);
-    // Pi 1.0 made fullscreen the default; keep the terminal's normal scrollback.
+    // Pi defaults to fullscreen; regular keeps the terminal's normal scrollback.
     await new InteractiveMode(runtime, { tuiMode: "regular" }).run();
   } catch (error) {
     await runtime.dispose();

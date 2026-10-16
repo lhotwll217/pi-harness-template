@@ -8,7 +8,6 @@ import { harnessPaths } from "@pi-template/contracts";
 import { passingOnboardingDependencies } from "../../test/helpers/onboarding";
 import { onboard, type CliOnboardingDependencies } from "./onboard";
 
-/** Replace the built-in Anthropic login with a deterministic one, keeping its model catalog. */
 function anthropicLoginRuntime(oauth: OAuthAuth): NonNullable<CliOnboardingDependencies["createModelRuntime"]> {
   return async (options) => {
     const runtime = await ModelRuntime.create(options);
@@ -144,7 +143,6 @@ try {
   });
   {
     const loginHome = join(root, "login-home");
-    // Logging in again keeps every provider already saved in auth.json.
     mkdirSync(harnessPaths(loginHome).piAgentDir, { recursive: true });
     writeFileSync(harnessPaths(loginHome).piAuth, JSON.stringify({ openai: { type: "api_key", key: "kept-key" } }));
     const loginInteraction = scriptedInteraction(["anthropic", "", ""]);
@@ -271,9 +269,6 @@ try {
   assert.equal(readFileSync(standaloneSettings, "utf8"), settingsBytes);
   assert.equal(readFileSync(standaloneModels, "utf8"), modelsBytes);
 
-  // Agent-operated login: --no-browser takes the provider's browserless method without a
-  // human picking, so an agent driving the terminal never hits the browser callback. Each
-  // fake offers the method pair a built-in Pi provider offers and records the choice.
   const browserlessMethods = [
     { id: "device_code", label: "Device code login (headless)" },
     { id: "copy_code", label: "Copy code login (headless)" },
@@ -297,7 +292,6 @@ try {
       async toAuth(credential) { return { apiKey: credential.access }; },
     });
     const deviceHome = join(root, `${browserless.id}-home`);
-    // provider, [pasted code], protected paths, accept
     const deviceInteraction = scriptedInteraction(
       browserless.id === "copy_code" ? ["anthropic", "code#state", "", ""] : ["anthropic", "", ""],
     );
@@ -317,7 +311,6 @@ try {
     assert.ok(!deviceInteraction.questions().includes("Selection: "),
       "the browserless method is chosen without asking");
     if (browserless.id === "copy_code") {
-      // The paste prompt is the provider's own wording, not a browser-redirect hint.
       assert.ok(deviceInteraction.questions().includes("Paste the code Anthropic shows after you sign in: "));
     }
   }

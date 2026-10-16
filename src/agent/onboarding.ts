@@ -206,8 +206,7 @@ export async function runOnboarding(
           const answer = answers.auth;
           if (answer?.kind === "credential") {
             if (!answer.provider.trim()) throw new Error("provider name is required");
-            // Pi no longer exports its file-backed credential store; auth.json keeps one
-            // credential per provider, so merge this entry and keep every other provider.
+            // Pi does not export its file-backed credential store; merge so every other provider stays.
             writeJsonAtomic(paths.piAuth, { ...readObject(paths.piAuth), [answer.provider]: answer.credential });
           } else if (answer?.kind === "import") {
             const imported = readObject(answer.sourceAuthPath);

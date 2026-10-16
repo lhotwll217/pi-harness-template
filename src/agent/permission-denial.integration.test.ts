@@ -83,7 +83,6 @@ try {
   };
   const result = await run(request);
 
-  // A denied bash call tells the agent which rule denied it.
   assert.match(deniedResult, /^\[pi-permission-system\] Denied by policy: 'bash' \(rule 'rm \*'\)/);
   assert.equal(result.exitCode, 0);
   assert.match(result.stdout, /Denied by policy: 'bash' \(rule 'rm \*'\)/);

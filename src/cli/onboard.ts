@@ -44,7 +44,6 @@ type CreateModelRuntime = typeof ModelRuntime.create;
 export interface CliOnboardingDependencies extends OnboardingDependencies {
   interactiveIO?: InteractiveOnboardingIO;
   standalonePiAuthPath?: string;
-  /** Builds the Pi model runtime that interactive login and model discovery run against. */
   createModelRuntime?: CreateModelRuntime;
 }
 
@@ -255,7 +254,7 @@ async function scratchRuntime(
 
 // Pi labels each provider's browserless method: device code (OpenAI Codex, Radius) or
 // Anthropic's "Copy code login (headless)".
-const looksLikeDeviceCodeOption = (option: { id: string; label: string }): boolean =>
+const isBrowserlessOption = (option: { id: string; label: string }): boolean =>
   /device|headless/i.test(option.id) || /device|headless/i.test(option.label);
 
 async function loginCredential(
@@ -265,13 +264,11 @@ async function loginCredential(
   preferDeviceCode: boolean,
 ): Promise<Credential> {
   const select = async (prompt: Extract<AuthPrompt, { type: "select" }>): Promise<string> => {
-    // Headless / agent-operated login: skip the human choice and take the device-code
-    // method (no localhost browser callback) when the provider offers one.
     if (preferDeviceCode) {
-      const deviceOption = prompt.options.find(looksLikeDeviceCodeOption);
-      if (deviceOption) {
-        io.write(`${prompt.message}\n  → ${deviceOption.label} (--no-browser)\n`);
-        return deviceOption.id;
+      const browserlessOption = prompt.options.find(isBrowserlessOption);
+      if (browserlessOption) {
+        io.write(`${prompt.message}\n  → ${browserlessOption.label} (--no-browser)\n`);
+        return browserlessOption.id;
       }
     }
     io.write(`${prompt.message}\n`);
@@ -286,9 +283,6 @@ async function loginCredential(
     async prompt(prompt) {
       if (prompt.type === "select") return await select(prompt);
       if (prompt.type === "manual_code") {
-        // The provider races the browser callback against manual paste and aborts this
-        // prompt when the callback wins; resolve the pending readline question with an
-        // empty line then, so it does not swallow the next typed line.
         const onAbort = () => io.flushPendingQuestion?.();
         prompt.signal?.addEventListener("abort", onAbort, { once: true });
         try {

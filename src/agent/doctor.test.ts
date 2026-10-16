@@ -39,8 +39,6 @@ try {
   assert.match(output, /fake\/model/);
   assert.match(output, /sandbox.*verified/i);
 
-  // Without a verifier, doctor asks Pi's model runtime whether the stored credential
-  // authorizes the selected model.
   writeFileSync(paths.piAuth, JSON.stringify({ anthropic: { type: "api_key", key: secret } }));
   writeFileSync(paths.piSettings, JSON.stringify({ defaultProvider: "anthropic", defaultModel: "claude-sonnet-5" }));
   assert.equal((await runDoctor({ home })).checks.model.available, true);
