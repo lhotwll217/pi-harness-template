@@ -8,11 +8,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
-import {
-  AuthStorage,
-  ModelRegistry,
-  type AuthCredential,
-} from "@earendil-works/pi-coding-agent";
+import type { Credential } from "@earendil-works/pi-ai";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
   ONBOARDING_STAGES,
   ONBOARDING_VERSION,
@@ -41,7 +38,7 @@ type JsonObject = Record<string, unknown>;
 
 export interface OnboardingAnswers {
   auth?:
-    | { kind: "credential"; provider: string; credential: AuthCredential }
+    | { kind: "credential"; provider: string; credential: Credential }
     | {
         kind: "import";
         sourceAuthPath: string;
@@ -70,7 +67,7 @@ export interface OnboardingDependencies {
   now?: () => string;
   authVerifier?: (paths: HarnessPaths) => boolean;
   providerLogin?: (paths: HarnessPaths, provider: string) => Promise<void>;
-  modelVerifier?: (paths: HarnessPaths, selection: { provider: string; model: string }) => boolean;
+  modelVerifier?: (paths: HarnessPaths, selection: { provider: string; model: string }) => boolean | Promise<boolean>;
   sandbox?: SandboxAdapter;
   service?: DaemonServiceAdapter;
   readiness?: (home: string) => Promise<{ ok: boolean; reason: string }>;
@@ -149,11 +146,7 @@ function selectedModel(paths: HarnessPaths): { provider: string; model: string }
 }
 
 function defaultAuthVerifier(paths: HarnessPaths): boolean {
-  try {
-    return AuthStorage.create(paths.piAuth).list().length > 0;
-  } catch {
-    return false;
-  }
+  return Object.keys(readObject(paths.piAuth)).length > 0;
 }
 
 function sameJson(left: unknown, right: unknown): boolean {
@@ -179,11 +172,9 @@ export async function runOnboarding(
   const paths = harnessPaths(dependencies.home);
   const now = dependencies.now ?? (() => new Date().toISOString());
   const authVerifier = dependencies.authVerifier ?? defaultAuthVerifier;
-  const modelVerifier = dependencies.modelVerifier ?? ((ownedPaths, selection) => {
-    const auth = AuthStorage.create(ownedPaths.piAuth);
-    const registry = ModelRegistry.create(auth, ownedPaths.piModels);
-    const model = registry.find(selection.provider, selection.model);
-    return !!model && registry.hasConfiguredAuth(model);
+  const modelVerifier = dependencies.modelVerifier ?? (async (ownedPaths, selection) => {
+    const runtime = await ModelRuntime.create({ authPath: ownedPaths.piAuth, modelsPath: ownedPaths.piModels });
+    return (await runtime.getAvailable(selection.provider)).some(({ id }) => id === selection.model);
   });
   const sandbox = dependencies.sandbox ?? createSandboxAdapter();
   const service = dependencies.service ?? createLaunchdServiceAdapter({ platform: dependencies.platform });
@@ -215,7 +206,9 @@ export async function runOnboarding(
           const answer = answers.auth;
           if (answer?.kind === "credential") {
             if (!answer.provider.trim()) throw new Error("provider name is required");
-            AuthStorage.create(paths.piAuth).set(answer.provider, answer.credential);
+            // Pi no longer exports its file-backed credential store; auth.json keeps one
+            // credential per provider, so merge this entry and keep every other provider.
+            writeJsonAtomic(paths.piAuth, { ...readObject(paths.piAuth), [answer.provider]: answer.credential });
           } else if (answer?.kind === "import") {
             const imported = readObject(answer.sourceAuthPath);
             if (!Object.keys(imported).length) throw new Error("approved credential import contains no providers");
@@ -248,7 +241,7 @@ export async function runOnboarding(
             ...(enabledModels ? { enabledModels } : {}),
           });
           const selection = selectedModel(paths);
-          if (!selection || !modelVerifier(paths, selection)) throw new Error("selected model is unavailable or unauthorized");
+          if (!selection || !(await modelVerifier(paths, selection))) throw new Error("selected model is unavailable or unauthorized");
           break;
         }
         case "resources": {
