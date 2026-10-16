@@ -3,7 +3,8 @@ title: "Workspace"
 summary: "The boundary between bundled agent resources and the owner-authored workspace, and the philosophy for what belongs on each side"
 read_when:
   - Deciding whether a prompt, skill, or workflow belongs in the bundle or the workspace
-  - Authoring owner instructions, memory, or workspace skills
+  - Authoring owner instructions or workspace skills
+  - Vendoring a skill into the harness or debugging why a skill did not load
   - Designing the bundled identity prompt or adding a bundled resource
 ---
 
@@ -36,15 +37,36 @@ creates but never overwrites:
 
 - `workspace/AGENTS.md` — persistent owner instructions: who the agent should
   be for this owner, house rules, tone, priorities.
-- `workspace/MEMORY.md` — durable facts the owner wants carried across
-  sessions.
 - `workspace/skills/` — owner-defined Agent Skills for nuanced, multi-step
   workflows.
 - `workspace/artifacts/` — durable owner-visible outputs.
 
-Owners define skills, prompts, and memory here; the harness loads workspace
+Owners define instructions and skills here; the harness loads workspace
 content only after explicit approval during onboarding, per the
 [explicit resource loading](security.md#explicit-resource-loading) rule.
+`AGENTS.md` is the only workspace file loaded into the session context. Any
+other file, a `MEMORY.md` left by an older harness included, is an ordinary
+owner file the agent reads only when asked.
+
+## Skills
+
+Every session (interactive, `pi-template prompt`, and scheduled) loads two
+sets of skills:
+
+- **Vendored skills**, listed in the agent definition as `kind: "skill"`
+  entries and stored under `src/agent/skills/<name>/`. Each is a copy of an
+  upstream skill, with an `UPSTREAM.md` naming the source repository and the
+  commit it was copied from. The first is `writing-for-agents`, from
+  [lhotwll217/skills](https://github.com/lhotwll217/skills).
+- **Workspace skills**, each a folder with a `SKILL.md` (or a link to one) in
+  `workspace/skills/`. Onboarding's skill policy chooses which load:
+  `all-workspace` (the default) loads every one, `bundled` loads none, and
+  `allowlist` loads only the named folders. Non-interactive onboarding takes
+  `--workspace-skills all|bundled|allowlist` and a repeated `--skill <name>`.
+
+A vendored skill wins a name collision with a workspace skill. Pi skips a link
+in `workspace/skills/` whose target is gone without a diagnostic, so
+`pi-template doctor` lists each such link as broken and not loaded.
 
 ## The dividing question
 

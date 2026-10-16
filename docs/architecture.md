@@ -48,7 +48,7 @@ Code and mutable agent state have different owners:
 |---|---|
 | Install root | Executable code and bundled prompts, tools, skills, and extensions |
 | Harness home | Configuration, credentials, durable state, transcripts, logs, and daemon files |
-| Agent workspace | Persistent owner instructions, memory, artifacts, and workspace skills |
+| Agent workspace | Persistent owner instructions, artifacts, and workspace skills |
 | Task working directory | Files and commands targeted by one interactive or scheduled run |
 
 Entry points may create missing harness-owned files, but must not overwrite

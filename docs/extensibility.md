@@ -25,7 +25,7 @@ The template uses three extension seams:
 ## Pi resources
 
 Bundled resources live under the future agent owner and appear in one explicit,
-ordered agent definition — the standard bundle of system prompt, tools, and extensions. The definition is the source for loading, onboarding review,
+ordered agent definition — the standard bundle of system prompt, tools, skills, and extensions. The definition is the source for loading, onboarding review,
 diagnostics, and exact-set tests. Ambient project extensions, skills, and prompts
 are not loaded automatically.
 
