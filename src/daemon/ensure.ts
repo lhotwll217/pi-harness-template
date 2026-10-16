@@ -29,6 +29,8 @@ export interface LaunchdServiceOptions {
   execFile?: (file: string, args: string[]) => Promise<unknown>;
 }
 
+const execFileAsync = async (file: string, args: string[]): Promise<unknown> =>
+  await promisify(execFileCallback)(file, args);
 const LAUNCHCTL_NOT_LOADED_CODES = new Set<string | number>([3, 113]);
 
 const escapeXml = (value: string): string => value
@@ -71,7 +73,7 @@ export function createLaunchdServiceAdapter(options: LaunchdServiceOptions = {})
   const platform = options.platform ?? process.platform;
   const userHome = options.userHome ?? homedir();
   const plist = daemonLaunchAgentPath(userHome);
-  const execFile = options.execFile ?? (async (file, args) => await promisify(execFileCallback)(file, args));
+  const execFile = options.execFile ?? execFileAsync;
   let expectedPlist: string | undefined;
   return {
     async configure(choice, configuration) {
@@ -109,17 +111,42 @@ export function createLaunchdServiceAdapter(options: LaunchdServiceOptions = {})
   };
 }
 
+/** True when this user's LaunchAgent is installed for this harness home. */
+export function launchdManagesHome(home: string, userHome = homedir()): boolean {
+  try {
+    return readFileSync(daemonLaunchAgentPath(userHome), "utf8").includes(launchAgentHomeEntry(home));
+  } catch {
+    return false;
+  }
+}
+
+/** Start or restart the installed LaunchAgent's daemon, loading the job first when launchd has not. */
+export async function kickstartDaemonService(options: Omit<LaunchdServiceOptions, "platform"> = {}): Promise<void> {
+  const uid = process.getuid?.();
+  if (uid === undefined) throw new Error("the installed daemon LaunchAgent requires a Unix user id");
+  const execFile = options.execFile ?? execFileAsync;
+  const domain = `gui/${uid}`;
+  const target = `${domain}/${DAEMON_LAUNCHD_LABEL}`;
+  await execFile("launchctl", ["enable", target]);
+  try {
+    await execFile("launchctl", ["kickstart", "-k", target]);
+  } catch (error) {
+    const code = (error as { code?: string | number }).code;
+    if (code === undefined || !LAUNCHCTL_NOT_LOADED_CODES.has(code)) throw error;
+    await execFile("launchctl", ["bootstrap", domain, daemonLaunchAgentPath(options.userHome ?? homedir())]);
+    await execFile("launchctl", ["kickstart", "-k", target]);
+  }
+}
+
 export async function launchdOwnership(
   pid: number,
   home: string,
   options: Omit<LaunchdServiceOptions, "platform"> = {},
 ): Promise<LaunchdOwnership> {
-  let plist: string;
-  try { plist = readFileSync(daemonLaunchAgentPath(options.userHome ?? homedir()), "utf8"); } catch { return LaunchdOwnership.NotOwned; }
-  if (!plist.includes(launchAgentHomeEntry(home))) return LaunchdOwnership.NotOwned;
+  if (!launchdManagesHome(home, options.userHome)) return LaunchdOwnership.NotOwned;
   const uid = process.getuid?.();
   if (uid === undefined) return LaunchdOwnership.Unknown;
-  const execFile = options.execFile ?? (async (file, args) => await promisify(execFileCallback)(file, args));
+  const execFile = options.execFile ?? execFileAsync;
   try {
     const result = await execFile("launchctl", ["print", `gui/${uid}/${DAEMON_LAUNCHD_LABEL}`]) as { stdout?: unknown };
     const reported = /^\s*pid\s*=\s*(\d+)\s*$/m.exec(String(result?.stdout ?? ""))?.[1];

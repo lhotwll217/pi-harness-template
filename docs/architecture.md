@@ -114,12 +114,27 @@ command instead of starting a second daemon. The diagnostic gives
 `launchctl kickstart -k` when `launchctl print` reports that the LaunchAgent for
 this harness home runs that pid, and `kill <pid>` otherwise. It never prints the
 bearer token. A closing daemon removes `daemon.json` only while the record still
-names it, so a replacement's record survives. This adopts Owner Operator's
-recovery rules
+names it, so a replacement's record survives.
+
+When the CLI starts a daemon and the installed LaunchAgent names this harness
+home, launchd starts it: `launchctl enable` and `launchctl kickstart -k` on
+`gui/<uid>/com.pi-template.daemon`, and when launchd reports the job not loaded
+(exit 3 or 113), `launchctl bootstrap` of the plist and a second kickstart. Any
+other `launchctl` failure fails the command rather than starting a detached
+daemon that would hold the port the LaunchAgent's `KeepAlive` restarts need.
+Without that LaunchAgent the CLI starts a detached `pi-template daemon` from its
+own checkout. A reachable daemon is never restarted, whichever checkout it runs
+from.
+
+This adopts Owner Operator's recovery rules
 ([`039359a`](https://github.com/lhotwll217/owner-operator/commit/039359a),
 [`643f99d`](https://github.com/lhotwll217/owner-operator/commit/643f99d),
 [`b548896`](https://github.com/lhotwll217/owner-operator/commit/b548896),
-[`7e1aa60`](https://github.com/lhotwll217/owner-operator/commit/7e1aa60)).
+[`7e1aa60`](https://github.com/lhotwll217/owner-operator/commit/7e1aa60)) and its
+launchd start sequence (`startDaemonProcess` in `src/daemon/ensure.ts` at
+[`21d5d29`](https://github.com/lhotwll217/owner-operator/blob/21d5d29/src/daemon/ensure.ts)).
+Owner Operator decides launchd ownership by comparing the home with its default
+path; this harness's plist records its home, so the check reads that entry.
 
 ## Trust boundary
 

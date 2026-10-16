@@ -3,12 +3,18 @@
 // become discoverable, and proceeds. `pi-template daemon` remains only the explicit
 // foreground mode for debugging and service managers.
 import { spawn } from "node:child_process";
-import { mkdirSync, openSync } from "node:fs";
+import { closeSync, mkdirSync, openSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DAEMON_PROBE_TIMEOUT_MS, harnessPaths } from "@pi-template/contracts";
-import { DAEMON_LAUNCHD_LABEL, LaunchdOwnership, launchdOwnership } from "../daemon/ensure";
+import {
+  DAEMON_LAUNCHD_LABEL,
+  LaunchdOwnership,
+  kickstartDaemonService,
+  launchdManagesHome,
+  launchdOwnership,
+} from "../daemon/ensure";
 import { connectGateway, probeGateway, type GatewayClient, type GatewayProbe } from "../gateway/client";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -90,16 +96,22 @@ export async function ensureDaemon(): Promise<GatewayClient> {
   if (probe.kind === "unreachable" && !await discoveryIsStale(probe)) throw await unreachableDaemonError(probe);
 
   const paths = harnessPaths();
-  mkdirSync(paths.logsDir, { recursive: true });
   const logPath = join(paths.logsDir, "daemon.log");
-  const log = openSync(logPath, "a");
-  const child = spawn(join(repositoryRoot, "pi-template"), ["daemon"], {
-    cwd: repositoryRoot,
-    detached: true,
-    stdio: ["ignore", log, log],
-    env: process.env,
-  });
-  child.unref();
+  if (launchdManagesHome(paths.home)) {
+    // A detached daemon would take the port, and KeepAlive would restart the LaunchAgent's daemon into it forever.
+    await kickstartDaemonService();
+  } else {
+    mkdirSync(paths.logsDir, { recursive: true });
+    const log = openSync(logPath, "a");
+    const child = spawn(join(repositoryRoot, "pi-template"), ["daemon"], {
+      cwd: repositoryRoot,
+      detached: true,
+      stdio: ["ignore", log, log],
+      env: process.env,
+    });
+    closeSync(log);
+    child.unref();
+  }
 
   const deadline = Date.now() + READY_DEADLINE_MS;
   for (;;) {
