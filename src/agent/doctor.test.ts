@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   ONBOARDING_VERSION,
   ensureHarnessWorkspace,
   reconcilePermissionSettings,
   saveHarnessSettings,
 } from "@pi-template/contracts";
+import { AGENT_DEFINITION, definitionIds } from "./agent-definition";
 import { formatDoctorReport, runDoctor } from "./doctor";
 
 const home = mkdtempSync(join(tmpdir(), "pi-template-doctor-"));
@@ -28,6 +31,7 @@ try {
   saveHarnessSettings(home, { alwaysOn: "declined", permissionMode: "ask" });
   reconcilePermissionSettings(home);
   writeFileSync(paths.onboardingProgress, JSON.stringify({ version: ONBOARDING_VERSION, stages: { resources: "2026-10-16T12:00:00.000Z" } }));
+  writeFileSync(paths.resourceApprovals, JSON.stringify({ acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION), workspaceContext: false }));
 
   const report = await runDoctor({
     home,
@@ -63,15 +67,95 @@ try {
   skill(join(home, "linked-source"), "linked");
   symlinkSync(join(home, "linked-source"), join(paths.workspaceSkills, "linked"));
   symlinkSync(join(home, "moved-skill"), join(paths.workspaceSkills, "stale"));
+  symlinkSync(join(home, "linked-source"), join(paths.workspaceSkills, "relinked"));
+  skill(join(paths.workspaceSkills, "writing-for-agents"), "writing-for-agents");
   const skills = await runDoctor({ home, providerModelVerifier: () => true });
+  const vendoredSkill = fileURLToPath(new URL("./skills/writing-for-agents/SKILL.md", import.meta.url));
+  assert.deepEqual(skills.checks.resources.skillPolicy, { mode: "all-workspace", allowlist: [] });
   assert.deepEqual(skills.checks.resources.workspaceSkills, ["dropped", "linked"]);
   assert.deepEqual(skills.checks.resources.brokenSkillLinksNotLoaded, [{ name: "stale", target: join(home, "moved-skill") }]);
+  assert.deepEqual(skills.checks.resources.skippedSkillLinks, [
+    { name: "relinked", target: join(home, "linked-source"), reason: "repeats linked" },
+  ]);
+  assert.deepEqual(skills.checks.resources.skillNameCollisionsNotLoaded, [{
+    name: "writing-for-agents",
+    path: join(paths.workspaceSkills, "writing-for-agents", "SKILL.md"),
+    winner: vendoredSkill,
+  }]);
   assert.ok(formatDoctorReport(skills).includes(
-    `Workspace skills: dropped, linked\n  broken link, not loaded: stale -> ${join(home, "moved-skill")}\n`,
+    "Workspace skills (all-workspace): dropped, linked\n" +
+    `  broken link, not loaded: stale -> ${join(home, "moved-skill")}\n` +
+    `  skipped link, not loaded: relinked -> ${join(home, "linked-source")} (repeats linked)\n` +
+    `  name collision, not loaded: ${join(paths.workspaceSkills, "writing-for-agents", "SKILL.md")} (${vendoredSkill} wins)\n`,
   ));
+  assert.deepEqual(skills.checks.resources.notices, []);
   assert.equal(skills.ok, true);
+
+  symlinkSync(".", join(paths.workspaceSkills, "a"));
+  symlinkSync(".", join(paths.workspaceSkills, "b"));
+  const loopProbe = `
+    const { runDoctor, createAgentResources } = await import(${JSON.stringify(fileURLToPath(new URL("./index.ts", import.meta.url)))});
+    const doctor = await runDoctor({ home: process.env.LOOP_HOME, providerModelVerifier: () => true });
+    const session = await createAgentResources({
+      home: process.env.LOOP_HOME,
+      cwd: process.env.LOOP_HOME,
+      query: { listTables: () => [], describeTable: () => ({ description: "", columns: [] }), runQuery: () => ({ rows: [], truncated: false }) },
+      notes: { createNote: () => ({ id: "n", body: "", createdAt: "", updatedAt: "" }) },
+    });
+    process.stdout.write(JSON.stringify({
+      skipped: doctor.checks.resources.skippedSkillLinks,
+      sessionSkills: session.loader.getSkills().skills.map(({ name }) => name),
+    }));
+  `;
+  const looped = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", loopProbe], {
+    env: { ...process.env, LOOP_HOME: home },
+    encoding: "utf8",
+    timeout: 30_000,
+    killSignal: "SIGKILL",
+  });
+  assert.equal(looped.signal, null, "doctor and a session finish within 30 s with two loop links in workspace/skills");
+  assert.equal(looped.status, 0, looped.stderr);
+  assert.deepEqual(JSON.parse(looped.stdout), {
+    skipped: [
+      { name: "a", target: ".", reason: "loops back to workspace/skills" },
+      { name: "b", target: ".", reason: "loops back to workspace/skills" },
+      { name: "relinked", target: join(home, "linked-source"), reason: "repeats linked" },
+    ],
+    sessionSkills: ["writing-for-agents", "dropped", "linked"],
+  });
+  unlinkSync(join(paths.workspaceSkills, "a"));
+  unlinkSync(join(paths.workspaceSkills, "b"));
+
+  writeFileSync(join(paths.workspace, "MEMORY.md"), "# Memory\n");
   saveHarnessSettings(home, { skillPolicy: { mode: "bundled", allowlist: [] } });
-  assert.deepEqual((await runDoctor({ home, providerModelVerifier: () => true })).checks.resources.workspaceSkills, []);
+  const bundledOnly = await runDoctor({ home, providerModelVerifier: () => true });
+  assert.deepEqual(bundledOnly.checks.resources.workspaceSkills, []);
+  assert.deepEqual(bundledOnly.checks.resources.notices, [
+    `${join(paths.workspace, "MEMORY.md")} is no longer loaded; ${paths.workspaceInstructions} is the instructions file`,
+    "skill policy is bundled, so no workspace skill loads; load them with " +
+      "`pi-template onboard --non-interactive --acknowledge-resources --workspace-skills all`",
+  ]);
+  assert.match(formatDoctorReport(bundledOnly), /^Workspace skills \(bundled\): none$/m);
+  assert.ok(formatDoctorReport(bundledOnly).includes(`Notice: ${join(paths.workspace, "MEMORY.md")} is no longer loaded`));
+  assert.equal(bundledOnly.ok, true);
+  saveHarnessSettings(home, { skillPolicy: { mode: "allowlist", allowlist: ["dropped"] } });
+  assert.match(formatDoctorReport(await runDoctor({ home, providerModelVerifier: () => true })),
+    /^Workspace skills \(allowlist: dropped\): dropped$/m);
+  unlinkSync(join(paths.workspace, "MEMORY.md"));
+
+  writeFileSync(paths.resourceApprovals, JSON.stringify({
+    acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION).filter((id) => id !== "skill:writing-for-agents"),
+    workspaceContext: false,
+  }));
+  const upgraded = await runDoctor({ home, providerModelVerifier: () => true });
+  assert.equal(upgraded.ok, false);
+  assert.equal(upgraded.checks.resources.reviewed, false);
+  assert.deepEqual(upgraded.checks.resources.unacknowledged, ["skill:writing-for-agents"]);
+  assert.deepEqual(upgraded.checks.resources.notices, [
+    "the agent definition gained entries the resource review did not acknowledge: skill:writing-for-agents; " +
+      "review them with `pi-template onboard`, or accept them with `pi-template onboard --non-interactive --acknowledge-resources`",
+  ]);
+  writeFileSync(paths.resourceApprovals, JSON.stringify({ acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION), workspaceContext: false }));
 
   writeFileSync(join(home, "sandbox.json"), JSON.stringify({ ...policy, enabled: false }));
   const off = await runDoctor({ home, providerModelVerifier: () => true });
@@ -128,7 +212,7 @@ try {
   writeFileSync(paths.piSettings, JSON.stringify({ defaultProvider: "anthropic", defaultModel: "no-such-model" }));
   assert.equal((await runDoctor({ home })).checks.model.available, false);
 
-  process.stdout.write("ok — doctor reports readiness shape without secret material and names the sandbox state and broken skill links\n");
+  process.stdout.write("ok — doctor reports readiness shape without secret material and names the sandbox state, skipped workspace skills, notices, and unacknowledged entries\n");
 } finally {
   rmSync(home, { recursive: true, force: true });
 }

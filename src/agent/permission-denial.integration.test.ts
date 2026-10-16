@@ -12,6 +12,7 @@ import {
   type ScheduledPromptRunRequest,
 } from "@pi-template/contracts";
 import { seedFauxProviderHome } from "../../test/helpers/faux-provider";
+import { acknowledgeAgentDefinition } from "../../test/helpers/onboarding";
 import { createScheduledPromptRunner } from "./prompt-runner";
 
 const root = mkdtempSync(join(tmpdir(), "pi-template-permission-denial-"));
@@ -22,6 +23,7 @@ const faux = registerFauxProvider();
 try {
   const paths = ensureHarnessWorkspace(home);
   seedFauxProviderHome(paths, faux.getModel());
+  acknowledgeAgentDefinition(paths);
   writeFileSync(join(home, "sandbox.json"), JSON.stringify({
     filesystem: { allowedReadRoots: [cwd], allowedWriteRoots: [cwd], deniedReadRoots: [] },
     process: { allowSubprocesses: true },

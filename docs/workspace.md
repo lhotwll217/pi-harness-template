@@ -62,12 +62,24 @@ sets of skills:
   `workspace/skills/`. Onboarding's skill policy chooses which load:
   `all-workspace` (the default) loads every one, `bundled` loads none, and
   `allowlist` loads only the named folders. Non-interactive onboarding takes
-  `--workspace-skills all|bundled|allowlist` and a repeated `--skill <name>`.
+  `--workspace-skills all|bundled|allowlist` and a repeated `--skill <name>`;
+  `--skill` alone means `allowlist`.
 
-A vendored skill wins a name collision with a workspace skill. Pi skips a link
-in `workspace/skills/` whose target is gone without a diagnostic, so
-`pi-template doctor` lists each such link, with its target, under
-`resources.brokenSkillLinksNotLoaded`.
+The harness hands Pi each entry of `workspace/skills/` separately, and leaves
+out what Pi cannot load or would load twice. `pi-template doctor` prints the
+skill policy beside the loaded workspace skills and lists each entry left out:
+
+- `resources.brokenSkillLinksNotLoaded`: a link whose target is gone. Pi skips
+  it without a diagnostic.
+- `resources.skippedSkillLinks`: a link back to `workspace/skills/` or a folder
+  above it, or a second link to a folder already loaded. Pi follows linked
+  folders without a cycle check, so a looping link would stall every session.
+- `resources.skillNameCollisionsNotLoaded`: a skill whose name another skill
+  already took. A vendored skill wins a name collision with a workspace skill.
+
+Doctor also notes, under `resources.notices`, a `workspace/MEMORY.md` that no
+longer loads and a `bundled` policy that keeps every workspace skill out, with
+the command that changes it.
 
 ## The dividing question
 

@@ -79,6 +79,15 @@ contract—such as new bundled capabilities or materially different protected-pa
 rules—must reopen the relevant review instead of silently grandfathering the old
 marker.
 
+New bundled capabilities follow this rule through the recorded resource review.
+`resource-approvals.json` lists the agent-definition entries the owner
+acknowledged. When the agent definition gains an entry that list lacks, every
+session (interactive, `pi-template prompt`, and scheduled) refuses to start,
+`pi-template doctor` reports not ready and lists the entries under
+`resources.unacknowledged`, and a rerun of onboarding without
+`--acknowledge-resources` stops. Each names the new entries and the command that
+acknowledges them.
+
 ## Agent-operated onboarding
 
 The north star is minimizing friction for the human to start interacting. One

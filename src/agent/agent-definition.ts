@@ -130,6 +130,14 @@ export const AGENT_DEFINITION: readonly AgentDefinitionEntry[] = Object.freeze([
 export const definitionIds = (definition: readonly AgentDefinitionEntry[]): string[] =>
   definition.map(({ id }) => id);
 
+/** Entries of the current agent definition missing from a recorded resource review. */
+export const unacknowledgedDefinitionIds = (acknowledged: readonly string[]): string[] =>
+  definitionIds(AGENT_DEFINITION).filter((id) => !acknowledged.includes(id));
+
+export const unacknowledgedDefinitionMessage = (ids: readonly string[]): string =>
+  `the agent definition gained entries the resource review did not acknowledge: ${ids.join(", ")}; ` +
+  "review them with `pi-template onboard`, or accept them with `pi-template onboard --non-interactive --acknowledge-resources`";
+
 export interface AgentDefinitionSummary {
   id: string;
   kind: AgentDefinitionEntry["kind"];

@@ -11,6 +11,7 @@ import {
   saveHarnessSettings,
 } from "@pi-template/contracts";
 import { AGENT_DEFINITION, definitionIds, piTemplateIdentityPrompt } from "../agent";
+import { acknowledgeAgentDefinition } from "../../test/helpers/onboarding";
 import {
   assertInteractiveTerminal,
   createInteractiveSessionRuntime,
@@ -57,7 +58,7 @@ try {
   const staleMemory = "# Memory\n\nThe Gateway is the only CLI transport.\n";
   writeFileSync(paths.workspaceInstructions, instructions);
   writeFileSync(join(paths.workspace, "MEMORY.md"), staleMemory);
-  writeFileSync(join(home, "resource-approvals.json"), JSON.stringify({ workspaceContext: true }));
+  acknowledgeAgentDefinition(paths, true);
   writeFileSync(paths.protectedPaths, JSON.stringify({ paths: [protectedRoot], repos: [] }));
   writeFileSync(join(home, "sandbox.json"), JSON.stringify({
     filesystem: {

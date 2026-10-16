@@ -14,6 +14,7 @@ import {
   type ScheduledPromptRunRequest,
 } from "@pi-template/contracts";
 import { seedFauxProviderHome } from "../../test/helpers/faux-provider";
+import { acknowledgeAgentDefinition } from "../../test/helpers/onboarding";
 import { createScheduledPromptRunner } from "./prompt-runner";
 import { SANDBOXED_COMMAND_TERMINATION_GRACE_MS, createSandboxAdapter } from "./sandbox";
 
@@ -45,6 +46,7 @@ function prepareHome(name: string, sandboxEnabled: boolean): { home: string; cwd
   const cwd = join(root, name, "task");
   const paths = ensureHarnessWorkspace(home);
   seedFauxProviderHome(paths, faux.getModel());
+  acknowledgeAgentDefinition(paths);
   writeFileSync(join(home, "sandbox.json"), JSON.stringify({
     ...policy, enabled: sandboxEnabled, filesystem: { allowedReadRoots: [cwd], allowedWriteRoots: [cwd], deniedReadRoots: [] },
   }));

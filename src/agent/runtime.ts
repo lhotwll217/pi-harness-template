@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, readdirSync, readlinkSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   createBashToolDefinition,
   createLocalBashOperations,
@@ -28,6 +28,8 @@ import {
   AGENT_DEFINITION,
   definitionIds,
   piTemplateIdentityPrompt,
+  unacknowledgedDefinitionIds,
+  unacknowledgedDefinitionMessage,
   type AgentToolDependencies,
 } from "./agent-definition";
 import {
@@ -61,25 +63,57 @@ export interface HarnessSessionServices {
   approvedWorkspaceSkillPaths: string[];
 }
 
-function safeWorkspaceSkillPaths(home: string): string[] {
-  const paths = ensureHarnessWorkspace(home);
-  const policy = loadHarnessSettings(home).skillPolicy;
-  if (policy.mode === "bundled") return [];
-  if (policy.mode === "all-workspace") return [paths.workspaceSkills];
-  const root = resolve(paths.workspaceSkills);
-  return policy.allowlist
-    .filter((name) => /^[A-Za-z0-9._-]+$/.test(name))
-    .map((name) => resolve(root, name))
-    .filter((path) => path.startsWith(root + sep) && existsSync(path));
+export interface SkippedSkillLink {
+  name: string;
+  target: string;
+  reason: string;
 }
 
-function workspaceContextApproved(home: string): boolean {
+/** Workspace skill entries under the home's skill policy. Pi follows linked directories without a
+ * cycle check, so a link back to workspace/skills or above, or a second link to one folder, is skipped. */
+function workspaceSkillEntries(home: string): { paths: string[]; skipped: SkippedSkillLink[] } {
+  const paths = ensureHarnessWorkspace(home);
+  const policy = loadHarnessSettings(home).skillPolicy;
+  if (policy.mode === "bundled") return { paths: [], skipped: [] };
+  const root = resolve(paths.workspaceSkills);
+  const names = policy.mode === "all-workspace"
+    ? readdirSync(root).filter((name) => !name.startsWith(".") && name !== "node_modules").sort()
+    : policy.allowlist.filter((name) => /^[A-Za-z0-9._-]+$/.test(name));
+  const candidates = names
+    .map((name) => ({ name, path: resolve(root, name) }))
+    .filter(({ path }) => path.startsWith(root + sep) && existsSync(path))
+    .map((entry) => ({ ...entry, link: lstatSync(entry.path).isSymbolicLink(), real: realpathSync(entry.path) }));
+  const realRoot = realpathSync(root);
+  const seen = new Map<string, string>();
+  const selected: string[] = [];
+  const skipped: SkippedSkillLink[] = [];
+  for (const entry of [...candidates.filter(({ link }) => !link), ...candidates.filter(({ link }) => link)]) {
+    const fromEntryToRoot = relative(entry.real, realRoot);
+    if (fromEntryToRoot !== ".." && !fromEntryToRoot.startsWith(`..${sep}`) && !isAbsolute(fromEntryToRoot)) {
+      skipped.push({ name: entry.name, target: readlinkSync(entry.path), reason: "loops back to workspace/skills" });
+    } else if (seen.has(entry.real)) {
+      skipped.push({ name: entry.name, target: readlinkSync(entry.path), reason: `repeats ${seen.get(entry.real)}` });
+    } else {
+      seen.set(entry.real, entry.name);
+      selected.push(entry.path);
+    }
+  }
+  return { paths: selected, skipped: skipped.sort((left, right) => left.name.localeCompare(right.name)) };
+}
+
+function recordedApprovals(home: string): { acknowledgedDefinitionIds?: unknown; workspaceContext?: unknown } {
   try {
     const value = JSON.parse(readFileSync(harnessPaths(home).resourceApprovals, "utf8"));
-    return value?.workspaceContext === true;
+    return value && typeof value === "object" ? value : {};
   } catch {
-    return false;
+    return {};
   }
+}
+
+/** Entries of the current agent definition the home's recorded resource review does not cover. */
+export function unacknowledgedResources(home?: string): string[] {
+  const { acknowledgedDefinitionIds } = recordedApprovals(harnessPaths(home).home);
+  return unacknowledgedDefinitionIds(Array.isArray(acknowledgedDefinitionIds) ? acknowledgedDefinitionIds : []);
 }
 
 /** Why no session may start over this home's protected_paths.json, with the recovery; undefined when none. */
@@ -96,6 +130,8 @@ function assertSessionCanStart(home: string): void {
   const policy = readSandboxPolicy(home);
   const writeRootProblem = policy && homeInWriteRootsProblem(home, policy);
   if (writeRootProblem) throw new Error(writeRootProblem);
+  const unacknowledged = unacknowledgedResources(home);
+  if (unacknowledged.length) throw new Error(unacknowledgedDefinitionMessage(unacknowledged));
 }
 
 /** Build Pi's cwd-bound services with every ambient resource source disabled. */
@@ -107,13 +143,13 @@ export async function createHarnessSessionServices(
   process.env.PI_CODING_AGENT_DIR = paths.piAgentDir;
   reconcilePermissionSettings(paths.home);
   const settingsManager = SettingsManager.create(paths.workspace, paths.piAgentDir, { projectTrusted: false });
-  const approvedWorkspaceSkillPaths = safeWorkspaceSkillPaths(paths.home);
+  const approvedWorkspaceSkillPaths = workspaceSkillEntries(paths.home).paths;
   const extensions = AGENT_DEFINITION.filter((entry) => entry.kind === "extension").map((entry) => entry.path());
   const skills = AGENT_DEFINITION.filter((entry) => entry.kind === "skill").map((entry) => entry.path);
   const tools = AGENT_DEFINITION
     .filter((entry) => entry.kind === "tool")
     .map((entry) => entry.create(options)) as ToolDefinition[];
-  const approvedContext = workspaceContextApproved(paths.home) && existsSync(paths.workspaceInstructions)
+  const approvedContext = recordedApprovals(paths.home).workspaceContext === true && existsSync(paths.workspaceInstructions)
     ? [{ path: paths.workspaceInstructions, content: readFileSync(paths.workspaceInstructions, "utf8") }]
     : [];
 
@@ -264,25 +300,35 @@ export async function createHarnessSession(options: HarnessSessionOptions) {
   };
 }
 
-/** Names of the workspace skills a session loads under the home's skill policy; a bundled skill wins a name collision. */
-export function configuredWorkspaceSkillNames(home?: string): string[] {
+export interface WorkspaceSkillReport {
+  loaded: string[];
+  brokenLinks: Array<{ name: string; target: string }>;
+  skippedLinks: SkippedSkillLink[];
+  collisions: Array<{ name: string; path: string; winner: string }>;
+}
+
+/** What a session loads from workspace/skills under the home's skill policy, and what it leaves out. */
+export function inspectWorkspaceSkills(home?: string): WorkspaceSkillReport {
   const paths = ensureHarnessWorkspace(home);
+  const entries = workspaceSkillEntries(paths.home);
   const bundled = AGENT_DEFINITION.filter((entry) => entry.kind === "skill");
-  const { skills } = loadSkills({
+  const { skills, diagnostics } = loadSkills({
     cwd: paths.workspace,
     agentDir: paths.piAgentDir,
-    skillPaths: [...bundled.map(({ path }) => path), ...safeWorkspaceSkillPaths(paths.home)],
+    skillPaths: [...bundled.map(({ path }) => path), ...entries.paths],
     includeDefaults: false,
   });
   const bundledNames = new Set(bundled.map(({ name }) => name));
-  return skills.map(({ name }) => name).filter((name) => !bundledNames.has(name)).sort();
-}
-
-/** Links in workspace/skills whose target is gone; Pi skips them without a diagnostic. */
-export function brokenWorkspaceSkillLinks(home?: string): Array<{ name: string; target: string }> {
-  const paths = ensureHarnessWorkspace(home);
-  return readdirSync(paths.workspaceSkills, { withFileTypes: true })
-    .filter((entry) => entry.isSymbolicLink() && !existsSync(join(paths.workspaceSkills, entry.name)))
-    .map(({ name }) => ({ name, target: readlinkSync(join(paths.workspaceSkills, name)) }))
-    .sort((left, right) => left.name.localeCompare(right.name));
+  return {
+    loaded: skills.map(({ name }) => name).filter((name) => !bundledNames.has(name)).sort(),
+    // Pi skips a link whose target is gone without a diagnostic.
+    brokenLinks: readdirSync(paths.workspaceSkills, { withFileTypes: true })
+      .filter((entry) => entry.isSymbolicLink() && !existsSync(join(paths.workspaceSkills, entry.name)))
+      .map(({ name }) => ({ name, target: readlinkSync(join(paths.workspaceSkills, name)) }))
+      .sort((left, right) => left.name.localeCompare(right.name)),
+    skippedLinks: entries.skipped,
+    collisions: diagnostics.flatMap(({ collision }) => collision
+      ? [{ name: collision.name, path: collision.loserPath, winner: collision.winnerPath }]
+      : []),
+  };
 }

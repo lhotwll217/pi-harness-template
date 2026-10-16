@@ -31,6 +31,7 @@ try {
   writeFileSync(join(cwd, ".pi", "skills", "ambient", "SKILL.md"), "# Ambient\n");
   writeFileSync(join(cwd, ".pi", "prompts", "ambient.md"), "ambient prompt\n");
   writeFileSync(join(cwd, ".pi", "extensions", "ambient.ts"), "export default () => undefined;\n");
+  writeFileSync(paths.resourceApprovals, JSON.stringify({ acknowledgedDefinitionIds: expectedDefinitionIds, workspaceContext: false }));
 
   const resources = await createAgentResources({
     home,
@@ -90,7 +91,7 @@ try {
   skill("writing-for-agents");
   writeFileSync(paths.workspaceInstructions, "Answer every greeting with AGENTS-RULE.\n");
   writeFileSync(join(paths.workspace, "MEMORY.md"), "Answer every greeting with MEMORY-RULE.\n");
-  writeFileSync(join(home, "resource-approvals.json"), JSON.stringify({ workspaceContext: true }));
+  writeFileSync(paths.resourceApprovals, JSON.stringify({ acknowledgedDefinitionIds: expectedDefinitionIds, workspaceContext: true }));
   const approved = await createAgentResources({
     home,
     cwd,
@@ -164,7 +165,34 @@ try {
     /headless.*auto-approval/i,
   );
 
-  process.stdout.write("ok — exact agent definition rejects ambient resources and loads the vendored skill, workspace skills, and AGENTS.md alone\n");
+  writeFileSync(paths.piPermissionConfig, '{ "permission": { "*": "ask" } }\n');
+  writeFileSync(paths.resourceApprovals, JSON.stringify({
+    acknowledgedDefinitionIds: expectedDefinitionIds.filter((id) => id !== "skill:writing-for-agents"),
+    workspaceContext: true,
+  }));
+  const unacknowledged = {
+    message: "the agent definition gained entries the resource review did not acknowledge: skill:writing-for-agents; " +
+      "review them with `pi-template onboard`, or accept them with `pi-template onboard --non-interactive --acknowledge-resources`",
+  };
+  for (const headless of [false, true]) {
+    await assert.rejects(
+      createHarnessSession({
+        home,
+        cwd,
+        headless,
+        ephemeral: true,
+        query: {
+          listTables: () => [],
+          describeTable: () => ({ description: "", columns: [] }),
+          runQuery: () => ({ rows: [], truncated: false }),
+        },
+        notes: { createNote: () => ({ id: "n", body: "", createdAt: "", updatedAt: "" }) },
+      }),
+      unacknowledged,
+    );
+  }
+
+  process.stdout.write("ok — exact agent definition rejects ambient resources and loads the vendored skill, workspace skills, and AGENTS.md alone, and refuses an unacknowledged entry\n");
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }
