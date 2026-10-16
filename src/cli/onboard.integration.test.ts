@@ -133,6 +133,24 @@ try {
   assert.equal(readFileSync(standaloneSettings, "utf8"), settingsBytes);
   assert.equal(readFileSync(standaloneModels, "utf8"), modelsBytes);
 
+  {
+    const bomDir = join(root, "standalone-pi-bom");
+    mkdirSync(bomDir, { recursive: true });
+    writeFileSync(join(bomDir, "auth.json"), `\uFEFF${authBytes}`);
+    writeFileSync(join(bomDir, "settings.json"), settingsBytes);
+    writeFileSync(join(bomDir, "models.json"), modelsBytes);
+    const bomHome = join(root, "imported-bom-home");
+    const bomDependencies = passingOnboardingDependencies(bomHome);
+    delete bomDependencies.authVerifier;
+    const bomResult = await onboard([], {
+      ...bomDependencies,
+      interactiveIO: scriptedInteraction(["", "", ""]).io,
+      standalonePiAuthPath: join(bomDir, "auth.json"),
+    });
+    assert.equal(bomResult.complete, true);
+    assert.deepEqual(JSON.parse(readFileSync(harnessPaths(bomHome).piAuth, "utf8")), JSON.parse(authBytes));
+  }
+
   const deterministicLogin = anthropicLoginRuntime({
     name: "Deterministic OAuth",
     async login() {

@@ -96,6 +96,27 @@ function readObject(path: string): JsonObject {
   }
 }
 
+function readAuthFile(path: string): JsonObject {
+  if (!existsSync(path)) return {};
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(path, "utf8").replace(/^\uFEFF/, ""));
+  } catch (error) {
+    throw new Error(`${path} could not be parsed; fix or remove it: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${path} must hold a JSON object of provider credentials; fix or remove it`);
+  }
+  return value as JsonObject;
+}
+
+/** Pi 1.0.3 renamed provider azure-openai-responses to azure without migrating auth.json (earendil-works/pi#9714). */
+export function readStandaloneCredentials(path: string): JsonObject {
+  const credentials = readAuthFile(path);
+  const { "azure-openai-responses": legacyAzure, ...rest } = credentials;
+  return legacyAzure === undefined || "azure" in rest ? credentials : { ...rest, azure: legacyAzure };
+}
+
 function writeJsonAtomic(path: string, value: unknown, mode = 0o600): void {
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
@@ -207,11 +228,11 @@ export async function runOnboarding(
           if (answer?.kind === "credential") {
             if (!answer.provider.trim()) throw new Error("provider name is required");
             // Pi does not export its file-backed credential store; merge so every other provider stays.
-            writeJsonAtomic(paths.piAuth, { ...readObject(paths.piAuth), [answer.provider]: answer.credential });
+            writeJsonAtomic(paths.piAuth, { ...readAuthFile(paths.piAuth), [answer.provider]: answer.credential });
           } else if (answer?.kind === "import") {
-            const imported = readObject(answer.sourceAuthPath);
+            const imported = readStandaloneCredentials(answer.sourceAuthPath);
             if (!Object.keys(imported).length) throw new Error("approved credential import contains no providers");
-            copyFileAtomic(answer.sourceAuthPath, paths.piAuth);
+            writeJsonAtomic(paths.piAuth, imported);
             if (answer.sourceSettingsPath && existsSync(answer.sourceSettingsPath)) {
               importModelSettings(answer.sourceSettingsPath, paths.piSettings);
             }

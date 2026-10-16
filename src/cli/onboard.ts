@@ -8,12 +8,13 @@ import {
   type AuthPrompt,
   type Credential,
 } from "@earendil-works/pi-ai";
-import { getAgentDir, ModelRuntime, readStoredCredential } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { harnessPaths, isPermissionMode, type PermissionMode, type SkillPolicy } from "@pi-template/contracts";
 import {
   AGENT_DEFINITION,
   definitionIds,
   agentDefinitionSummary,
+  readStandaloneCredentials,
   runOnboarding,
   type OnboardingAnswers,
   type OnboardingDependencies,
@@ -196,15 +197,9 @@ const isAffirmativeAnswer = (value: string): boolean => ["y", "yes"].includes(va
 const isNegativeAnswer = (value: string): boolean => ["n", "no"].includes(value.trim().toLowerCase());
 const isDefaultYesAnswer = (value: string): boolean => !value.trim() || isAffirmativeAnswer(value);
 
-function importableProviders(sourceAuthPath: string): string[] {
-  let stored: Record<string, unknown>;
-  try {
-    stored = JSON.parse(readFileSync(sourceAuthPath, "utf8")) as Record<string, unknown>;
-  } catch {
-    return [];
-  }
+function importableProviders(stored: Record<string, unknown>): string[] {
   return Object.keys(stored).filter((provider) => {
-    const credential = readStoredCredential(provider, sourceAuthPath);
+    const credential = stored[provider] as Credential | undefined;
     if (credential?.type === "api_key") return Boolean(credential.key?.trim());
     return credential?.type === "oauth" &&
       Boolean(credential.access.trim()) &&
@@ -368,14 +363,15 @@ async function interactiveAuth(
     const importChoice = await io.question(`Copy existing standalone Pi setup from ${source.agentDir}? [Y/n] `);
     if (isDefaultYesAnswer(importChoice)) {
       if (!existsSync(source.authPath)) throw new CliUsageError("the standalone Pi setup has no authorization file to import");
-      const providers = importableProviders(source.authPath);
+      const stored = readStandaloneCredentials(source.authPath);
+      const providers = importableProviders(stored);
       if (providers.length === 0) throw new CliUsageError("the standalone Pi setup has no usable authorizations to import");
       const importedSelection = importedModelSelection(source);
       const provider = importedProvider(providers, importedSelection?.provider);
       const model = await selectAvailableModel(
         await scratchRuntime(
           createRuntime,
-          { [provider]: readStoredCredential(provider, source.authPath)! },
+          { [provider]: stored[provider] as Credential },
           existsSync(source.modelsPath) ? source.modelsPath : null,
         ),
         provider,
