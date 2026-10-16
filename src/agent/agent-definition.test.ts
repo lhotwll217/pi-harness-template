@@ -82,9 +82,9 @@ try {
     created.session.dispose();
   }
 
-  const skill = (name: string, dir = join(paths.workspaceSkills, name)) => {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "SKILL.md"), `---\nname: ${name}\ndescription: The owner's ${name} skill.\n---\n`);
+  const skill = (name: string) => {
+    mkdirSync(join(paths.workspaceSkills, name), { recursive: true });
+    writeFileSync(join(paths.workspaceSkills, name, "SKILL.md"), `---\nname: ${name}\ndescription: The owner's ${name} skill.\n---\n`);
   };
   skill("release-notes");
   skill("writing-for-agents");
