@@ -73,12 +73,15 @@ probe and fails closed. Automation changes *who operates the flow*, never
 The one step that structurally assumes a human is provider login: the default
 browser flow opens a page and waits on a localhost callback. An agent driving a
 terminal cannot complete that. `pi-template onboard --no-browser` (or the
-`PI_TEMPLATE_NO_BROWSER` environment variable) routes login to the provider's
-device-code flow instead — the harness prints a URL and a short code, the owner
-approves on any device, and polling completes with no callback and no redirect
-URL to paste. The agent relays the URL and code to the owner; nothing else in
-the flow needs a human. The interactive default stays browser login, which is
-the better experience for a person at a laptop.
+`PI_TEMPLATE_NO_BROWSER` environment variable) takes the login method Pi marks
+as headless instead. For a device-code provider such as OpenAI Codex, the
+harness prints a URL and a short code, the owner approves on any device, and
+polling completes with no callback and no redirect URL to paste. Anthropic
+offers copy-code login instead: the owner signs in at the printed URL and the
+code Anthropic shows is pasted back. The agent relays the URL, and the code
+when there is one; nothing else in the flow needs a human. The interactive
+default stays browser login, which is the better experience for a person at a
+laptop.
 
 ## Readiness
 
