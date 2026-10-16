@@ -66,7 +66,8 @@ sets of skills:
 
 A vendored skill wins a name collision with a workspace skill. Pi skips a link
 in `workspace/skills/` whose target is gone without a diagnostic, so
-`pi-template doctor` lists each such link as broken and not loaded.
+`pi-template doctor` lists each such link, with its target, under
+`resources.brokenSkillLinksNotLoaded`.
 
 ## The dividing question
 

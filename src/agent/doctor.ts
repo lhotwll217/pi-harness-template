@@ -47,7 +47,7 @@ export interface DoctorReport {
       reviewed: boolean;
       bundled: string[];
       workspaceSkills: string[];
-      brokenWorkspaceSkillLinks: Array<{ name: string; target: string }>;
+      brokenSkillLinksNotLoaded: Array<{ name: string; target: string }>;
       workspaceContext: boolean;
     };
     permission: { configured: boolean; mode: string; configPath: string };
@@ -127,7 +127,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
       reviewed: progress.version === ONBOARDING_VERSION && !!progress.stages?.resources,
       bundled: agentDefinitionSummary().map(({ id }) => id),
       workspaceSkills: configuredWorkspaceSkillNames(paths.home),
-      brokenWorkspaceSkillLinks: brokenWorkspaceSkillLinks(paths.home),
+      brokenSkillLinksNotLoaded: brokenWorkspaceSkillLinks(paths.home),
       workspaceContext: readObject(paths.resourceApprovals).workspaceContext === true,
     },
     permission: {
@@ -161,7 +161,7 @@ export function formatDoctorReport(report: DoctorReport): string {
     `Model: ${checks.model.selected ?? "not configured"} (${checks.model.available ? "available" : "unavailable"})`,
     `Bundled resources: ${checks.resources.bundled.join(", ")}`,
     `Workspace skills: ${checks.resources.workspaceSkills.join(", ") || "none"}`,
-    ...checks.resources.brokenWorkspaceSkillLinks.map(({ name, target }) => `  broken link, not loaded: ${name} -> ${target}`),
+    ...checks.resources.brokenSkillLinksNotLoaded.map(({ name, target }) => `  broken link, not loaded: ${name} -> ${target}`),
     `Workspace context: ${checks.resources.workspaceContext ? "approved" : "not approved"}`,
     `Permission mode: ${checks.permission.mode} (${checks.permission.configured ? "configured" : "not configured"})`,
     `Protected paths: ${checks.protectedPaths.readable ? checks.protectedPaths.reason : `unreadable (${checks.protectedPaths.reason})`}`,

@@ -65,7 +65,7 @@ try {
   symlinkSync(join(home, "moved-skill"), join(paths.workspaceSkills, "stale"));
   const skills = await runDoctor({ home, providerModelVerifier: () => true });
   assert.deepEqual(skills.checks.resources.workspaceSkills, ["dropped", "linked"]);
-  assert.deepEqual(skills.checks.resources.brokenWorkspaceSkillLinks, [{ name: "stale", target: join(home, "moved-skill") }]);
+  assert.deepEqual(skills.checks.resources.brokenSkillLinksNotLoaded, [{ name: "stale", target: join(home, "moved-skill") }]);
   assert.ok(formatDoctorReport(skills).includes(
     `Workspace skills: dropped, linked\n  broken link, not loaded: stale -> ${join(home, "moved-skill")}\n`,
   ));
