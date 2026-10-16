@@ -42,16 +42,19 @@ converging on Owner Operator's pattern. Two consumers share it: the
 
 1. **List tables** — names, row counts, and one-line descriptions.
 2. **Describe one table** — columns with types, constraints, and descriptions.
-3. **Run a bounded `SELECT`** — results capped at 200 rows, with an explicit
-   truncation flag telling the caller to narrow the query.
+3. **Run a bounded `SELECT`** — one statement, results capped at 200 rows and
+   1 MB of JSON, with an explicit truncation flag telling the caller to narrow
+   the query.
 
 Read-only is enforced by SQLite, not by statement inspection: the query runs on
 a read-only handle whose authorizer permits only reads, so any write, `ATTACH`,
-or `PRAGMA` is refused and the data is left unchanged. Each query runs in its
-own Node process, killed after 5 seconds, because `node:sqlite` cannot
-interrupt a running statement. A refusal carries a hint, and a query or
-describe naming a missing table names the closest real tables. This follows
-Stitcher `1f63ce4` and `cc5e8c8`.
+`PRAGMA`, or `VACUUM` is refused and the data is left unchanged. SQL after the
+first statement is refused rather than dropped. Each query runs in its own Node
+process because `node:sqlite` cannot interrupt a running statement; a worker
+thread in that process kills it after 5 seconds, so the limit holds even when
+the daemon dies first. A refusal carries a hint, and a query or describe naming
+a missing table names the closest real tables. This follows Stitcher `1f63ce4`
+and `cc5e8c8`.
 
 Table and column descriptions come from a git-tracked schema-docs module
 versioned with the writers, never from the database file, so the documentation

@@ -3,7 +3,7 @@ import { DatabaseQueryAction } from "@pi-template/contracts";
 import type { QueryResult } from "../../state/query";
 import { emit, noun, verb, withGateway } from "./command";
 
-const TRUNCATED_HINT = "add WHERE or LIMIT, or aggregate with count(*) and GROUP BY";
+const TRUNCATED_HINT = "add WHERE or LIMIT, select fewer or shorter columns, or aggregate with count(*) and GROUP BY";
 
 export function addDb(program: Command): void {
   const db = noun(program, "db", "read-only SQL over the harness's state database", {
@@ -44,8 +44,9 @@ export function addDb(program: Command): void {
     useWhen: "you know the table and columns (from describe) and want rows, counts, or joins.",
     notFor: "guessing names: run pi-template db describe <table> first.",
     rules: [
-      "Reads only: any write, ATTACH, or PRAGMA is refused and the data is left unchanged.",
-      "At most 200 rows come back, and a cut result says so: narrow it with WHERE or LIMIT, or aggregate.",
+      "Reads only: any write, ATTACH, PRAGMA, or VACUUM is refused and the data is left unchanged.",
+      "One statement per call; SQL after the first statement is refused.",
+      "At most 200 rows or 1 MB come back, and a cut result says so: narrow it with WHERE or LIMIT, or aggregate.",
       "A query stops after 5 s.",
       "Prints { rows, truncated }; a cut result adds a hint on narrowing it.",
     ],

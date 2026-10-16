@@ -38,8 +38,11 @@ export class DatabaseQueryError extends Error {
 }
 
 export const QUERY_ROW_CAP = 200;
+/** Bounds a result's JSON the way the Gateway bounds a request body: 1 MB. */
+export const QUERY_BYTE_CAP = 1_000_000;
 export const QUERY_TIME_LIMIT_MS = 5_000;
 
+const MULTIPLE_STATEMENTS = "db query runs one statement; found more after the first";
 const TABLES_HINT = "`pi-template db tables` lists every table.";
 
 function openReadOnly(dbPath: string): DatabaseSync {
@@ -132,14 +135,16 @@ export function describeTable(table: string, dbPath: string = defaultDbPath()): 
   });
 }
 
-// Runs in a separate Node process so a runaway query can be killed: node:sqlite has no
-// interrupt or progress handler, and a worker thread stuck in one native step cannot be
-// terminated.
+// Runs in a separate Node process so a runaway query can be stopped: node:sqlite has no
+// interrupt or progress handler. The process stops itself from a worker thread, which runs while
+// the main thread is stuck in one native step, so the limit holds even when the caller dies.
 const QUERY_PROCESS_SOURCE = `
 const { DatabaseSync, constants } = require("node:sqlite");
+const { Worker } = require("node:worker_threads");
+new Worker('setTimeout(() => process.kill(process.pid, "SIGKILL"), ${QUERY_TIME_LIMIT_MS})', { eval: true }).unref();
 let input = "";
 process.stdin.setEncoding("utf8").on("data", (chunk) => { input += chunk; }).on("end", () => {
-  const { sql, dbPath, cap } = JSON.parse(input);
+  const { sql, dbPath, rowCap, byteCap } = JSON.parse(input);
   let result;
   try {
     const db = new DatabaseSync(dbPath, { readOnly: true });
@@ -148,10 +153,15 @@ process.stdin.setEncoding("utf8").on("data", (chunk) => { input += chunk; }).on(
       const c = constants;
       const allowed = new Set([c.SQLITE_SELECT, c.SQLITE_READ, c.SQLITE_FUNCTION, c.SQLITE_RECURSIVE]);
       db.setAuthorizer((action) => allowed.has(action) ? c.SQLITE_OK : c.SQLITE_DENY);
+      const statement = db.prepare(sql);
+      const rest = sql.slice(statement.sourceSQL.length).replace(/--[^\\n]*|\\/\\*[\\s\\S]*?(?:\\*\\/|$)|[\\s;]/g, "");
+      if (rest) throw new Error(${JSON.stringify(MULTIPLE_STATEMENTS)});
       const rows = [];
+      let bytes = 0;
       let truncated = false;
-      for (const row of db.prepare(sql).iterate()) {
-        if (rows.length === cap) { truncated = true; break; }
+      for (const row of statement.iterate()) {
+        bytes += Buffer.byteLength(JSON.stringify(row)) + 1;
+        if (rows.length === rowCap || bytes > byteCap) { truncated = true; break; }
         rows.push({ ...row });
       }
       result = { rows, truncated };
@@ -171,7 +181,8 @@ function sqlError(message: string, dbPath: string): DatabaseQueryError {
     return new DatabaseQueryError(message, TABLES_HINT, withDatabase(dbPath, (db) => nearest(missing, tableNames(db))));
   }
   if (/no such column/i.test(message)) return new DatabaseQueryError(message, "`pi-template db describe <table>` lists its columns.");
-  if (/not authorized|readonly/i.test(message)) {
+  if (message === MULTIPLE_STATEMENTS) return new DatabaseQueryError(message, "Send each statement in its own `pi-template db query`.");
+  if (/not authorized|authorization denied|readonly/i.test(message)) {
     return new DatabaseQueryError(message, "`pi-template db query` runs one read-only SELECT against the state database.");
   }
   return new DatabaseQueryError(message, "`pi-template db describe <table>` shows a table's columns.");
@@ -182,27 +193,23 @@ export async function runQuery(sql: string, dbPath: string = defaultDbPath()): P
   const outcome = await new Promise<QueryResult | { error: string }>((resolve, reject) => {
     const child = spawn(process.execPath, ["-e", QUERY_PROCESS_SOURCE], { env: {}, stdio: ["pipe", "pipe", "ignore"] });
     let output = "";
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      reject(new DatabaseQueryError(
-        `query stopped after ${QUERY_TIME_LIMIT_MS / 1000} s`,
-        "Add WHERE or LIMIT, and bound any recursive CTE.",
-      ));
-    }, QUERY_TIME_LIMIT_MS);
     child.stdout.setEncoding("utf8").on("data", (chunk: string) => { output += chunk; });
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.once("close", () => {
-      clearTimeout(timer);
+    child.once("error", reject);
+    child.once("close", (_code, signal) => {
+      if (signal === "SIGKILL") {
+        reject(new DatabaseQueryError(
+          `query stopped after ${QUERY_TIME_LIMIT_MS / 1000} s`,
+          "Add WHERE or LIMIT, and bound any recursive CTE.",
+        ));
+        return;
+      }
       try {
         resolve(JSON.parse(output) as QueryResult | { error: string });
       } catch {
         reject(new Error("the query process ended without a result"));
       }
     });
-    child.stdin.end(JSON.stringify({ sql, dbPath, cap: QUERY_ROW_CAP }));
+    child.stdin.end(JSON.stringify({ sql, dbPath, rowCap: QUERY_ROW_CAP, byteCap: QUERY_BYTE_CAP }));
   });
   if ("error" in outcome) throw sqlError(outcome.error, dbPath);
   return outcome;

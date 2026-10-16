@@ -1,10 +1,36 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import { State } from "./state";
-import { DatabaseQueryError, describeTable, listTables, QUERY_ROW_CAP, QUERY_TIME_LIMIT_MS, runQuery } from "./query";
+import {
+  DatabaseQueryError,
+  describeTable,
+  listTables,
+  QUERY_BYTE_CAP,
+  QUERY_ROW_CAP,
+  QUERY_TIME_LIMIT_MS,
+  runQuery,
+} from "./query";
+
+const READ_ONLY_HINT = "`pi-template db query` runs one read-only SELECT against the state database.";
+const RUNAWAY = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n";
+const delay = async (milliseconds: number): Promise<void> => {
+  await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+};
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+const fileHash = (path: string): string => createHash("sha256").update(readFileSync(path)).digest("hex");
 
 const dir = mkdtempSync(join(tmpdir(), "pi-template-query-"));
 const dbPath = join(dir, "state.db");
@@ -81,11 +107,47 @@ try {
       return true;
     });
   }
+  const beforeRefusals = fileHash(dbPath);
+  const vacuumTarget = join(dir, "copy.db");
+  for (const sql of [
+    "DELETE FROM notes",
+    "ATTACH '/tmp/elsewhere.db' AS elsewhere",
+    "VACUUM",
+    `VACUUM INTO '${vacuumTarget}'`,
+    "SELECT load_extension('/tmp/missing-extension')",
+  ]) {
+    await assert.rejects(runQuery(sql, dbPath), (error: unknown) => {
+      assert.ok(error instanceof DatabaseQueryError);
+      assert.equal(error.hint, READ_ONLY_HINT, sql);
+      return true;
+    });
+  }
+  assert.equal(existsSync(vacuumTarget), false, "VACUUM INTO writes no copy");
+  assert.equal(fileHash(dbPath), beforeRefusals, "refused statements leave the database file unchanged");
   assert.deepEqual(
     (await runQuery("SELECT id, body FROM notes ORDER BY rowid", dbPath)).rows,
     [{ id: "note-1", body: "first" }, { id: "note-2", body: "second" }],
     "refused writes leave the data unchanged",
   );
+
+  await assert.rejects(runQuery("SELECT 1; DELETE FROM notes", dbPath), (error: unknown) => {
+    assert.ok(error instanceof DatabaseQueryError);
+    assert.equal(error.message, "db query runs one statement; found more after the first");
+    assert.equal(error.hint, "Send each statement in its own `pi-template db query`.");
+    return true;
+  });
+  assert.equal(fileHash(dbPath), beforeRefusals, "a trailing statement never runs");
+  assert.deepEqual((await runQuery("SELECT 1 AS one;", dbPath)).rows, [{ one: 1 }]);
+  assert.deepEqual((await runQuery("SELECT 1 AS one; -- done\n/* really */ ;", dbPath)).rows, [{ one: 1 }]);
+
+  const wide = await runQuery(
+    `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n LIMIT 10)
+     SELECT printf('%.*c', 200000, 'x') AS x FROM n`,
+    dbPath,
+  );
+  assert.equal(wide.rows.length, 4, "rows stop before the byte cap");
+  assert.equal(wide.truncated, true);
+  assert.ok(Buffer.byteLength(JSON.stringify(wide)) <= QUERY_BYTE_CAP);
 
   await assert.rejects(runQuery("SELECT body FROM note", dbPath), (error: unknown) => {
     assert.ok(error instanceof DatabaseQueryError);
@@ -95,12 +157,29 @@ try {
   });
 
   const started = Date.now();
-  await assert.rejects(
-    runQuery("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n", dbPath),
-    /query stopped after 5 s/,
-  );
+  await assert.rejects(runQuery(RUNAWAY, dbPath), /query stopped after 5 s/);
   const elapsed = Date.now() - started;
   assert.ok(elapsed >= QUERY_TIME_LIMIT_MS && elapsed < QUERY_TIME_LIMIT_MS + 1_000, `runaway query stopped after ${elapsed} ms`);
+
+  const caller = spawn(process.execPath, [
+    "--import", "tsx", "--input-type=module", "-e",
+    `import { runQuery } from ${JSON.stringify(fileURLToPath(new URL("./query.ts", import.meta.url)))};
+     await runQuery(${JSON.stringify(RUNAWAY)}, ${JSON.stringify(dbPath)});`,
+  ], { stdio: "ignore" });
+  let queryProcess: number | undefined;
+  for (const deadline = Date.now() + 10_000; queryProcess === undefined;) {
+    const found = spawnSync("pgrep", ["-P", String(caller.pid)], { encoding: "utf8" }).stdout.trim();
+    if (found) queryProcess = Number(found.split("\n")[0]);
+    else if (Date.now() > deadline) throw new Error("the query process never started");
+    else await delay(20);
+  }
+  const queryStarted = Date.now();
+  await delay(1_000);
+  caller.kill("SIGKILL");
+  while (alive(queryProcess) && Date.now() - queryStarted < QUERY_TIME_LIMIT_MS + 1_000) await delay(50);
+  const orphaned = alive(queryProcess);
+  if (orphaned) process.kill(queryProcess, "SIGKILL");
+  assert.equal(orphaned, false, "a runaway query stops at the time limit even after its caller is killed");
 
   const drift = new DatabaseSync(dbPath);
   drift.exec("ALTER TABLE notes ADD COLUMN extra_detail TEXT");
