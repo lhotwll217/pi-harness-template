@@ -26,18 +26,22 @@ export enum LaunchdOwnership {
 export interface LaunchdServiceOptions {
   platform?: NodeJS.Platform;
   userHome?: string;
-  execFile?: (file: string, args: string[]) => Promise<unknown>;
+  execFile?: (file: string, args: string[], timeoutMs?: number) => Promise<unknown>;
 }
 
 // Matches the sandbox probe's bound (src/agent/sandbox/anthropic-sandbox.ts); launchctl answers in milliseconds.
 const LAUNCHCTL_TIMEOUT_MS = 5_000;
-const execFileAsync = async (file: string, args: string[]): Promise<{ stdout: string }> =>
-  await promisify(execFileCallback)(file, args, { timeout: LAUNCHCTL_TIMEOUT_MS });
+// launchd's default ExitTimeOut for user agents, as `launchctl print` reports it; pinned in the plist.
+export const DAEMON_EXIT_TIMEOUT_SECONDS = 5;
+const BOOTOUT_TIMEOUT_MS = DAEMON_EXIT_TIMEOUT_SECONDS * 1_000 + LAUNCHCTL_TIMEOUT_MS;
+const execFileAsync = async (file: string, args: string[], timeoutMs = LAUNCHCTL_TIMEOUT_MS): Promise<{ stdout: string }> =>
+  await promisify(execFileCallback)(file, args, { timeout: timeoutMs });
 const LAUNCHCTL_NOT_LOADED_CODES = new Set<string | number>([3, 113]);
 const launchctlReportsNotLoaded = (error: unknown): boolean => {
   const code = (error as { code?: string | number }).code;
   return code !== undefined && LAUNCHCTL_NOT_LOADED_CODES.has(code);
 };
+const launchctlTimedOut = (error: unknown): boolean => (error as { killed?: boolean }).killed === true;
 
 const escapeXml = (value: string): string => value
   .replaceAll("&", "&amp;")
@@ -64,7 +68,7 @@ const canonicalPath = (path: string): string => {
 export const daemonLaunchAgentPath = (userHome = homedir()): string =>
   join(userHome, "Library", "LaunchAgents", `${DAEMON_LAUNCHD_LABEL}.plist`);
 
-const LAUNCH_AGENT_HOME_ENTRY = /<key>PI_TEMPLATE_HOME<\/key><string>([^<]*)<\/string>/;
+const LAUNCH_AGENT_HOME_ENTRY = /<key>PI_TEMPLATE_HOME<\/key>\s*<string>([^<]*)<\/string>/;
 
 export function daemonLaunchAgent(configuration: DaemonServiceConfiguration): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -82,6 +86,7 @@ export function daemonLaunchAgent(configuration: DaemonServiceConfiguration): st
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <key>ExitTimeOut</key><integer>${DAEMON_EXIT_TIMEOUT_SECONDS}</integer>
   <key>StandardOutPath</key><string>${escapeXml(join(configuration.home, "logs", "daemon.log"))}</string>
   <key>StandardErrorPath</key><string>${escapeXml(join(configuration.home, "logs", "daemon.log"))}</string>
 </dict>
@@ -110,7 +115,14 @@ export function createLaunchdServiceAdapter(options: LaunchdServiceOptions = {})
       const uid = process.getuid?.();
       if (uid === undefined) throw new Error("launchd service installation requires a Unix user id");
       const domain = `gui/${uid}`;
-      await execFile("launchctl", ["bootout", domain, plist]).catch(() => undefined);
+      await execFile("launchctl", ["bootout", domain, plist], BOOTOUT_TIMEOUT_MS).catch((error: unknown) => {
+        if (!launchctlTimedOut(error)) return;
+        throw new Error(
+          `launchctl bootout did not finish within ${BOOTOUT_TIMEOUT_MS / 1_000}s while stopping the running daemon; ` +
+            "wait for it to exit, then retry",
+          { cause: error },
+        );
+      });
       await execFile("launchctl", ["bootstrap", domain, plist]);
       await execFile("launchctl", ["enable", `${domain}/${DAEMON_LAUNCHD_LABEL}`]);
       await execFile("launchctl", ["kickstart", "-k", `${domain}/${DAEMON_LAUNCHD_LABEL}`]);

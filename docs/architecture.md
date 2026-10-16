@@ -103,7 +103,9 @@ runtime fingerprint, bearer token, mode `0600`) once its Gateway listens. A CLI
 command trusts the record only when an authenticated `/health` agrees with it on
 pid and fingerprint in two consecutive probes, each bounded at one second, so a
 daemon that answers once and then stalls gets the same diagnostic as one that
-stalls from the start. `/health` also reports the daemon's `repoRoot`; a client
+stalls from the start. `status` prints the confirming probe's health and
+readiness instead of requesting them again, so a daemon that stalls after both
+probes cannot hang it. `/health` also reports the daemon's `repoRoot`; a client
 in another checkout connects to that daemon and is served by its code.
 
 The record survives a crash, so the client treats a failed probe as evidence,
@@ -119,7 +121,9 @@ bearer token. A closing daemon removes `daemon.json` only while the record still
 names it, so a replacement's record survives.
 
 When the CLI starts a daemon and the installed LaunchAgent names this harness
-home (compared as resolved real paths), launchd starts it: `launchctl enable`
+home (its `PI_TEMPLATE_HOME` entry, read in either the layout onboarding writes
+or the one `plutil -convert xml1` writes, compared as resolved real paths),
+launchd starts it: `launchctl enable`
 and `launchctl kickstart` without `-k` on `gui/<uid>/com.pi-template.daemon`, so
 a job launchd already runs (restarted by `KeepAlive`, or started by a concurrent
 command) is left alone while its record appears. When launchd reports the job
@@ -128,12 +132,23 @@ a second kickstart; a failed bootstrap is accepted when `launchctl print` then
 finds the job loaded, since a concurrent command bootstrapped it. Any other
 `launchctl` failure, or a call that takes over five seconds, fails the command
 rather than starting a detached daemon that would hold the port the
-LaunchAgent's `KeepAlive` restarts need. If no reachable daemon publishes its
-record within 15 seconds while launchd reports a running pid (for example after
-`daemon.json` was removed by hand), the command names that pid and gives
-`launchctl kickstart -k` instead of killing it. Without that LaunchAgent the CLI
+LaunchAgent's `KeepAlive` restarts need. The command first records the pid
+`launchctl print` reports. If no reachable daemon publishes its record within
+15 seconds while launchd still runs that pid (for example after `daemon.json`
+was removed by hand), the command names the pid and gives
+`launchctl kickstart -k` instead of killing it; when launchd started the job
+during the command and it never became ready, the command says so and points
+at the daemon log. Without that LaunchAgent the CLI
 starts a detached `pi-template daemon` from its own checkout. A reachable daemon
 is never restarted, whichever checkout it runs from.
+
+Onboarding's service install boots out the loaded job before it bootstraps the
+new plist. `launchctl bootout` returns only after the job exits, and the daemon
+has no shutdown bound of its own (a draining scheduler waits out each run's
+timeout), so the plist pins `ExitTimeOut` at five seconds, launchd's default
+for user agents, after which launchd sends `SIGKILL`. Bootout gets that plus
+the five-second call bound; one that runs past it fails the install with that
+cause instead of leaving bootstrap to fail against the job still loaded.
 
 This adopts Owner Operator's recovery rules
 ([`039359a`](https://github.com/lhotwll217/owner-operator/commit/039359a),
