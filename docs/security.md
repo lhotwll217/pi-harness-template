@@ -76,18 +76,24 @@ Two lists become deny rules on the permission extension's `path` surface,
 A rule denies reading and writing the path and everything beneath it, matched as
 written and as symlink-resolved, with the reason `Pi Template protected paths`.
 It fires when a file tool (`read`, `write`, `edit`, `grep`, `find`, `ls`) names
-the path in its own path argument, and when a bash command names it in an
-argument the extension parses, such as `cat <home>/pi/auth.json`. It does not
-see:
+the path in its own path argument, and when a bash command names it as a
+literal path in an argument the extension parses, such as
+`cat <home>/pi/auth.json`. It does not see:
 
+- a path the shell expands: a glob (`cat <home>/*.json`, `cat <home>/p?/auth.json`),
+  a brace list (`cat <home>/{daemon,x}.json`), or a variable
+  (`f=<home>/daemon.json; cat $f`);
 - a path a process assembles for itself, such as
   `python3 -c "open('/Us' + 'ers/...')"`;
 - a `grep` or `find` rooted above a protected path, which descends into it: a
   `grep` rooted at the harness home prints matching lines of `pi/auth.json`.
 
-With the sandbox on, bash still cannot reach `pi/` or an owner protected path
-through the first gap; nothing closes the second. Protected `repos` are recorded
-in `protected_paths.json`, but no runtime rule enforces them yet.
+With the sandbox off, bash is trusted with everything the owner's account can
+reach; these rules stop only a command that names a protected path literally.
+With the sandbox on, the OS enforces the boundary whatever the spelling: bash
+cannot read or write `pi/` or an owner protected path, and cannot write any
+control file. Protected `repos` are recorded in `protected_paths.json`, but no
+runtime rule enforces them yet.
 
 Secrets remain under the harness home or provider store and must not appear in
 logs, readiness output, transcripts, events, or error messages.
@@ -126,13 +132,15 @@ so the daemon's own credentials stay out of transcripts.
 The sandbox covers bash only; the file tools run in the harness process under
 the [protected-path rules](#protected-paths) alone. On, a bash command cannot
 read or write under `<harness home>/pi` or an owner protected path, and writes
-only under its write roots, so it cannot change `sandbox.json` or another
-control file unless a write root contains the harness home. Reads elsewhere are
-allowed, so it can still read `daemon.json` and the other control files outside
-`pi/`. Off, a command reaches everything the owner can except what the
-protected-path rules catch, so `python3 -c` with a path it builds itself reads
-the model credentials. `pi-template doctor` reads `sandbox.json` itself and
-reports `sandbox.enabled`, so a hand edit shows at once.
+only under its write roots. The runtime adds every control file to the
+sandbox's write denials whatever the write roots say, so no command can turn
+the sandbox off or change the permission mode, protected paths, or approvals.
+Reads outside `pi/` and the protected paths are allowed, so bash can still read
+`daemon.json`, which `pi-template` needs to reach the daemon. Off, a command
+reaches everything the owner can except a literal protected path, so a glob or
+`python3 -c` with a path it builds itself reads the model credentials.
+`pi-template doctor` reads `sandbox.json` itself and reports `sandbox.enabled`,
+so a hand edit shows at once.
 
 ## Audit and provenance
 

@@ -78,7 +78,11 @@ function runtimeConfig(policy: SandboxPolicy, extraDeniedReads: string[] = []): 
       denyRead: [...new Set([...policy.filesystem.deniedReadRoots, ...extraDeniedReads])],
       allowRead: policy.filesystem.allowedReadRoots,
       allowWrite: policy.filesystem.allowedWriteRoots,
-      denyWrite: [...new Set([...policy.filesystem.deniedReadRoots, ...extraDeniedReads])],
+      denyWrite: [...new Set([
+        ...policy.filesystem.deniedReadRoots,
+        ...policy.filesystem.deniedWriteRoots ?? [],
+        ...extraDeniedReads,
+      ])],
     },
   };
 }

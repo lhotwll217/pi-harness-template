@@ -5,6 +5,8 @@ export interface SandboxFilesystemPolicy {
   allowedReadRoots: string[];
   allowedWriteRoots: string[];
   deniedReadRoots: string[];
+  /** Denied even under a write root. The runtime sets the harness control paths; sandbox.json never records it. */
+  deniedWriteRoots?: string[];
 }
 
 export interface SandboxProcessPolicy {

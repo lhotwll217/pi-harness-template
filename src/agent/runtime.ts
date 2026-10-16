@@ -16,6 +16,7 @@ import {
 import type { Model } from "@earendil-works/pi-ai";
 import {
   ensureHarnessWorkspace,
+  harnessControlPaths,
   harnessPaths,
   loadHarnessSettings,
   reconcilePermissionSettings,
@@ -157,9 +158,13 @@ function bashOperations(home: string, sandbox: SandboxAdapter): BashOperations {
         await local.exec(command, cwd, { ...execution, env: commandEnvironment(execution.env ?? process.env) }),
     };
   }
+  const enforced = {
+    ...policy,
+    filesystem: { ...policy.filesystem, deniedWriteRoots: harnessControlPaths(harnessPaths(home)) },
+  };
   return {
     exec: async (command, cwd, execution) => {
-      const { exitCode, timedOut } = await sandbox.execute(policy, {
+      const { exitCode, timedOut } = await sandbox.execute(enforced, {
         command,
         cwd,
         env: execution.env,
