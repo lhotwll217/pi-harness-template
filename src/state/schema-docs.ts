@@ -1,4 +1,4 @@
-/** Git-tracked prompt surface served by listTables/describeTable. Keep with database.ts. */
+/** Git-tracked descriptions served by `pi-template db` and query_database. Keep with database.ts. */
 export interface ColumnDoc {
   name: string;
   description: string;

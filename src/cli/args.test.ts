@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ONBOARDING_VERSION } from "@pi-template/contracts";
-import { parseCliArgs, resolveBareInvocation } from "./args";
+import { parseScheduleAdd, resolveBareInvocation } from "./args";
 
 const entryRoot = mkdtempSync(join(tmpdir(), "pi-template-entry-routing-"));
 const markerPath = join(entryRoot, "onboarded.json");
@@ -18,55 +18,25 @@ try {
   rmSync(entryRoot, { recursive: true, force: true });
 }
 
-assert.deepEqual(parseCliArgs([]), { kind: "entry" });
-
-assert.deepEqual(parseCliArgs(["docs", "list"]), { kind: "docs-list" });
-assert.deepEqual(parseCliArgs(["docs", "read", "scheduler"]), { kind: "docs-read", id: "scheduler" });
-assert.deepEqual(parseCliArgs(["docs", "query", "how", "do", "schedules", "work?"]), {
-  kind: "docs-query",
-  question: "how do schedules work?",
+const prompt = parseScheduleAdd({ name: "hourly check", every: "1h", prompt: "inspect state", timeout: "90" }, []);
+assert.deepEqual(prompt, {
+  name: "hourly check",
+  trigger: { kind: "every", everyMs: 3_600_000 },
+  payload: { kind: "prompt", prompt: "inspect state" },
+  timeoutSeconds: 90,
 });
-assert.deepEqual(parseCliArgs(["notes", "add", "keep", "one", "writer"]), {
-  kind: "notes-add",
-  body: "keep one writer",
-});
-assert.deepEqual(parseCliArgs(["notes", "list"]), { kind: "notes-list" });
-assert.deepEqual(parseCliArgs(["notes", "remove", "note-1"]), { kind: "notes-remove", id: "note-1" });
 
-const prompt = parseCliArgs([
-  "schedule", "add", "--name", "hourly check", "--every", "1h",
-  "--prompt", "inspect state", "--timeout", "90",
-]);
-assert.equal(prompt.kind, "schedule-add");
-if (prompt.kind === "schedule-add") {
-  assert.equal(prompt.name, "hourly check");
-  assert.deepEqual(prompt.trigger, { kind: "every", everyMs: 3_600_000 });
-  assert.deepEqual(prompt.payload, { kind: "prompt", prompt: "inspect state" });
-  assert.equal(prompt.timeoutSeconds, 90);
-}
+const command = parseScheduleAdd(
+  { cron: "0 9 * * *", tz: "Europe/Helsinki" },
+  ["node", "task.mjs", "--exact-argument"],
+);
+assert.deepEqual(command.trigger, { kind: "cron", expression: "0 9 * * *", timeZone: "Europe/Helsinki" });
+assert.deepEqual(command.payload, { kind: "command", argv: ["node", "task.mjs", "--exact-argument"] });
+assert.equal(command.timeoutSeconds, 600);
 
-const command = parseCliArgs([
-  "schedule", "add", "--cron", "0 9 * * *", "--tz", "Europe/Helsinki",
-  "--", "node", "task.mjs", "--exact-argument",
-]);
-assert.equal(command.kind, "schedule-add");
-if (command.kind === "schedule-add") {
-  assert.deepEqual(command.trigger, { kind: "cron", expression: "0 9 * * *", timeZone: "Europe/Helsinki" });
-  assert.deepEqual(command.payload, { kind: "command", argv: ["node", "task.mjs", "--exact-argument"] });
-}
+assert.throws(() => parseScheduleAdd({ every: "nope", prompt: "x" }, []), /duration/);
+assert.throws(() => parseScheduleAdd({ every: "1m" }, []), /payload/);
+assert.throws(() => parseScheduleAdd({ cron: "* * * * *", prompt: "x" }, []), /--tz/);
+assert.throws(() => parseScheduleAdd({ at: "2026-10-01T09:00:00Z", every: "1m", prompt: "x" }, []), /exactly one/);
 
-assert.throws(() => parseCliArgs(["schedule", "add", "--every", "nope", "--prompt", "x"]), /duration/);
-assert.throws(() => parseCliArgs(["schedule", "add", "--every", "1m"]), /payload/);
-assert.throws(() => parseCliArgs(["schedule", "add", "--cron", "* * * * *", "--prompt", "x"]), /--tz/);
-assert.deepEqual(parseCliArgs(["prompt", "who", "are", "you"]), {
-  kind: "prompt", message: "who are you", json: false,
-});
-assert.deepEqual(parseCliArgs(["prompt", "--json", "who are you"]), {
-  kind: "prompt", message: "who are you", json: true,
-});
-assert.throws(() => parseCliArgs(["prompt"]), /prompt message/);
-assert.throws(() => parseCliArgs(["prompt", "--json"]), /prompt message/);
-
-assert.throws(() => parseCliArgs(["frobnicate"]), /unknown command/);
-
-process.stdout.write("ok — CLI arguments preserve exact command argv and selected command surface\n");
+process.stdout.write("ok — schedule add preserves exact command argv; bare invocation routes by marker and terminal\n");

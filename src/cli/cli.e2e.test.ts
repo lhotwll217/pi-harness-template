@@ -102,6 +102,53 @@ try {
   assert.equal(listed.status, 0, listed.stderr);
   assert.ok((JSON.parse(listed.stdout) as Array<{ id: string }>).some(({ id }) => id === note.id));
 
+  const tables = await runCli(["db", "tables"]);
+  assert.equal(tables.status, 0, tables.stderr);
+  assert.deepEqual(
+    (JSON.parse(tables.stdout) as Array<{ name: string }>).map(({ name }) => name),
+    ["notes", "schedule_runs", "schedules", "schema_migrations"],
+  );
+  const described = await runCli(["db", "describe", "notes"]);
+  assert.equal(described.status, 0, described.stderr);
+  assert.deepEqual(
+    (JSON.parse(described.stdout) as { columns: Array<{ name: string; description: string }> }).columns
+      .map(({ name, description }) => [name, description]),
+    [
+      ["id", "Stable note id."],
+      ["body", "Owner-authored note text."],
+      ["created_at", "ISO creation time."],
+      ["updated_at", "ISO last-update time."],
+    ],
+  );
+
+  const write = await runCli(["db", "query", "UPDATE notes SET body = 'x'"]);
+  assert.equal(write.status, 1);
+  assert.equal(write.stdout, "");
+  assert.deepEqual(JSON.parse(write.stderr), {
+    status: 400,
+    error: "not authorized",
+    hint: "`pi-template db query` runs one read-only SELECT against the state database.",
+  });
+  assert.equal(write.stderr.trimEnd().split("\n").length, 1, "a failure is one JSON line on stderr");
+  const unchanged = await runCli(["db", "query", "SELECT body FROM notes"]);
+  assert.deepEqual(JSON.parse(unchanged.stdout), { rows: [{ body: "visible from the CLI" }], truncated: false });
+
+  const misspelled = await runCli(["db", "query", "SELECT * FROM note"]);
+  assert.equal(misspelled.status, 1);
+  assert.deepEqual(JSON.parse(misspelled.stderr), {
+    status: 400,
+    error: "no such table: note",
+    hint: "`pi-template db tables` lists every table.",
+    closest: ["notes"],
+  });
+
+  const large = await runCli(["db", "query", "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n LIMIT 500) SELECT i FROM n"]);
+  assert.equal(large.status, 0, large.stderr);
+  const capped = JSON.parse(large.stdout) as { rows: unknown[]; truncated: boolean; hint: string };
+  assert.equal(capped.rows.length, 200);
+  assert.equal(capped.truncated, true);
+  assert.equal(capped.hint, "add WHERE or LIMIT, or aggregate with count(*) and GROUP BY");
+
   const client = await connectGateway();
   assert.ok(client);
   const queried = await client.queryDatabase({
@@ -129,7 +176,7 @@ try {
   assert.ok((JSON.parse(schedules.stdout) as Array<{ id: string }>).some(({ id }) => id === schedule.id));
   client.close();
 
-  process.stdout.write("ok — CLI traverses Gateway for docs, notes, query visibility, and command schedules\n");
+  process.stdout.write("ok — CLI traverses Gateway for docs, notes, read-only db, and command schedules, printing JSON\n");
 } finally {
   await daemon?.close();
   if (previousHome === undefined) delete process.env.PI_TEMPLATE_HOME;

@@ -32,6 +32,7 @@
     "@earendil-works/pi-ai": "0.80.6",
     "@earendil-works/pi-coding-agent": "0.80.6",
     "@gotgenes/pi-permission-system": "20.7.1",
+    "commander": "12.1.0",
     "croner": "10.0.1"
   }
 }

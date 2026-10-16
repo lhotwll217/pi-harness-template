@@ -19,24 +19,12 @@ type ScheduleAddTrigger =
   | { kind: ScheduleKind.Every; everyMs: number }
   | { kind: ScheduleKind.Cron; expression: string; timeZone: string };
 
-export type CliCommand =
-  | { kind: "entry" }
-  | { kind: "help" }
-  | { kind: "daemon" }
-  | { kind: "onboard"; argv: string[] }
-  | { kind: "prompt"; message: string; json: boolean }
-  | { kind: "status" }
-  | { kind: "doctor" }
-  | { kind: "docs-list" }
-  | { kind: "docs-read"; id: string }
-  | { kind: "docs-query"; question: string }
-  | { kind: "notes-add"; body: string }
-  | { kind: "notes-list" }
-  | { kind: "notes-remove"; id: string }
-  | { kind: "schedule-add"; name?: string; trigger: ScheduleAddTrigger; payload: ScheduledPayload; timeoutSeconds: number }
-  | { kind: "schedule-list" }
-  | { kind: "schedule-remove"; id: string }
-  | { kind: "schedule-run"; id: string };
+export interface ScheduleAddRequest {
+  name?: string;
+  trigger: ScheduleAddTrigger;
+  payload: ScheduledPayload;
+  timeoutSeconds: number;
+}
 
 export type BareInvocation = "interactive" | "onboard" | "setup-required" | "status";
 
@@ -72,23 +60,13 @@ function positiveInteger(value: string, description: string): number {
   return parsed;
 }
 
-function parseScheduleAdd(argv: readonly string[]): Extract<CliCommand, { kind: "schedule-add" }> {
-  const values = new Map<string, string>();
-  let commandArgv: string[] = [];
-  const known = new Set(["--name", "--at", "--every", "--cron", "--tz", "--prompt", "--timeout"]);
-  for (let index = 0; index < argv.length; index += 1) {
-    const argument = argv[index];
-    if (argument === "--") {
-      commandArgv = argv.slice(index + 1);
-      break;
-    }
-    if (!known.has(argument)) throw new CliUsageError(`unknown schedule add option: ${argument}`);
-    const value = argv[++index];
-    if (value === undefined || value === "--") throw new CliUsageError(`${argument} needs a value`);
-    if (values.has(argument)) throw new CliUsageError(`${argument} may be provided only once`);
-    values.set(argument, value);
-  }
+export type ScheduleAddOptions = Partial<Record<"name" | "at" | "every" | "cron" | "tz" | "prompt" | "timeout", string>>;
 
+/** Validate `pi-template schedule add` flags and the exact argv after `--`. */
+export function parseScheduleAdd(options: ScheduleAddOptions, commandArgv: readonly string[]): ScheduleAddRequest {
+  const values = new Map(Object.entries(options)
+    .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+    .map(([name, value]) => [`--${name}`, value]));
   const triggerFlags = ["--at", "--every", "--cron"].filter((flag) => values.has(flag));
   if (triggerFlags.length !== 1) throw new CliUsageError("schedule add needs exactly one of --at, --every, or --cron");
   let trigger: ScheduleAddTrigger;
@@ -112,10 +90,9 @@ function parseScheduleAdd(argv: readonly string[]): Extract<CliCommand, { kind: 
     ? { kind: ScheduledPayloadKind.Prompt, prompt: required(prompt, "--prompt") }
     : {
         kind: ScheduledPayloadKind.Command,
-        argv: commandArgv as [string, ...string[]],
+        argv: [...commandArgv] as [string, ...string[]],
       };
   return {
-    kind: "schedule-add",
     name: values.get("--name"),
     trigger,
     payload,
@@ -123,39 +100,4 @@ function parseScheduleAdd(argv: readonly string[]): Extract<CliCommand, { kind: 
       ? positiveInteger(values.get("--timeout")!, "--timeout")
       : 600,
   };
-}
-
-export function parseCliArgs(argv: readonly string[]): CliCommand {
-  if (argv.length === 0) return { kind: "entry" };
-  if (argv.includes("--help") || argv.includes("-h")) return { kind: "help" };
-  const [command, action, ...rest] = argv;
-  if (command === "daemon" && action === undefined) return { kind: "daemon" };
-  if (command === "onboard") return { kind: "onboard", argv: argv.slice(1) };
-  if (command === "prompt") {
-    const words = [action, ...rest].filter((word): word is string => word !== undefined && word !== "--json");
-    return {
-      kind: "prompt",
-      message: required(words.join(" "), "prompt message"),
-      json: argv.includes("--json"),
-    };
-  }
-  if (command === "status" && action === undefined) return { kind: "status" };
-  if (command === "doctor" && action === undefined) return { kind: "doctor" };
-
-  if (command === "docs" && action === "list" && rest.length === 0) return { kind: "docs-list" };
-  if (command === "docs" && action === "read") return { kind: "docs-read", id: required(rest[0], "document id") };
-  if (command === "docs" && action === "query") {
-    return { kind: "docs-query", question: required(rest.join(" "), "documentation question") };
-  }
-
-  if (command === "notes" && action === "list" && rest.length === 0) return { kind: "notes-list" };
-  if (command === "notes" && action === "add") return { kind: "notes-add", body: required(rest.join(" "), "note body") };
-  if (command === "notes" && action === "remove") return { kind: "notes-remove", id: required(rest[0], "note id") };
-
-  if (command === "schedule" && action === "list" && rest.length === 0) return { kind: "schedule-list" };
-  if (command === "schedule" && action === "add") return parseScheduleAdd(rest);
-  if (command === "schedule" && action === "remove") return { kind: "schedule-remove", id: required(rest[0], "schedule id") };
-  if (command === "schedule" && action === "run") return { kind: "schedule-run", id: required(rest[0], "schedule id") };
-
-  throw new CliUsageError(`unknown command: ${argv.join(" ")}`);
 }

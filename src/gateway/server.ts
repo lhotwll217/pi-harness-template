@@ -216,12 +216,18 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
 
       if (route === "POST /query-database") {
         const query = await readBody(request) as Record<string, unknown>;
-        if (query.action === DatabaseQueryAction.ListTables) return respond(200, options.query.listTables());
-        if (query.action === DatabaseQueryAction.DescribeTable && typeof query.table === "string") {
-          return respond(200, options.query.describeTable(query.table));
-        }
-        if (query.action === DatabaseQueryAction.Query && typeof query.sql === "string") {
-          return respond(200, options.query.runQuery(query.sql));
+        try {
+          if (query.action === DatabaseQueryAction.ListTables) return respond(200, options.query.listTables());
+          if (query.action === DatabaseQueryAction.DescribeTable && typeof query.table === "string") {
+            return respond(200, options.query.describeTable(query.table));
+          }
+          if (query.action === DatabaseQueryAction.Query && typeof query.sql === "string") {
+            return respond(200, await options.query.runQuery(query.sql));
+          }
+        } catch (error) {
+          // A refusal's own fields (a hint, the closest tables) are what the caller acts on.
+          if (!(error instanceof Error)) throw error;
+          return respond(400, { error: error.message, ...error });
         }
         return respond(400, { error: "invalid database query request" });
       }
