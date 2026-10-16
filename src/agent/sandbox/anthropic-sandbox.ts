@@ -140,6 +140,7 @@ async function spawnSandboxed(
       stdio: ["ignore", "pipe", "pipe"],
     });
     let timeout: NodeJS.Timeout | undefined;
+    let timedOut = false;
     let output = "";
     const abort = (): void => { child.kill("SIGTERM"); };
     child.stdout.on("data", (chunk) => { output += String(chunk); });
@@ -149,9 +150,9 @@ async function spawnSandboxed(
       if (timeout) clearTimeout(timeout);
       request.signal?.removeEventListener("abort", abort);
       if (output) request.onOutput(redactOutput(output));
-      resolve({ exitCode });
+      resolve({ exitCode, timedOut });
     });
-    if (request.timeoutMs) timeout = setTimeout(abort, request.timeoutMs);
+    if (request.timeoutMs) timeout = setTimeout(() => { timedOut = true; abort(); }, request.timeoutMs);
     if (request.signal?.aborted) abort();
     else request.signal?.addEventListener("abort", abort, { once: true });
   });

@@ -50,6 +50,7 @@ export interface SandboxedCommandRequest {
 
 export interface SandboxedCommandResult {
   exitCode: number | null;
+  timedOut: boolean;
 }
 
 export interface SandboxAdapter {

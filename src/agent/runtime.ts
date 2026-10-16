@@ -170,14 +170,19 @@ export async function createHarnessSession(options: HarnessSessionOptions) {
     const policy = sandboxPolicy(paths.home);
     customTools.push(createBashToolDefinition(options.cwd, {
       operations: {
-        exec: async (command, cwd, execution) => await sandbox.execute(policy, {
-          command,
-          cwd,
-          env: execution.env,
-          signal: execution.signal,
-          timeoutMs: execution.timeout,
-          onOutput: execution.onData,
-        }),
+        exec: async (command, cwd, execution) => {
+          const { exitCode, timedOut } = await sandbox.execute(policy, {
+            command,
+            cwd,
+            env: execution.env,
+            signal: execution.signal,
+            timeoutMs: execution.timeout === undefined ? undefined : execution.timeout * 1000,
+            onOutput: execution.onData,
+          });
+          // Pi's bash tool turns this message into "Command timed out after N seconds".
+          if (timedOut) throw new Error(`timeout:${execution.timeout}`);
+          return { exitCode };
+        },
       },
     }));
   }

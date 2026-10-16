@@ -11,6 +11,7 @@ import {
   saveHarnessSettings,
   type ScheduledPromptRunRequest,
 } from "@pi-template/contracts";
+import { seedFauxProviderHome } from "../../test/helpers/faux-provider";
 import { createScheduledPromptRunner } from "./prompt-runner";
 
 const root = mkdtempSync(join(tmpdir(), "pi-template-permission-denial-"));
@@ -20,13 +21,7 @@ const faux = registerFauxProvider();
 
 try {
   const paths = ensureHarnessWorkspace(home);
-  const model = faux.getModel();
-  writeFileSync(paths.piAuth, JSON.stringify({ [model.provider]: { type: "api_key", key: "faux-key" } }));
-  // Pi authorizes only providers it knows, so declare the faux provider like a models.json entry.
-  writeFileSync(paths.piModels, JSON.stringify({ providers: {
-    [model.provider]: { api: model.api, baseUrl: "http://127.0.0.1:1", apiKey: "faux-key", models: [model] },
-  } }));
-  writeFileSync(paths.piSettings, JSON.stringify({ defaultProvider: model.provider, defaultModel: model.id }));
+  seedFauxProviderHome(paths, faux.getModel());
   writeFileSync(join(home, "sandbox.json"), JSON.stringify({
     filesystem: { allowedReadRoots: [root], allowedWriteRoots: [root], deniedReadRoots: [] },
     process: { allowSubprocesses: true },
