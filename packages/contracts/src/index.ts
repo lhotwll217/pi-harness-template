@@ -17,6 +17,7 @@ export {
   isPermissionMode,
   loadHarnessSettings,
   saveHarnessSettings,
+  unreadablePermissionMode,
 } from "./harness-home";
 export type {
   HarnessPaths,

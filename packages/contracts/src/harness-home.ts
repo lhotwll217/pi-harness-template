@@ -25,6 +25,8 @@ export const DEFAULT_TOOL_POSTURE: readonly string[] = Object.freeze([
   "read", "grep", "find", "ls", "bash", "edit", "write",
 ]);
 export const DEFAULT_PERMISSION_MODE: PermissionMode = "allow";
+/** The mode a damaged settings.json yields: an unreadable choice must not widen access. */
+const FAIL_CLOSED_PERMISSION_MODE: PermissionMode = "read-only";
 
 const SKILL_MODES = new Set(["bundled", "all-workspace", "allowlist"]);
 const TOOL_NAMES = new Set(DEFAULT_TOOL_POSTURE);
@@ -100,13 +102,41 @@ export function ensureHarnessWorkspace(home = defaultHome()): HarnessPaths {
   return paths;
 }
 
-function readJson(path: string): Record<string, unknown> {
+interface SettingsDocument {
+  raw: Record<string, unknown>;
+  problem?: string;
+}
+
+function readSettingsDocument(path: string): SettingsDocument {
+  let text: string;
   try {
-    const value = JSON.parse(readFileSync(path, "utf8"));
-    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  } catch {
-    return {};
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return { raw: {} };
+    return { raw: {}, problem: `settings are unreadable at ${path}` };
   }
+  try {
+    const value = JSON.parse(text);
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? { raw: value }
+      : { raw: {}, problem: `settings are not a JSON object at ${path}` };
+  } catch {
+    return { raw: {}, problem: `settings are not valid JSON at ${path}` };
+  }
+}
+
+function permissionModeProblem(document: SettingsDocument, path: string): string | undefined {
+  if (document.problem) return document.problem;
+  const mode = document.raw.permissionMode;
+  return mode === undefined || isPermissionMode(mode)
+    ? undefined
+    : `settings record an invalid permission mode ${JSON.stringify(mode)} at ${path}`;
+}
+
+/** Why settings.json cannot supply a permission mode; undefined when it records a valid one or none. */
+export function unreadablePermissionMode(home = defaultHome()): string | undefined {
+  const path = harnessPaths(home).settings;
+  return permissionModeProblem(readSettingsDocument(path), path);
 }
 
 const cleanStrings = (values: unknown): string[] => [...new Set(
@@ -122,12 +152,16 @@ function skillPolicy(value: unknown): SkillPolicy {
 }
 
 export function loadHarnessSettings(home = defaultHome()): HarnessSettings {
-  const raw = readJson(harnessPaths(home).settings);
+  const path = harnessPaths(home).settings;
+  const document = readSettingsDocument(path);
+  const { raw } = document;
   const posture = cleanStrings(raw.toolPosture).filter((name) => TOOL_NAMES.has(name));
   return {
     skillPolicy: skillPolicy(raw.skillPolicy),
     toolPosture: posture.length ? posture : [...DEFAULT_TOOL_POSTURE],
-    permissionMode: isPermissionMode(raw.permissionMode) ? raw.permissionMode : DEFAULT_PERMISSION_MODE,
+    permissionMode: permissionModeProblem(document, path)
+      ? FAIL_CLOSED_PERMISSION_MODE
+      : isPermissionMode(raw.permissionMode) ? raw.permissionMode : DEFAULT_PERMISSION_MODE,
     alwaysOn: raw.alwaysOn === "installed" || raw.alwaysOn === "declined" ? raw.alwaysOn : undefined,
   };
 }
@@ -137,7 +171,7 @@ export function saveHarnessSettings(
   patch: Partial<HarnessSettings> = {},
 ): HarnessSettings {
   const paths = ensureHarnessWorkspace(home ?? defaultHome());
-  const current = readJson(paths.settings);
+  const current = readSettingsDocument(paths.settings).raw;
   const merged = {
     ...current,
     ...patch,
