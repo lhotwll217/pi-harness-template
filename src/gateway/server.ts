@@ -225,9 +225,9 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
             return respond(200, await options.query.runQuery(query.sql));
           }
         } catch (error) {
-          // A refusal's own fields (a hint, the closest tables) are what the caller acts on.
           if (!(error instanceof Error)) throw error;
-          return respond(400, { error: error.message, ...error });
+          const { hint, closest } = error as { hint?: string; closest?: string[] };
+          return respond(400, { error: error.message, hint, closest });
         }
         return respond(400, { error: "invalid database query request" });
       }

@@ -1,5 +1,3 @@
-// CLI conventions enforced on the command tree and its source rather than in review, so a new
-// verb that breaks one fails here.
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -10,8 +8,6 @@ import { harnessProgram, helpPages } from "./registry";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-// JSON is structural: a verb reaches stdout only through emit(), which serializes its payload, so
-// no command source but command.ts may write to stdout itself.
 for (const file of readdirSync(here).filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts") && name !== "command.ts")) {
   assert.doesNotMatch(readFileSync(join(here, file), "utf8"), /process\.stdout|console\.log/, `${file} writes stdout only through emit()`);
 }

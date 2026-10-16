@@ -62,7 +62,6 @@ function positiveInteger(value: string, description: string): number {
 
 export type ScheduleAddOptions = Partial<Record<"name" | "at" | "every" | "cron" | "tz" | "prompt" | "timeout", string>>;
 
-/** Validate `pi-template schedule add` flags and the exact argv after `--`. */
 export function parseScheduleAdd(options: ScheduleAddOptions, commandArgv: readonly string[]): ScheduleAddRequest {
   const values = new Map(Object.entries(options)
     .filter((entry): entry is [string, string] => typeof entry[1] === "string")

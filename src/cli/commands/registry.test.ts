@@ -1,5 +1,3 @@
-// Help at every level comes from the one commander tree and never needs a daemon: each call below
-// runs the real executable against an empty home, which must still hold no daemon discovery file.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -59,7 +57,6 @@ try {
     "",
   ].join("\n"));
 
-  // A bare noun is discovery: its help on stdout, exit 0, for every noun.
   for (const name of ["db", "docs", "notes", "schedule"]) {
     const bare = piTemplate(name);
     assert.equal(bare.status, 0, name);
@@ -68,7 +65,6 @@ try {
     assert.match(bare.stdout, new RegExp(`^Usage: pi-template ${name} \\[options\\] \\[command\\]$`, "m"));
   }
 
-  // Every usage mistake is one JSON line on stderr naming the right usage, and exits 2.
   const usageError = (args: string[], expected: { error: string; hint: string }) => {
     const result = piTemplate(...args);
     assert.equal(result.status, 2, args.join(" "));

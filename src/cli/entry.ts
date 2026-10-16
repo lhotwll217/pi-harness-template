@@ -1,5 +1,3 @@
-// Bare `pi-template`: set up when needed, then open the agent in a terminal, or print status as
-// JSON when there is no terminal to open it in.
 import { readFileSync } from "node:fs";
 import { harnessPaths, isOnboardingComplete, type OnboardingMarker } from "@pi-template/contracts";
 import { resolveBareInvocation } from "./args";

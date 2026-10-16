@@ -1,27 +1,17 @@
-// What every `pi-template` verb shares on top of commander: JSON on stdout; prose help ending in
-// examples; failures as one JSON line on stderr, exiting 1 while usage mistakes exit 2. Run
-// bodies import their dependencies lazily, so building the tree or printing help never loads
-// the daemon.
 import { once } from "node:events";
 import type { Command } from "commander";
 import type { GatewayClient } from "../../gateway/client";
 import { CliUsageError } from "../args";
 
 export interface VerbInput {
-  /** Declared arguments in order; a variadic one is an array. */
   args: Array<string | string[] | undefined>;
   options: Record<string, unknown>;
 }
 
-/**
- * What a command's help says after its flags, in one shape everywhere: when to use it, what to
- * use instead, what to run next, its rules, and examples.
- */
 export interface CommandGuide {
   useWhen?: string;
   notFor?: string;
   next?: string;
-  /** How a noun's verbs fit together, or a verb's rules. */
   rules?: readonly string[];
   examples?: readonly string[];
 }
@@ -36,12 +26,10 @@ function guideText(guide: CommandGuide): string {
   return `\n${sections.join("\n\n")}`;
 }
 
-/** Add a noun: `<parent> <name>` whose verbs are added to it. */
 export function noun(parent: Command, name: string, summary: string, guide: CommandGuide): Command {
   return parent.command(name).description(summary).addHelpText("after", guideText(guide));
 }
 
-/** Add `<parent> <name> [args]` with a summary, its guide, and a run body returning the exit code. */
 export function verb(
   parent: Command,
   nameAndArgs: string,
@@ -74,12 +62,10 @@ async function writeOut(text: string): Promise<void> {
   if (!process.stdout.write(text)) await once(process.stdout, "drain");
 }
 
-/** The one way a verb writes to stdout: its payload as JSON. */
 export async function emit(payload: unknown): Promise<void> {
   await writeOut(`${JSON.stringify(payload, null, 2)}\n`);
 }
 
-/** Run `use` against the daemon's Gateway, starting the daemon when none is running. */
 export async function withGateway<T>(use: (client: GatewayClient) => Promise<T>): Promise<T> {
   const { ensureDaemon } = await import("../ensure-daemon");
   const client = await ensureDaemon();
@@ -90,7 +76,6 @@ export async function withGateway<T>(use: (client: GatewayClient) => Promise<T>)
   }
 }
 
-/** A failure as one JSON line on stderr: the Gateway's error body with its status, else the message. */
 async function reportFailure(error: unknown): Promise<void> {
   const { GatewayRequestError } = await import("../../gateway/client");
   const report = error instanceof GatewayRequestError

@@ -1,7 +1,3 @@
-// Every `pi-template` command, as one commander tree. The tree drives parsing and help at each
-// level; rootHelp() and helpPages() return exactly what the terminal prints, so a caller that
-// embeds the help reads the same text. Building it has no side effects: run bodies load what
-// they need when they run.
 import { Command, CommanderError } from "commander";
 import { commandPath, forEachCommand } from "./command";
 import { addDb } from "./db";
@@ -48,27 +44,30 @@ export function harnessProgram(): Command {
     "`pi-template <command> --help` shows a command's verbs; `pi-template <command> <verb> --help` its",
     "flags, rules, and examples.",
   ].join("\n"));
-  // Every usage mistake, commander's own included, is one JSON line on stderr naming the right
-  // usage, and exits 2.
   forEachCommand(program, (command) => {
-    const path = commandPath(command);
-    const hint = command.commands.length === 0
-      ? `Usage: ${path} ${command.usage()}. \`${path} --help\` shows its flags and examples.`
-      : `\`${path} --help\` lists its ${command.parent ? "verbs" : "commands"}.`;
-    // A noun with no verb is discovery, not a mistake: its help on stdout, exit 0.
-    if (command.commands.length > 0) {
-      command.help = () => {
-        command.outputHelp();
-        throw new CommanderError(0, "commander.helpDisplayed", "(outputHelp)");
-      };
-    }
-    command.error = (message, options) => {
-      const error = message.replace(/^error: /, "").replace(/\s*\n\s*/g, " ");
-      process.stderr.write(`${JSON.stringify({ error, hint })}\n`);
-      throw new CommanderError(2, options?.code ?? "pi-template.usage", error);
-    };
+    if (command.commands.length > 0) printHelpWhenVerbMissing(command);
+    reportUsageErrorsAsJson(command);
   });
   return program;
+}
+
+function printHelpWhenVerbMissing(noun: Command): void {
+  noun.help = () => {
+    noun.outputHelp();
+    throw new CommanderError(0, "commander.helpDisplayed", "(outputHelp)");
+  };
+}
+
+function reportUsageErrorsAsJson(command: Command): void {
+  const path = commandPath(command);
+  const hint = command.commands.length === 0
+    ? `Usage: ${path} ${command.usage()}. \`${path} --help\` shows its flags and examples.`
+    : `\`${path} --help\` lists its ${command.parent ? "verbs" : "commands"}.`;
+  command.error = (message, options) => {
+    const error = message.replace(/^error: /, "").replace(/\s*\n\s*/g, " ");
+    process.stderr.write(`${JSON.stringify({ error, hint })}\n`);
+    throw new CommanderError(2, options?.code ?? "pi-template.usage", error);
+  };
 }
 
 function helpOf(command: Command): string {

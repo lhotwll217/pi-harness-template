@@ -56,9 +56,8 @@ export function addHarnessCommands(program: Command): void {
     ],
   }, async () => {
     const { onboard: runOnboard } = await import("../onboard");
-    // Onboarding reads its answer flags itself, in the order given; the options below are
-    // declared for help and validation.
-    await emit(await runOnboard(process.argv.slice(process.argv.indexOf("onboard", 2) + 1)));
+    const [, , , ...flagsInOrder] = process.argv;
+    await emit(await runOnboard(flagsInOrder));
     return 0;
   });
   for (const [flags, help] of ONBOARD_OPTIONS) onboard.option(flags, help);

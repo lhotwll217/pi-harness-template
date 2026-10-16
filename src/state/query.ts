@@ -1,7 +1,3 @@
-// Read-only SQL access behind `pi-template db` and query_database: list tables → describe one →
-// run a bounded SELECT. Each call opens and closes a fresh handle so startup and replacement
-// of the durable database are visible without keeping an extra long-lived connection.
-
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
@@ -35,10 +31,6 @@ export interface QueryResult {
   truncated: boolean;
 }
 
-/**
- * A refusal the caller can act on: `hint` says what to run or change, and `closest` names the
- * existing tables nearest an unknown one. Both are own fields, so they travel in the error body.
- */
 export class DatabaseQueryError extends Error {
   constructor(message: string, readonly hint: string, readonly closest?: string[]) {
     super(message);
@@ -153,8 +145,6 @@ process.stdin.setEncoding("utf8").on("data", (chunk) => { input += chunk; }).on(
     const db = new DatabaseSync(dbPath, { readOnly: true });
     try {
       db.exec("PRAGMA busy_timeout = 5000");
-      // Only reading is authorized from here on: ATTACH, DETACH, PRAGMA and every write are
-      // denied whatever the SQL text looks like. The read-only handle stays as a second layer.
       const c = constants;
       const allowed = new Set([c.SQLITE_SELECT, c.SQLITE_READ, c.SQLITE_FUNCTION, c.SQLITE_RECURSIVE]);
       db.setAuthorizer((action) => allowed.has(action) ? c.SQLITE_OK : c.SQLITE_DENY);
