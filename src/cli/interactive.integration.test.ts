@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
@@ -178,13 +178,14 @@ try {
   const firstImport = runtime.runtime.session.sessionFile!;
   await runtime.runtime.importFromJsonl(standaloneFile);
   const secondImport = runtime.runtime.session.sessionFile!;
-  assert.notEqual(secondImport, firstImport);
+  const transcripts = runtime.runtime.session.sessionManager.getSessionDir();
+  assert.equal(relative(join(home, "transcripts"), transcripts).startsWith(".."), false);
+  assert.deepEqual([firstImport, secondImport], [
+    join(transcripts, basename(standaloneFile)),
+    join(transcripts, basename(standaloneFile, ".jsonl") + "-1.jsonl"),
+  ]);
   assert.equal(readFileSync(firstImport, "utf8").startsWith(standaloneBytes), true);
   assert.equal(readFileSync(secondImport, "utf8").startsWith(standaloneBytes), true);
-  assert.deepEqual(
-    readdirSync(join(home, "transcripts")).filter((name) => [firstImport, secondImport].some((file) => file.endsWith(name))).length,
-    2,
-  );
 
   process.stdout.write("ok — interactive runtime uses exact resources, Gateway tools, workspace context, owned transcripts, and non-overwriting imports\n");
 } finally {
