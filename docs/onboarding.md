@@ -47,8 +47,10 @@ agent-definition acknowledgment was recorded must acknowledge it once more.
 
 Two recorded answers stop a rerun before anything is written when they cannot
 be read, rather than falling back to a default that could widen access. A
-`sandbox.json` that does not parse or lacks part of its policy stops the rerun
-until `--sandbox` or `--sandbox-off` replaces it. A non-interactive rerun whose
+`sandbox.json` that does not parse, or lacks any part of its policy (the three
+filesystem root lists, `process.allowSubprocesses`, and a network mode of `deny`
+or `allowlist` with its domain list), stops the rerun until `--sandbox` or
+`--sandbox-off` replaces it. A non-interactive rerun whose
 `settings.json` does not parse or records an unknown permission mode stops
 until `--permission` replaces it. Non-interactive onboarding without
 `--permission` takes the recorded mode, or `allow` on a new home.

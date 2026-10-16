@@ -89,14 +89,38 @@ export function readSandboxPolicy(home: string): SandboxPolicy | undefined {
     if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return undefined;
     throw new Error(`sandbox policy is unreadable under ${home}`, { cause: error });
   }
-  let value: Partial<SandboxPolicy>;
+  let value: unknown;
   try {
-    value = JSON.parse(raw) as Partial<SandboxPolicy>;
+    value = JSON.parse(raw);
   } catch (error) {
     throw new Error(`sandbox policy is invalid under ${home}`, { cause: error });
   }
-  if (!value?.filesystem || !value.process || !value.network) throw new Error(`sandbox policy is invalid under ${home}`);
-  return { ...value, enabled: value.enabled !== false } as SandboxPolicy;
+  const policy = validPolicy(value);
+  if (!policy) throw new Error(`sandbox policy is invalid under ${home}`);
+  return policy;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+const isStrings = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === "string");
+
+function validPolicy(value: unknown): SandboxPolicy | undefined {
+  if (!isRecord(value)) return undefined;
+  const { enabled, filesystem, process, network } = value;
+  if (enabled !== undefined && typeof enabled !== "boolean") return undefined;
+  if (!isRecord(filesystem) || !isRecord(process) || !isRecord(network)) return undefined;
+  const { allowedReadRoots, allowedWriteRoots, deniedReadRoots } = filesystem;
+  if (!isStrings(allowedReadRoots) || !isStrings(allowedWriteRoots) || !isStrings(deniedReadRoots)) return undefined;
+  if (typeof process.allowSubprocesses !== "boolean") return undefined;
+  if ((network.mode !== "deny" && network.mode !== "allowlist") || !isStrings(network.allowedDomains)) return undefined;
+  return {
+    enabled: enabled !== false,
+    filesystem: { allowedReadRoots, allowedWriteRoots, deniedReadRoots },
+    process: { allowSubprocesses: process.allowSubprocesses },
+    network: { mode: network.mode, allowedDomains: network.allowedDomains },
+  };
 }
 
 export const failedSandboxChecks = (): SandboxVerificationChecks => ({

@@ -294,6 +294,11 @@ try {
   const damagedSandboxes = [
     readFileSync(flagsSandboxPath, "utf8").replace(/\}\s*$/, ",}\n"),
     JSON.stringify(legacyWithoutProcess),
+    JSON.stringify({ enabled: true, filesystem: {}, process: { allowSubprocesses: true }, network: {} }),
+    JSON.stringify({ ...flagsSandbox(), network: { mode: "open", allowedDomains: [] } }),
+    JSON.stringify({ ...flagsSandbox(), enabled: "yes" }),
+    JSON.stringify({ ...flagsSandbox(), filesystem: { ...flagsSandbox().filesystem, allowedWriteRoots: "/" } }),
+    JSON.stringify({ ...flagsSandbox(), process: { allowSubprocesses: "true" } }),
   ];
   for (const damaged of damagedSandboxes) {
     writeFileSync(flagsSandboxPath, damaged);
