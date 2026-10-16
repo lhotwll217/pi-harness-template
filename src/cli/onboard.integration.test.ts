@@ -339,7 +339,7 @@ try {
   );
   assert.deepEqual(forbiddenOccurrences, []);
 
-  process.stdout.write("ok — consolidated onboarding imports, authenticates, customizes, routes --no-browser to device-code, and honors explicit flags\n");
+  process.stdout.write("ok — consolidated onboarding imports, authenticates, customizes, routes --no-browser to device-code or copy-code, and honors explicit flags\n");
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

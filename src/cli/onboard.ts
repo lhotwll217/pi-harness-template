@@ -83,8 +83,6 @@ function parseFlags(argv: readonly string[]): OnboardFlags {
   const values = new Map<string, string>();
   const repeated = new Map<string, string[]>();
   let nonInteractive = false;
-  // Agent-operated / no-local-browser onboarding routes login to Pi's device-code flow
-  // instead of the localhost browser callback (docs/onboarding.md#agent-operated-onboarding).
   let noBrowser = process.env.PI_TEMPLATE_NO_BROWSER === "1";
   let acknowledgeResources = false;
   let approveWorkspaceContext = false;
