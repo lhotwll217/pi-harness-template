@@ -10,6 +10,7 @@ import {
   type ScheduledPromptRunRequest,
 } from "@pi-template/contracts";
 import { createScheduledPromptRunner } from "../agent/prompt-runner";
+import { createAgentResources } from "../agent/runtime";
 import { passingOnboardingDependencies } from "../../test/helpers/onboarding";
 import { toolResultFromTurn } from "../../test/helpers/tool-turn";
 import { createInteractiveSessionRuntime } from "./interactive";
@@ -72,12 +73,13 @@ try {
     signal: new AbortController().signal,
   };
   await assert.rejects(createScheduledPromptRunner({ home, resources })(scheduled), { message: refusal });
+  await assert.rejects(createAgentResources({ home, cwd: paths.workspace, ...resources }), { message: refusal });
   assert.equal(readFileSync(paths.piPermissionConfig, "utf8"), permissionBytes, "no refused session rewrites the permission rules");
 
   unlinkSync(paths.protectedPaths);
   assert.equal(await toolResultFromTurn(faux, session, "read", { path: secret }), "secret\n", "a missing file protects nothing");
 
-  process.stdout.write("ok — a damaged protected_paths.json stops interactive, prompt, and scheduled sessions; a missing one protects nothing\n");
+  process.stdout.write("ok — a damaged protected_paths.json stops interactive, prompt, and scheduled sessions and bare session services; a missing one protects nothing\n");
 } finally {
   faux.unregister();
   rmSync(root, { recursive: true, force: true });
