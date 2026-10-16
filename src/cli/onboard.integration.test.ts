@@ -239,7 +239,6 @@ try {
   assert.equal(JSON.parse(readFileSync(harnessPaths(customHome).settings, "utf8")).permissionMode, "ask");
   assert.equal(JSON.parse(readFileSync(join(customHome, "resource-approvals.json"), "utf8")).workspaceContext, false);
 
-  // An interactive rerun starts from the recorded answers, so accepting it changes nothing.
   const customFiles = ["settings.json", "protected_paths.json", "resource-approvals.json", "sandbox.json"];
   const recordedFiles = (home: string) => customFiles.map((file) => JSON.parse(readFileSync(join(home, file), "utf8")));
   const beforeCustomRerun = recordedFiles(customHome);
@@ -276,7 +275,6 @@ try {
   assert.equal(flagsSandbox().enabled, true);
   assert.equal(JSON.parse(readFileSync(join(flagsHome, "sandbox-verification.json"), "utf8")).ok, true);
 
-  // A rerun keeps every recorded answer it does not replace: the sandbox stays on.
   const flagFiles = () => [
     "settings.json", "protected_paths.json", "resource-approvals.json", "sandbox.json", "pi/settings.json",
   ].map((file) => JSON.parse(readFileSync(join(flagsHome, file), "utf8")));

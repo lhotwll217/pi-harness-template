@@ -34,7 +34,6 @@ interface OnboardFlags {
   noBrowser: boolean;
   acknowledgeResources: boolean;
   approveWorkspaceContext: boolean;
-  /** `--sandbox` or `--sandbox-off`; undefined keeps the recorded choice. */
   sandboxEnabled: boolean | undefined;
   values: Map<string, string>;
   repeated: Map<string, string[]>;
@@ -145,7 +144,6 @@ function importAnswer(source: PiImportSource): NonNullable<OnboardingAnswers["au
   };
 }
 
-/** Flag answers over the home's recorded answers, over first-run defaults. */
 function answersFromFlags(flags: OnboardFlags, recorded: OnboardingAnswers): OnboardingAnswers {
   const provider = flags.values.get("--provider");
   const authFile = flags.values.get("--auth-file");
@@ -418,7 +416,6 @@ function protectedPaths(raw: string): string[] {
   return raw.split(",").map((path) => path.trim()).filter(Boolean).map((path) => resolve(path));
 }
 
-/** The review's starting point: the home's recorded answers, else first-run defaults. */
 function reviewDefaults(
   auth: InteractiveAuthSelection,
   protectedPathValues: string[],

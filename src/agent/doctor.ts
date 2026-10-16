@@ -58,7 +58,6 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
   const selected = provider && model ? `${provider}/${model}` : null;
   const progress = readObject(paths.onboardingProgress) as Partial<OnboardingProgress>;
   const verification = readObject(join(paths.home, "sandbox-verification.json"));
-  // The policy file decides, so a hand edit to sandbox.json shows at once.
   let sandbox: DoctorReport["checks"]["sandbox"];
   try {
     const policy = readSandboxPolicy(paths.home);

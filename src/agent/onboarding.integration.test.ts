@@ -216,7 +216,6 @@ try {
   assert.equal(completed.marker?.version, ONBOARDING_VERSION);
   assert.ok(existsSync(harnessPaths(resumeHome).onboardingMarker));
 
-  // A rerun runs every stage again with the answers it gives, and keeps every recorded one it omits.
   const recordedFiles = () => ["protected_paths.json", "resource-approvals.json", "sandbox.json"]
     .map((file) => readFileSync(join(resumeHome, file), "utf8"));
   const beforeRerun = recordedFiles();
@@ -226,7 +225,6 @@ try {
   assert.deepEqual(recordedFiles(), beforeRerun);
   assert.notEqual(rerun.marker?.completedAt, completed.marker?.completedAt);
 
-  // A rerun that cannot finish keeps the marker it would otherwise withdraw.
   writeFileSync(join(resumeHome, "resource-approvals.json"), JSON.stringify({ workspaceContext: true }));
   await assert.rejects(
     runOnboarding({}, { ...dependencies(), home: resumeHome }),
@@ -234,7 +232,6 @@ try {
   );
   assert.ok(existsSync(harnessPaths(resumeHome).onboardingMarker));
 
-  // An owner who leaves the sandbox off is not probed, even where the probe would fail.
   const offHome = join(root, "sandbox-off");
   sandboxPasses = false;
   const probesBefore = sandboxProbes;

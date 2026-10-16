@@ -189,8 +189,7 @@ function verifyHome(paths: HarnessPaths): boolean {
     [paths.workspaceInstructions, paths.workspaceMemory].every((path) => existsSync(path) && statSync(path).isFile());
 }
 
-/** The answers a home already records, so a rerun keeps every answer it does not replace.
- * Only what onboarding wrote counts: a fresh home records nothing. */
+/** The answers onboarding wrote to a home; an answer it never wrote is undefined, never a default. */
 export function recordedAnswers(home?: string): OnboardingAnswers {
   const paths = harnessPaths(home);
   const settings = readObject(paths.settings);
@@ -204,7 +203,6 @@ export function recordedAnswers(home?: string): OnboardingAnswers {
   }
   return {
     model: selectedModel(paths),
-    // Approvals written before the acknowledgment was recorded carry none, so they must be reacknowledged.
     resources: typeof approvals.workspaceContext === "boolean"
       ? {
           acknowledgedDefinitionIds: Array.isArray(acknowledged)
@@ -234,6 +232,19 @@ const ANSWERED_STAGES = {
 function requireAnswer<T>(stage: OnboardingStage, answer: T | undefined): T {
   if (answer === undefined) throw new OnboardingStageError(stage, "explicit owner input is required");
   return answer;
+}
+
+function assertRerunCanFinish(answers: OnboardingAnswers, hasCredentials: () => boolean): void {
+  if (!answers.auth && !hasCredentials()) {
+    throw new OnboardingStageError("auth", "no usable provider credentials are configured");
+  }
+  requireAnswer("model", answers.model);
+  for (const [stage, key] of Object.entries(ANSWERED_STAGES) as [OnboardingStage, keyof OnboardingAnswers][]) {
+    requireAnswer(stage, answers[key]);
+  }
+  if (!sameJson(answers.resources!.acknowledgedDefinitionIds, definitionIds(AGENT_DEFINITION))) {
+    throw new OnboardingStageError("resources", "resource review must acknowledge the exact agent definition");
+  }
 }
 
 /** Versioned, resumable setup. A stage timestamp is durable only after its predicate passes.
@@ -272,17 +283,7 @@ export async function runOnboarding(
     typeof existingMarker.completedAt === "string" &&
     ONBOARDING_STAGES.every((stage) => !!progress.stages[stage])
   ) {
-    // Refuse a rerun that cannot finish before withdrawing the marker it would lose.
-    if (!answers.auth && !authVerifier(paths)) {
-      throw new OnboardingStageError("auth", "no usable provider credentials are configured");
-    }
-    requireAnswer("model", answers.model);
-    for (const [stage, key] of Object.entries(ANSWERED_STAGES) as [OnboardingStage, keyof OnboardingAnswers][]) {
-      requireAnswer(stage, answers[key]);
-    }
-    if (!sameJson(answers.resources!.acknowledgedDefinitionIds, definitionIds(AGENT_DEFINITION))) {
-      throw new OnboardingStageError("resources", "resource review must acknowledge the exact agent definition");
-    }
+    assertRerunCanFinish(answers, () => authVerifier(paths));
     rmSync(paths.onboardingMarker, { force: true });
     progress = { version: ONBOARDING_VERSION, stages: {} };
     writeJsonAtomic(paths.onboardingProgress, progress);
@@ -415,7 +416,6 @@ export async function runOnboarding(
           if ((dependencies.platform ?? process.platform) !== "darwin" && answer.choice === "installed") {
             throw new Error("always-on service installation is not supported on this platform");
           }
-          // An install without a new executable keeps the launchd job already in place.
           const keepsInstall = answer.choice === "installed" && answer.executable === undefined &&
             loadHarnessSettings(paths.home).alwaysOn === "installed";
           if (!keepsInstall) {

@@ -54,7 +54,6 @@ try {
   assert.match(output, /^Sandbox: on, verified \(verified\)$/m);
   assert.equal(report.ok, true);
 
-  // The policy file decides, not the verification record an earlier onboarding left.
   writeFileSync(join(home, "sandbox.json"), JSON.stringify({ ...policy, enabled: false }));
   const off = await runDoctor({ home, providerModelVerifier: () => true });
   assert.deepEqual(off.checks.sandbox, {

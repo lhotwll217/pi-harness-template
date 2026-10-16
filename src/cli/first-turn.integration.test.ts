@@ -19,7 +19,6 @@ const gateway: InteractiveGateway = {
   async createNote() { throw new Error("not used"); },
 };
 
-/** One `pi-template prompt` turn in which the model runs `command` through bash; returns the tool result. */
 async function bashTurn(command: string, cwd: string): Promise<string> {
   let toolResult = "";
   faux.setResponses([
@@ -32,18 +31,22 @@ async function bashTurn(command: string, cwd: string): Promise<string> {
       return fauxAssistantMessage("done");
     },
   ]);
+  assert.equal(await withSilencedStdout(() =>
+    runPromptSession({ gateway, home, cwd, model: faux.getModel(), message: `Run ${command}` })), 0);
+  return toolResult;
+}
+
+async function withSilencedStdout<T>(run: () => Promise<T>): Promise<T> {
   const write = process.stdout.write;
-  // Print mode writes the final answer to stdout; keep the test output to its own result line.
   process.stdout.write = ((_chunk: unknown, encoding?: unknown, callback?: unknown) => {
     (typeof encoding === "function" ? encoding : callback as (() => void) | undefined)?.();
     return true;
   }) as typeof process.stdout.write;
   try {
-    assert.equal(await runPromptSession({ gateway, home, cwd, model: faux.getModel(), message: `Run ${command}` }), 0);
+    return await run();
   } finally {
     process.stdout.write = write;
   }
-  return toolResult;
 }
 
 try {

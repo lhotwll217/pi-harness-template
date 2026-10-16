@@ -147,7 +147,6 @@ function assertHeadlessApprovalPolicy(home: string): void {
   }
 }
 
-/** Bash runs in the OS sandbox only when the home's policy turns it on (docs/security.md#the-sandbox-is-opt-in). */
 function bashOperations(home: string, sandbox: SandboxAdapter): BashOperations {
   const policy = readSandboxPolicy(home);
   if (!policy?.enabled) {
