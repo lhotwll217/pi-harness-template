@@ -49,12 +49,13 @@ converging on Owner Operator's pattern. Two consumers share it: the
 Read-only is enforced by SQLite, not by statement inspection: the query runs on
 a read-only handle whose authorizer permits only reads, so any write, `ATTACH`,
 `PRAGMA`, or `VACUUM` is refused and the data is left unchanged. SQL after the
-first statement is refused rather than dropped. Each query runs in its own Node
-process because `node:sqlite` cannot interrupt a running statement; a worker
-thread in that process kills it after 5 seconds, so the limit holds even when
-the daemon dies first. A refusal carries a hint, and a query or describe naming
-a missing table names the closest real tables. This follows Stitcher `1f63ce4`
-and `cc5e8c8`.
+first statement is refused rather than dropped, and SQL with no statement is
+refused. Each query runs in its own Node process because `node:sqlite` cannot
+interrupt a running statement; a worker thread in that process stops it after 5
+seconds, so the limit holds even when the daemon dies first, and the daemon
+stops it one second later if that thread could not run. A refusal carries a hint
+where one fits, and a query or describe naming a missing table names the
+closest real tables. This follows Stitcher `1f63ce4` and `cc5e8c8`.
 
 Table and column descriptions come from a git-tracked schema-docs module
 versioned with the writers, never from the database file, so the documentation

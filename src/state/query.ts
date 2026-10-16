@@ -32,7 +32,7 @@ export interface QueryResult {
 }
 
 export class DatabaseQueryError extends Error {
-  constructor(message: string, readonly hint: string, readonly closest?: string[]) {
+  constructor(message: string, readonly hint?: string, readonly closest?: string[]) {
     super(message);
   }
 }
@@ -41,9 +41,15 @@ export const QUERY_ROW_CAP = 200;
 /** Bounds a result's JSON the way the Gateway bounds a request body: 1 MB. */
 export const QUERY_BYTE_CAP = 1_000_000;
 export const QUERY_TIME_LIMIT_MS = 5_000;
+const TIME_LIMIT_SIGNAL = "SIGALRM";
+// One second of slack lets the child's guard, which starts about 35 ms after the backstop
+// timer, act first.
+const BACKSTOP_SLACK_MS = 1_000;
 
 const MULTIPLE_STATEMENTS = "db query runs one statement; found more after the first";
+const NO_STATEMENT = "db query runs one statement; found none";
 const TABLES_HINT = "`pi-template db tables` lists every table.";
+const READ_ONLY_HINT = "`pi-template db query` runs one read-only SELECT against the state database.";
 
 function openReadOnly(dbPath: string): DatabaseSync {
   const db = new DatabaseSync(dbPath, { readOnly: true });
@@ -141,7 +147,9 @@ export function describeTable(table: string, dbPath: string = defaultDbPath()): 
 const QUERY_PROCESS_SOURCE = `
 const { DatabaseSync, constants } = require("node:sqlite");
 const { Worker } = require("node:worker_threads");
-new Worker('setTimeout(() => process.kill(process.pid, "SIGKILL"), ${QUERY_TIME_LIMIT_MS})', { eval: true }).unref();
+new Worker('setTimeout(() => process.kill(process.pid, "${TIME_LIMIT_SIGNAL}"), ${QUERY_TIME_LIMIT_MS})', { eval: true }).unref();
+const NOT_SQL = /--[^\\n]*|\\/\\*[\\s\\S]*?(?:\\*\\/|$)|[\\s;]/g;
+const jsonBytesAtLeast = (value) => typeof value === "string" ? value.length : value instanceof Uint8Array ? value.byteLength : 0;
 let input = "";
 process.stdin.setEncoding("utf8").on("data", (chunk) => { input += chunk; }).on("end", () => {
   const { sql, dbPath, rowCap, byteCap } = JSON.parse(input);
@@ -153,14 +161,15 @@ process.stdin.setEncoding("utf8").on("data", (chunk) => { input += chunk; }).on(
       const c = constants;
       const allowed = new Set([c.SQLITE_SELECT, c.SQLITE_READ, c.SQLITE_FUNCTION, c.SQLITE_RECURSIVE]);
       db.setAuthorizer((action) => allowed.has(action) ? c.SQLITE_OK : c.SQLITE_DENY);
+      if (!sql.replace(NOT_SQL, "")) throw new Error(${JSON.stringify(NO_STATEMENT)});
       const statement = db.prepare(sql);
-      const rest = sql.slice(statement.sourceSQL.length).replace(/--[^\\n]*|\\/\\*[\\s\\S]*?(?:\\*\\/|$)|[\\s;]/g, "");
-      if (rest) throw new Error(${JSON.stringify(MULTIPLE_STATEMENTS)});
+      if (sql.slice(statement.sourceSQL.length).replace(NOT_SQL, "")) throw new Error(${JSON.stringify(MULTIPLE_STATEMENTS)});
       const rows = [];
       let bytes = 0;
       let truncated = false;
       for (const row of statement.iterate()) {
-        bytes += Buffer.byteLength(JSON.stringify(row)) + 1;
+        const floor = Object.values(row).reduce((sum, value) => sum + jsonBytesAtLeast(value), 0);
+        bytes += floor > byteCap ? Infinity : Buffer.byteLength(JSON.stringify(row)) + 1;
         if (rows.length === rowCap || bytes > byteCap) { truncated = true; break; }
         rows.push({ ...row });
       }
@@ -182,10 +191,13 @@ function sqlError(message: string, dbPath: string): DatabaseQueryError {
   }
   if (/no such column/i.test(message)) return new DatabaseQueryError(message, "`pi-template db describe <table>` lists its columns.");
   if (message === MULTIPLE_STATEMENTS) return new DatabaseQueryError(message, "Send each statement in its own `pi-template db query`.");
-  if (/not authorized|authorization denied|readonly/i.test(message)) {
-    return new DatabaseQueryError(message, "`pi-template db query` runs one read-only SELECT against the state database.");
+  if (message === NO_STATEMENT || /not authorized|authorization denied|readonly/i.test(message)) {
+    return new DatabaseQueryError(message, READ_ONLY_HINT);
   }
-  return new DatabaseQueryError(message, "`pi-template db describe <table>` shows a table's columns.");
+  if (/too large to be represented/i.test(message)) {
+    return new DatabaseQueryError(message, "Select an integer beyond 2^53 as text: CAST(<column> AS TEXT).");
+  }
+  return new DatabaseQueryError(message);
 }
 
 export async function runQuery(sql: string, dbPath: string = defaultDbPath()): Promise<QueryResult> {
@@ -193,13 +205,29 @@ export async function runQuery(sql: string, dbPath: string = defaultDbPath()): P
   const outcome = await new Promise<QueryResult | { error: string }>((resolve, reject) => {
     const child = spawn(process.execPath, ["-e", QUERY_PROCESS_SOURCE], { env: {}, stdio: ["pipe", "pipe", "ignore"] });
     let output = "";
+    let stoppedAtLimit = false;
+    const backstop = setTimeout(() => {
+      stoppedAtLimit = true;
+      child.kill("SIGKILL");
+    }, QUERY_TIME_LIMIT_MS + BACKSTOP_SLACK_MS);
     child.stdout.setEncoding("utf8").on("data", (chunk: string) => { output += chunk; });
-    child.once("error", reject);
+    child.once("error", (error) => {
+      clearTimeout(backstop);
+      reject(error);
+    });
     child.once("close", (_code, signal) => {
-      if (signal === "SIGKILL") {
+      clearTimeout(backstop);
+      if (signal === TIME_LIMIT_SIGNAL || (stoppedAtLimit && signal === "SIGKILL")) {
         reject(new DatabaseQueryError(
           `query stopped after ${QUERY_TIME_LIMIT_MS / 1000} s`,
           "Add WHERE or LIMIT, and bound any recursive CTE.",
+        ));
+        return;
+      }
+      if (signal !== null) {
+        reject(new DatabaseQueryError(
+          `the query process was killed by ${signal}`,
+          signal === "SIGKILL" ? "A SIGKILL before the time limit usually means memory ran out: select fewer or smaller values." : undefined,
         ));
         return;
       }

@@ -31,6 +31,14 @@ const alive = (pid: number): boolean => {
   }
 };
 const fileHash = (path: string): string => createHash("sha256").update(readFileSync(path)).digest("hex");
+const queryProcessOf = async (parent: number): Promise<number> => {
+  for (const deadline = Date.now() + 10_000; ;) {
+    const found = spawnSync("pgrep", ["-P", String(parent), "-f", "node:sqlite"], { encoding: "utf8" }).stdout.trim();
+    if (found) return Number(found.split("\n")[0]);
+    if (Date.now() > deadline) throw new Error("the query process never started");
+    await delay(20);
+  }
+};
 
 const dir = mkdtempSync(join(tmpdir(), "pi-template-query-"));
 const dbPath = join(dir, "state.db");
@@ -149,6 +157,32 @@ try {
   assert.equal(wide.truncated, true);
   assert.ok(Buffer.byteLength(JSON.stringify(wide)) <= QUERY_BYTE_CAP);
 
+  for (const sql of ["", "  ", "-- only a comment", ";"]) {
+    await assert.rejects(runQuery(sql, dbPath), (error: unknown) => {
+      assert.ok(error instanceof DatabaseQueryError);
+      assert.equal(error.message, "db query runs one statement; found none", JSON.stringify(sql));
+      assert.equal(error.hint, READ_ONLY_HINT);
+      return true;
+    });
+  }
+  await assert.rejects(runQuery("SELECT 9007199254740993 AS big", dbPath), (error: unknown) => {
+    assert.ok(error instanceof DatabaseQueryError);
+    assert.equal(error.message, "Value is too large to be represented as a JavaScript number: 9007199254740993");
+    assert.equal(error.hint, "Select an integer beyond 2^53 as text: CAST(<column> AS TEXT).");
+    return true;
+  });
+  await assert.rejects(runQuery("SELEC 1", dbPath), (error: unknown) => {
+    assert.ok(error instanceof DatabaseQueryError);
+    assert.equal(error.message, 'near "SELEC": syntax error');
+    assert.equal(error.hint, undefined, "no hint fits a syntax error");
+    return true;
+  });
+  assert.deepEqual(
+    await runQuery("SELECT zeroblob(140000000) AS b", dbPath),
+    { rows: [], truncated: true },
+    "a value over the byte cap cuts the result before it is serialized",
+  );
+
   await assert.rejects(runQuery("SELECT body FROM note", dbPath), (error: unknown) => {
     assert.ok(error instanceof DatabaseQueryError);
     assert.equal(error.message, "no such table: note");
@@ -160,6 +194,30 @@ try {
   await assert.rejects(runQuery(RUNAWAY, dbPath), /query stopped after 5 s/);
   const elapsed = Date.now() - started;
   assert.ok(elapsed >= QUERY_TIME_LIMIT_MS && elapsed < QUERY_TIME_LIMIT_MS + 1_000, `runaway query stopped after ${elapsed} ms`);
+
+  const killed = runQuery(RUNAWAY, dbPath);
+  process.kill(await queryProcessOf(process.pid), "SIGKILL");
+  await assert.rejects(killed, (error: unknown) => {
+    assert.ok(error instanceof DatabaseQueryError);
+    assert.equal(error.message, "the query process was killed by SIGKILL", "only the time limit reads as the time limit");
+    return true;
+  });
+
+  const stalledStarted = Date.now();
+  const stalled = runQuery(RUNAWAY, dbPath);
+  const stalledProcess = await queryProcessOf(process.pid);
+  process.kill(stalledProcess, "SIGSTOP");
+  const stalledOutcome = await Promise.race([
+    stalled.then(() => "resolved", (error: unknown) => error),
+    delay(QUERY_TIME_LIMIT_MS + 3_000).then(() => "still running"),
+  ]);
+  if (alive(stalledProcess)) process.kill(stalledProcess, "SIGKILL");
+  assert.match(String(stalledOutcome instanceof Error ? stalledOutcome.message : stalledOutcome), /query stopped after 5 s/);
+  const stalledElapsed = Date.now() - stalledStarted;
+  assert.ok(
+    stalledElapsed >= QUERY_TIME_LIMIT_MS + 1_000 && stalledElapsed < QUERY_TIME_LIMIT_MS + 2_000,
+    `a query process whose guard cannot fire stops after ${stalledElapsed} ms`,
+  );
 
   const caller = spawn(process.execPath, [
     "--import", "tsx", "--input-type=module", "-e",
