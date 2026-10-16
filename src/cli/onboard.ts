@@ -292,7 +292,7 @@ async function loginCredential(
         const onAbort = () => io.flushPendingQuestion?.();
         prompt.signal?.addEventListener("abort", onAbort, { once: true });
         try {
-          const answer = await io.question("Paste the redirect URL (or press Enter once the browser finishes): ");
+          const answer = await io.question(`${prompt.message} `);
           prompt.signal?.throwIfAborted();
           return answer;
         } finally {

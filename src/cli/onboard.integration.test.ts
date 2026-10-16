@@ -288,13 +288,19 @@ try {
           message: "Select login method:",
           options: [{ id: "browser", label: "Browser login (default)" }, browserless],
         });
+        if (chosenLoginMethod === "copy_code") {
+          await interaction.prompt({ type: "manual_code", message: "Paste the code Anthropic shows after you sign in:" });
+        }
         return { type: "oauth", access: "device-access", refresh: "device-refresh", expires: 4_102_444_800_000 };
       },
       async refresh(credential) { return credential; },
       async toAuth(credential) { return { apiKey: credential.access }; },
     });
     const deviceHome = join(root, `${browserless.id}-home`);
-    const deviceInteraction = scriptedInteraction(["anthropic", "", ""]); // provider, protected paths, accept
+    // provider, [pasted code], protected paths, accept
+    const deviceInteraction = scriptedInteraction(
+      browserless.id === "copy_code" ? ["anthropic", "code#state", "", ""] : ["anthropic", "", ""],
+    );
     const deviceDependencies = passingOnboardingDependencies(deviceHome);
     delete deviceDependencies.authVerifier;
     deviceDependencies.modelVerifier = () => true;
@@ -310,6 +316,10 @@ try {
     // The method was auto-chosen: only the provider pick was asked, never a method "Selection:".
     assert.ok(!deviceInteraction.questions().includes("Selection: "),
       "the browserless method is chosen without asking");
+    if (browserless.id === "copy_code") {
+      // The paste prompt is the provider's own wording, not a browser-redirect hint.
+      assert.ok(deviceInteraction.questions().includes("Paste the code Anthropic shows after you sign in: "));
+    }
   }
 
   const forbiddenTerm = ["owner", "operator"].join("-");
