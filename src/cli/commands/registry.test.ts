@@ -117,6 +117,24 @@ try {
   assert.deepEqual(JSON.parse(promptWithDash.stderr), {
     error: "setup required before talking to the agent; run `pi-template` in an interactive terminal",
   });
+  for (const [args, name, usage] of [
+    [["prompt", ""], "message", "prompt [options] <message...>"],
+    [["prompt", "  "], "message", "prompt [options] <message...>"],
+    [["notes", "add", "  "], "body", "notes add [options] <body...>"],
+    [["docs", "query", ""], "question", "docs query [options] <question...>"],
+    [["db", "query", " "], "sql", "db query [options] <sql>"],
+    [["db", "describe", ""], "table", "db describe [options] <table>"],
+    [["docs", "read", ""], "id", "docs read [options] <id>"],
+    [["notes", "remove", " "], "id", "notes remove [options] <id>"],
+    [["schedule", "run", ""], "id", "schedule run [options] <id>"],
+    [["schedule", "remove", ""], "id", "schedule remove [options] <id>"],
+  ] as const) {
+    const path = `pi-template ${usage.split(" [")[0]}`;
+    usageError([...args], {
+      error: `required argument '${name}' is blank`,
+      hint: `Usage: pi-template ${usage}. \`${path} --help\` shows its flags and examples.`,
+    });
+  }
   usageError(["frobnicate"], { error: "unknown command 'frobnicate'", hint: "`pi-template --help` lists its commands." });
   assert.equal(existsSync(harnessPaths(home).daemonInfo), false, "help and usage errors never start the daemon");
 } finally {

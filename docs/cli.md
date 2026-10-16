@@ -42,11 +42,14 @@ usage errors follow Stitcher `914a47b` and `75db0d9`.
 
 ## Arguments
 
-Words after a verb reach it as typed. `notes add`, `docs query`, and `prompt`
-join their words into one text, dash words included; `prompt` still reads its
-own `--json`. `schedule add` runs the command after `--` exactly as given,
-refuses any other stray word, and refuses a flag given twice. `--help` before
-the text still prints help.
+`notes add`, `docs query`, and `prompt` join their words into one text, dash
+words included. A blank text, like any blank required argument, is a usage
+mistake. Commander parses the words first, so the text differs from what was
+typed in three ways: a `--` is dropped when it is the first word, and in
+`prompt` anywhere; `-h` or `--help` prints help when it is the first word, and
+in `prompt` anywhere before a `--`; and `prompt` reads `--json` anywhere as its
+flag. `schedule add` runs the command after `--` exactly as given, refuses any
+other stray word, and refuses a flag given twice.
 
 ## Help is the guidance
 

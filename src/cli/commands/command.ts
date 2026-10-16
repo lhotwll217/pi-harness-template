@@ -40,6 +40,7 @@ export function verb(
   const command = parent.command(nameAndArgs).description(summary).addHelpText("after", guideText(guide));
   command.action(async () => {
     try {
+      refuseBlankArguments(command);
       process.exitCode = await run({ args: command.processedArgs as VerbInput["args"], options: command.opts() });
     } catch (error) {
       if (error instanceof CliUsageError) command.error(error.message, { exitCode: 2 });
@@ -48,6 +49,15 @@ export function verb(
     }
   });
   return command;
+}
+
+// Commander accepts "" for a required argument.
+function refuseBlankArguments(command: Command): void {
+  command.registeredArguments.forEach((argument, index) => {
+    const value = command.processedArgs[index] as string | string[] | undefined;
+    const text = Array.isArray(value) ? value.join(" ") : value;
+    if (argument.required && !text?.trim()) throw new CliUsageError(`required argument '${argument.name()}' is blank`);
+  });
 }
 
 export const commandPath = (command: Command): string =>
