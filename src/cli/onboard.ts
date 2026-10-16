@@ -211,7 +211,7 @@ function answersFromFlags(flags: OnboardFlags, recorded: OnboardingAnswers): Onb
     resources: flags.acknowledgeResources ? {
       acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION),
       skillPolicy: workspaceSkills !== undefined || skills !== undefined
-        ? skillPolicy(workspaceSkills ?? "all", skills ?? [])
+        ? skillPolicy(workspaceSkills ?? "allowlist", skills ?? [])
         : recorded.resources?.skillPolicy ?? DEFAULT_SKILL_POLICY,
       approveWorkspaceContext: flags.approveWorkspaceContext || (recorded.resources?.approveWorkspaceContext ?? false),
     } : undefined,

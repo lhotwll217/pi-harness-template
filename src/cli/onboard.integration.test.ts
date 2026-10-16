@@ -424,6 +424,16 @@ try {
   assert.equal(JSON.parse(readFileSync(harnessPaths(importedDefaultHome).piSettings, "utf8")).defaultModel, "imported-model");
   assert.equal(JSON.parse(readFileSync(harnessPaths(importedDefaultHome).settings, "utf8")).permissionMode, "allow");
 
+  const importedDefaultDependencies = passingOnboardingDependencies(importedDefaultHome);
+  const skillPolicyAfter = async (args: string[]) => {
+    assert.equal((await onboard(["--non-interactive", "--acknowledge-resources", ...args], importedDefaultDependencies)).complete, true);
+    return JSON.parse(readFileSync(harnessPaths(importedDefaultHome).settings, "utf8")).skillPolicy;
+  };
+  assert.deepEqual(await skillPolicyAfter(["--skill", "mine", "--skill", "theirs"]), { mode: "allowlist", allowlist: ["mine", "theirs"] });
+  assert.deepEqual(await skillPolicyAfter([]), { mode: "allowlist", allowlist: ["mine", "theirs"] });
+  assert.deepEqual(await skillPolicyAfter(["--workspace-skills", "all"]), { mode: "all-workspace", allowlist: [] });
+
+
   const manualHome = join(root, "manual-home");
   const manualInteraction = scriptedInteraction([
     "manual", "custom-provider", "manual-secret", "custom-model", "", "",
