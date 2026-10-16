@@ -2,6 +2,7 @@
 // that needs the Gateway starts the daemon itself when none is running, waits for it to
 // become discoverable, and proceeds. `pi-template daemon` remains only the explicit
 // foreground mode for debugging and service managers.
+// Contract: docs/architecture.md#daemon-discovery-and-recovery
 import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync } from "node:fs";
 import { createServer } from "node:net";
@@ -11,9 +12,9 @@ import { DAEMON_PROBE_TIMEOUT_MS, harnessPaths } from "@pi-template/contracts";
 import {
   DAEMON_LAUNCHD_LABEL,
   LaunchdOwnership,
-  kickstartDaemonService,
   launchdManagesHome,
   launchdOwnership,
+  startDaemonService,
 } from "../daemon/ensure";
 import { connectGateway, probeGateway, type GatewayClient, type GatewayProbe } from "../gateway/client";
 
@@ -98,8 +99,7 @@ export async function ensureDaemon(): Promise<GatewayClient> {
   const paths = harnessPaths();
   const logPath = join(paths.logsDir, "daemon.log");
   if (launchdManagesHome(paths.home)) {
-    // A detached daemon would take the port, and KeepAlive would restart the LaunchAgent's daemon into it forever.
-    await kickstartDaemonService();
+    await startDaemonService();
   } else {
     mkdirSync(paths.logsDir, { recursive: true });
     const log = openSync(logPath, "a");

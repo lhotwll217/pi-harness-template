@@ -111,7 +111,6 @@ export function createLaunchdServiceAdapter(options: LaunchdServiceOptions = {})
   };
 }
 
-/** True when this user's LaunchAgent is installed for this harness home. */
 export function launchdManagesHome(home: string, userHome = homedir()): boolean {
   try {
     return readFileSync(daemonLaunchAgentPath(userHome), "utf8").includes(launchAgentHomeEntry(home));
@@ -120,21 +119,19 @@ export function launchdManagesHome(home: string, userHome = homedir()): boolean 
   }
 }
 
-/** Start or restart the installed LaunchAgent's daemon, loading the job first when launchd has not. */
-export async function kickstartDaemonService(options: Omit<LaunchdServiceOptions, "platform"> = {}): Promise<void> {
+export async function startDaemonService(): Promise<void> {
   const uid = process.getuid?.();
   if (uid === undefined) throw new Error("the installed daemon LaunchAgent requires a Unix user id");
-  const execFile = options.execFile ?? execFileAsync;
   const domain = `gui/${uid}`;
   const target = `${domain}/${DAEMON_LAUNCHD_LABEL}`;
-  await execFile("launchctl", ["enable", target]);
+  await execFileAsync("launchctl", ["enable", target]);
   try {
-    await execFile("launchctl", ["kickstart", "-k", target]);
+    await execFileAsync("launchctl", ["kickstart", "-k", target]);
   } catch (error) {
     const code = (error as { code?: string | number }).code;
     if (code === undefined || !LAUNCHCTL_NOT_LOADED_CODES.has(code)) throw error;
-    await execFile("launchctl", ["bootstrap", domain, daemonLaunchAgentPath(options.userHome ?? homedir())]);
-    await execFile("launchctl", ["kickstart", "-k", target]);
+    await execFileAsync("launchctl", ["bootstrap", domain, daemonLaunchAgentPath()]);
+    await execFileAsync("launchctl", ["kickstart", "-k", target]);
   }
 }
 

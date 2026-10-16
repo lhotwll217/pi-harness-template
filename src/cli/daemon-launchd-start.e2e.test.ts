@@ -35,9 +35,7 @@ const environment: NodeJS.ProcessEnv = {
 const started = new Set<number>();
 const helpers = new Set<ChildProcess>();
 
-// Stands in for launchd: logs every call; `kickstart` exits with the code in kickstartExit once,
-// otherwise starts the job's daemon the way the LaunchAgent would.
-writeFileSync(join(bin, "launchctl"), `#!/usr/bin/env node
+const fakeLaunchctl = `#!/usr/bin/env node
 const { appendFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync } = require("node:fs");
 const { spawn } = require("node:child_process");
 const { dirname, join } = require("node:path");
@@ -55,7 +53,8 @@ const log = openSync(env.TEST_DAEMON_LOG, "a");
 spawn(join(env.TEST_REPOSITORY, "pi-template"), ["daemon"], {
   cwd: env.TEST_REPOSITORY, detached: true, stdio: ["ignore", log, log], env,
 }).unref();
-`);
+`;
+writeFileSync(join(bin, "launchctl"), fakeLaunchctl);
 chmodSync(join(bin, "launchctl"), 0o755);
 
 interface CliResult { status: number | null; stdout: string; stderr: string }
