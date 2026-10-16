@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { harnessPaths } from "@pi-template/contracts";
 
 export interface SandboxFilesystemPolicy {
   allowedReadRoots: string[];
@@ -73,7 +73,7 @@ const COMMAND_ENVIRONMENT = new Set([
 export const commandEnvironment = (source: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv =>
   Object.fromEntries(Object.entries(source ?? {}).filter(([name]) => COMMAND_ENVIRONMENT.has(name) || name.startsWith("LC_")));
 
-export const sandboxPolicyPath = (home: string): string => join(home, "sandbox.json");
+export const sandboxPolicyPath = (home: string): string => harnessPaths(home).sandboxPolicy;
 
 /**
  * The home's sandbox policy, or undefined when it records none, which means off. A policy

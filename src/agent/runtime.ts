@@ -16,6 +16,7 @@ import {
 import type { Model } from "@earendil-works/pi-ai";
 import {
   ensureHarnessWorkspace,
+  harnessPaths,
   loadHarnessSettings,
   reconcilePermissionSettings,
   type AgentToolId,
@@ -63,7 +64,7 @@ function safeWorkspaceSkillPaths(home: string): string[] {
 
 function workspaceContextApproved(home: string): boolean {
   try {
-    const value = JSON.parse(readFileSync(join(home, "resource-approvals.json"), "utf8"));
+    const value = JSON.parse(readFileSync(harnessPaths(home).resourceApprovals, "utf8"));
     return value?.workspaceContext === true;
   } catch {
     return false;

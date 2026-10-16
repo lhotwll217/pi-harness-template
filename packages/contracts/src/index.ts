@@ -13,6 +13,7 @@ export {
   DEFAULT_SKILL_POLICY,
   DEFAULT_TOOL_POSTURE,
   ensureHarnessWorkspace,
+  harnessControlPaths,
   harnessPaths,
   isPermissionMode,
   loadHarnessSettings,

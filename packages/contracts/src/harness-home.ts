@@ -49,6 +49,9 @@ export interface HarnessPaths {
   onboardingMarker: string;
   onboardingProgress: string;
   protectedPaths: string;
+  sandboxPolicy: string;
+  sandboxVerification: string;
+  resourceApprovals: string;
   stateDb: string;
   daemonInfo: string;
   logsDir: string;
@@ -73,10 +76,29 @@ export function harnessPaths(home = defaultHome()): HarnessPaths {
     onboardingMarker: join(home, "onboarded.json"),
     onboardingProgress: join(home, "onboarding-progress.json"),
     protectedPaths: join(home, "protected_paths.json"),
+    sandboxPolicy: join(home, "sandbox.json"),
+    sandboxVerification: join(home, "sandbox-verification.json"),
+    resourceApprovals: join(home, "resource-approvals.json"),
     stateDb: join(home, "state.db"),
     daemonInfo: join(home, "daemon.json"),
     logsDir: join(home, "logs"),
   };
+}
+
+/**
+ * The files that set the agent's own limits, plus the Pi directory that holds its model
+ * credentials. The permission policy protects them like owner-declared protected paths.
+ */
+export function harnessControlPaths(paths: HarnessPaths): string[] {
+  return [
+    paths.settings,
+    paths.protectedPaths,
+    paths.sandboxPolicy,
+    paths.sandboxVerification,
+    paths.resourceApprovals,
+    paths.daemonInfo,
+    paths.piAgentDir,
+  ];
 }
 
 export function isPermissionMode(value: unknown): value is PermissionMode {

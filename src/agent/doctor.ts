@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
   ONBOARDING_VERSION,
@@ -57,7 +57,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
   const model = typeof piSettings.defaultModel === "string" ? piSettings.defaultModel : "";
   const selected = provider && model ? `${provider}/${model}` : null;
   const progress = readObject(paths.onboardingProgress) as Partial<OnboardingProgress>;
-  const verification = readObject(join(paths.home, "sandbox-verification.json"));
+  const verification = readObject(paths.sandboxVerification);
   let sandbox: DoctorReport["checks"]["sandbox"];
   try {
     const policy = readSandboxPolicy(paths.home);
@@ -101,7 +101,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
       reviewed: progress.version === ONBOARDING_VERSION && !!progress.stages?.resources,
       bundled: agentDefinitionSummary().map(({ id }) => id),
       workspaceSkills: configuredWorkspaceSkillNames(paths.home),
-      workspaceContext: readObject(join(paths.home, "resource-approvals.json")).workspaceContext === true,
+      workspaceContext: readObject(paths.resourceApprovals).workspaceContext === true,
     },
     permission: {
       configured: existsSync(paths.piPermissionConfig),

@@ -20,6 +20,8 @@ import { loadProtectedPaths, pathIdentities } from "./protected-paths";
 import {
   DEFAULT_PERMISSION_MODE,
   ensureHarnessWorkspace,
+  harnessControlPaths,
+  harnessPaths,
   isPermissionMode,
   loadHarnessSettings,
   saveHarnessSettings,
@@ -130,7 +132,7 @@ function permissionPolicy(
   }
   const generatedRule: PiDenyRule = { action: "deny", reason: PROTECTED_REASON };
   const pathRules: PiPermissionPatternMap = { "*": "allow" };
-  for (const blocked of loadProtectedPaths(home).paths) {
+  for (const blocked of [...harnessControlPaths(harnessPaths(home)), ...loadProtectedPaths(home).paths]) {
     for (const identity of pathIdentities(blocked)) {
       pathRules[identity] = generatedRule;
       pathRules[`${identity}/*`] = generatedRule;

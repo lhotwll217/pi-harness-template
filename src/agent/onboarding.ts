@@ -193,7 +193,7 @@ function verifyHome(paths: HarnessPaths): boolean {
 export function recordedAnswers(home?: string): OnboardingAnswers {
   const paths = harnessPaths(home);
   const settings = readObject(paths.settings);
-  const approvals = readObject(resolve(paths.home, "resource-approvals.json"));
+  const approvals = readObject(paths.resourceApprovals);
   const acknowledged = approvals.acknowledgedDefinitionIds;
   let sandbox: SandboxPolicy | undefined;
   try {
@@ -347,13 +347,13 @@ export async function runOnboarding(
             throw new Error("resource review must acknowledge the exact agent definition");
           }
           saveHarnessSettings(paths.home, { skillPolicy: answer.skillPolicy });
-          writeJsonAtomic(resolve(paths.home, "resource-approvals.json"), {
+          writeJsonAtomic(paths.resourceApprovals, {
             acknowledgedDefinitionIds: answer.acknowledgedDefinitionIds,
             workspaceContext: answer.approveWorkspaceContext,
           });
           if (
             !sameJson(loadHarnessSettings(paths.home).skillPolicy, answer.skillPolicy) ||
-            readObject(resolve(paths.home, "resource-approvals.json")).workspaceContext !== answer.approveWorkspaceContext
+            readObject(paths.resourceApprovals).workspaceContext !== answer.approveWorkspaceContext
           ) {
             throw new Error("approved workspace resource policy was not persisted");
           }
@@ -400,11 +400,11 @@ export async function runOnboarding(
           };
           writeJsonAtomic(sandboxPolicyPath(paths.home), policy);
           if (!policy.enabled) {
-            rmSync(resolve(paths.home, "sandbox-verification.json"), { force: true });
+            rmSync(paths.sandboxVerification, { force: true });
             break;
           }
           sandboxResult = await sandbox.verify(policy);
-          writeJsonAtomic(resolve(paths.home, "sandbox-verification.json"), {
+          writeJsonAtomic(paths.sandboxVerification, {
             ...sandboxResult,
             verifiedAt: now(),
           });
