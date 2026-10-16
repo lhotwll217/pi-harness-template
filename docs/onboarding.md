@@ -45,15 +45,20 @@ answer it needs, and is written again when the last stage passes, so a rerun
 that fails a stage leaves setup incomplete. Homes onboarded before the
 agent-definition acknowledgment was recorded must acknowledge it once more.
 
-Two recorded answers stop a rerun before anything is written when they cannot
-be read, rather than falling back to a default that could widen access. A
+A rerun never falls back to a default that could widen access when a recorded
+answer cannot be read; it stops, or asks, before anything is written. A
 `sandbox.json` that does not parse, or lacks any part of its policy (the three
 filesystem root lists, `process.allowSubprocesses`, and a network mode of `deny`
 or `allowlist` with its domain list), stops the rerun until `--sandbox` or
-`--sandbox-off` replaces it. A non-interactive rerun whose
-`settings.json` does not parse or records an unknown permission mode stops
-until `--permission` replaces it. Non-interactive onboarding without
-`--permission` takes the recorded mode, or `allow` on a new home.
+`--sandbox-off` replaces it. A non-interactive rerun stops when `settings.json`
+does not parse or records an unknown permission mode, until `--permission`
+replaces it, and when `protected_paths.json` does not parse or lists anything
+but strings, until `--protected-path` replaces it. An interactive rerun over
+either of those two files names the damage, asks for its answers with no
+default (the protected paths; the permission mode, and the service choice when
+settings no longer record it), and lists the damaged file in the review.
+Non-interactive onboarding without `--permission` takes the recorded mode, or
+`allow` on a new home.
 
 ## Fail-closed rule
 

@@ -52,7 +52,7 @@ export function addHarnessCommands(program: Command): void {
       "Interactive by default; --non-interactive takes every answer from flags.",
       "--non-interactive needs --provider, --api-key or --auth-file, --model, --service, and --acknowledge-resources. --permission defaults to allow.",
       "The sandbox stays off unless --sandbox turns it on (--sandbox-off turns it off); its roots default to cwd.",
-      "On an onboarded home, every omitted flag keeps its recorded answer; a recorded sandbox or permission choice that cannot be read stops the rerun until its flag replaces it.",
+      "On an onboarded home, every omitted flag keeps its recorded answer; a recorded sandbox choice, permission mode, or protected-path list that cannot be read stops the rerun until its flag replaces it.",
     ],
     examples: [
       "pi-template onboard",

@@ -252,6 +252,52 @@ try {
   assert.match(customRerun.transcript(), /^ {2}Permission mode: ask$/m);
   assert.deepEqual(recordedFiles(customHome), beforeCustomRerun);
 
+  const customDependencies = (io: CliOnboardingDependencies["interactiveIO"]): CliOnboardingDependencies => ({
+    ...passingOnboardingDependencies(customHome), interactiveIO: io, standalonePiAuthPath: standaloneAuth,
+  });
+  const customProtectedPath = harnessPaths(customHome).protectedPaths;
+  const damagedProtected = '{"paths":["/sensitive"],}\n';
+  const protectedProblem = `protected paths are not valid JSON at ${customProtectedPath}`;
+  writeFileSync(customProtectedPath, damagedProtected);
+  const blankOverDamagedPaths = scriptedInteraction(["", ""]);
+  await assert.rejects(onboard([], customDependencies(blankOverDamagedPaths.io)), {
+    name: "CliUsageError",
+    message: `${protectedProblem}; enter the protected paths, or none`,
+  });
+  assert.equal(blankOverDamagedPaths.questions()[1], "Protected paths (comma-separated, none for none; the recorded list is damaged): ");
+  assert.equal(readFileSync(customProtectedPath, "utf8"), damagedProtected);
+  const replacedPaths = scriptedInteraction(["", "/sensitive", ""]);
+  assert.equal((await onboard([], customDependencies(replacedPaths.io))).complete, true);
+  assert.match(replacedPaths.transcript(), new RegExp(`^ {2}Damaged recorded file, replaced by these answers: ${protectedProblem}$`, "m"));
+  assert.deepEqual(recordedFiles(customHome), beforeCustomRerun);
+
+  const customSettingsPath = harnessPaths(customHome).settings;
+  const damagedSettings = '{"permissionMode":"ask",\n';
+  const settingsProblem = `settings are not valid JSON at ${customSettingsPath}`;
+  writeFileSync(customSettingsPath, damagedSettings);
+  const blankOverDamagedSettings = scriptedInteraction(["", "", ""]);
+  await assert.rejects(onboard([], customDependencies(blankOverDamagedSettings.io)), {
+    name: "CliUsageError",
+    message: `${settingsProblem}; answer one of allow, ask, read-only`,
+  });
+  assert.match(blankOverDamagedSettings.transcript(), new RegExp(`^${settingsProblem}; choose the answers it recorded again\\.$`, "m"));
+  assert.equal(blankOverDamagedSettings.questions()[2], "Permission mode, required (allow/ask/read-only): ");
+  assert.equal(readFileSync(customSettingsPath, "utf8"), damagedSettings);
+  const blankServiceOverDamagedSettings = scriptedInteraction(["", "", "ask", ""]);
+  await assert.rejects(onboard([], customDependencies(blankServiceOverDamagedSettings.io)), {
+    name: "CliUsageError",
+    message: `${settingsProblem}; answer one of declined, installed`,
+  });
+  assert.equal(blankServiceOverDamagedSettings.questions()[3], "Daemon service, required (declined/installed): ");
+  assert.equal(readFileSync(customSettingsPath, "utf8"), damagedSettings);
+  const replacedSettings = scriptedInteraction(["", "", "ask", "declined", ""]);
+  assert.equal((await onboard([], customDependencies(replacedSettings.io))).complete, true);
+  assert.match(replacedSettings.transcript(), new RegExp(`^ {2}Damaged recorded file, replaced by these answers: ${settingsProblem}$`, "m"));
+  assert.match(replacedSettings.transcript(), /^ {2}Permission mode: ask$/m);
+  assert.match(replacedSettings.transcript(), /^ {2}Service: declined$/m);
+  assert.equal(JSON.parse(readFileSync(customSettingsPath, "utf8")).permissionMode, "ask");
+  assert.equal(JSON.parse(readFileSync(customSettingsPath, "utf8")).alwaysOn, "declined");
+
   const flagsHome = join(root, "flags-home");
   let flagsModel: { provider: string; model: string } | undefined;
   const flagsDependencies = passingOnboardingDependencies(flagsHome);
@@ -287,6 +333,21 @@ try {
   const [settingsBefore, ...restBefore] = beforeRerun;
   assert.deepEqual(settingsAfter, { ...settingsBefore, permissionMode: "ask" });
   assert.deepEqual(restAfter, restBefore);
+
+  const flagsProtectedPath = harnessPaths(flagsHome).protectedPaths;
+  for (const damaged of ['{"paths":["/flags-private"],}\n', '{"paths":"/flags-private","repos":[]}\n']) {
+    writeFileSync(flagsProtectedPath, damaged);
+    const problem = damaged.includes(",}")
+      ? `protected paths are not valid JSON at ${flagsProtectedPath}`
+      : `protected paths must list paths and repos as strings at ${flagsProtectedPath}`;
+    await assert.rejects(onboard(["--non-interactive"], flagsDependencies), {
+      name: "CliUsageError",
+      message: `${problem}; fix it, or rerun with --protected-path to replace it`,
+    });
+    assert.equal(readFileSync(flagsProtectedPath, "utf8"), damaged);
+  }
+  assert.equal((await onboard(["--non-interactive", "--protected-path", "/flags-private"], flagsDependencies)).complete, true);
+  assert.deepEqual(flagFiles(), [settingsAfter, ...restBefore]);
 
   const flagsSandboxPath = join(flagsHome, "sandbox.json");
   const verificationBytes = readFileSync(join(flagsHome, "sandbox-verification.json"), "utf8");

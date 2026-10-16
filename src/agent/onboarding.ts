@@ -23,6 +23,7 @@ import {
   reconcilePermissionSettings,
   saveHarnessSettings,
   savePermissionMode,
+  unreadableProtectedPaths,
   type HarnessPaths,
   type OnboardingMarker,
   type OnboardingProgress,
@@ -213,7 +214,9 @@ export function recordedAnswers(home?: string): OnboardingAnswers {
         }
       : undefined,
     capabilities: isPermissionMode(settings.permissionMode) ? { permissionMode: settings.permissionMode } : undefined,
-    protectedPaths: existsSync(paths.protectedPaths) ? loadProtectedPaths(paths.home) : undefined,
+    protectedPaths: existsSync(paths.protectedPaths) && !unreadableProtectedPaths(paths.home)
+      ? loadProtectedPaths(paths.home)
+      : undefined,
     sandbox: sandbox ? { policy: sandbox } : undefined,
     service: settings.alwaysOn === "installed" || settings.alwaysOn === "declined"
       ? { choice: settings.alwaysOn }

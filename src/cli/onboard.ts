@@ -14,6 +14,7 @@ import {
   harnessPaths,
   isPermissionMode,
   unreadablePermissionMode,
+  unreadableProtectedPaths,
   type PermissionMode,
   type SkillPolicy,
 } from "@pi-template/contracts";
@@ -69,6 +70,12 @@ interface InteractiveAuthSelection {
   answer: NonNullable<OnboardingAnswers["auth"]>;
   provider: string;
   model: string;
+}
+
+/** Why each recorded file the interactive review must not take a default from is damaged. */
+interface DamagedRecords {
+  protectedPaths?: string;
+  settings?: string;
 }
 
 type ReviewedSetup = OnboardingAnswers & {
@@ -450,7 +457,12 @@ function reviewDefaults(
   };
 }
 
-function writeReview(io: InteractiveOnboardingIO, answers: ReviewedSetup, home: string | undefined): void {
+function writeReview(
+  io: InteractiveOnboardingIO,
+  answers: ReviewedSetup,
+  home: string | undefined,
+  damaged: DamagedRecords,
+): void {
   const paths = harnessPaths(home);
   io.write("Setup review:\n");
   io.write(`  Provider: ${answers.model.provider}\n`);
@@ -474,6 +486,37 @@ function writeReview(io: InteractiveOnboardingIO, answers: ReviewedSetup, home: 
   io.write(`  Sandbox allowed write roots: ${policy.filesystem.allowedWriteRoots.join(", ")}\n`);
   io.write(`  Network: ${policy.network.mode}${policy.network.allowedDomains.length ? ` (${policy.network.allowedDomains.join(", ")})` : ""}\n`);
   io.write(`  Service: ${answers.service.choice}\n`);
+  for (const problem of [damaged.protectedPaths, damaged.settings]) {
+    if (problem) io.write(`  Damaged recorded file, replaced by these answers: ${problem}\n`);
+  }
+}
+
+async function requiredChoice<T extends string>(
+  io: InteractiveOnboardingIO,
+  prompt: string,
+  problem: string,
+  choices: readonly T[],
+): Promise<T> {
+  const answer = (await io.question(prompt)).trim();
+  if (!(choices as readonly string[]).includes(answer)) {
+    throw new CliUsageError(`${problem}; answer one of ${choices.join(", ")}`);
+  }
+  return answer as T;
+}
+
+async function installedService(
+  io: InteractiveOnboardingIO,
+  keepsInstall: boolean,
+): Promise<NonNullable<OnboardingAnswers["service"]>> {
+  const executable = (await io.question(
+    `Absolute pi-template executable path${keepsInstall ? " (blank keeps the installed service)" : ""}: `,
+  )).trim();
+  if (keepsInstall && !executable) return { choice: "installed" };
+  return {
+    choice: "installed",
+    executable: resolve(executable),
+    workingDirectory: resolve((await io.question("Daemon working directory: ")).trim()),
+  };
 }
 
 async function customizedAnswers(
@@ -494,19 +537,9 @@ async function customizedAnswers(
   const workspaceContext = await io.question("Approve workspace AGENTS.md and MEMORY.md? [y/N] ");
   const serviceRaw = (await io.question("Daemon service [declined/installed]: ")).trim() || defaults.service.choice;
   if (serviceRaw !== "declined" && serviceRaw !== "installed") throw new CliUsageError("service choice must be declined or installed");
-  const keepsInstall = defaults.service.choice === "installed";
-  const executableRaw = serviceRaw === "installed"
-    ? (await io.question(`Absolute pi-template executable path${keepsInstall ? " (blank keeps the installed service)" : ""}: `)).trim()
-    : "";
   const service = serviceRaw === "declined"
     ? { choice: "declined" as const }
-    : keepsInstall && !executableRaw
-    ? { choice: "installed" as const }
-    : {
-        choice: "installed" as const,
-        executable: resolve(executableRaw),
-        workingDirectory: resolve((await io.question("Daemon working directory: ")).trim()),
-      };
+    : await installedService(io, defaults.service.choice === "installed");
   return {
     ...defaults,
     model: { provider: defaults.model.provider, model },
@@ -528,17 +561,37 @@ async function interactiveAnswers(
   createRuntime: CreateModelRuntime,
   recorded: OnboardingAnswers,
   sandboxEnabled: boolean | undefined,
+  damaged: DamagedRecords,
 ): Promise<OnboardingAnswers> {
   const auth = await interactiveAuth(io, source, preferDeviceCode, createRuntime);
   const recordedPaths = recorded.protectedPaths?.paths;
-  const protectedRaw = (await io.question(recordedPaths
+  const protectedRaw = (await io.question(damaged.protectedPaths
+    ? "Protected paths (comma-separated, none for none; the recorded list is damaged): "
+    : recordedPaths
     ? `Protected paths (comma-separated, none to clear) [${recordedPaths.join(", ") || "none"}]: `
     : "Protected paths (comma-separated, blank for none): ")).trim();
+  if (damaged.protectedPaths && !protectedRaw) {
+    throw new CliUsageError(`${damaged.protectedPaths}; enter the protected paths, or none`);
+  }
   const protectedPathValues = recordedPaths && !protectedRaw
     ? recordedPaths
     : protectedRaw.toLowerCase() === "none" ? [] : protectedPaths(protectedRaw);
-  const defaults = reviewDefaults(auth, protectedPathValues, recorded, sandboxEnabled);
-  writeReview(io, defaults, home);
+  let replaced = recorded;
+  if (damaged.settings) {
+    io.write(`${damaged.settings}; choose the answers it recorded again.\n`);
+    const permissionMode = await requiredChoice(
+      io, "Permission mode, required (allow/ask/read-only): ", damaged.settings, ["allow", "ask", "read-only"] as const,
+    );
+    replaced = { ...replaced, capabilities: { permissionMode } };
+    if (!recorded.service) {
+      const choice = await requiredChoice(
+        io, "Daemon service, required (declined/installed): ", damaged.settings, ["declined", "installed"] as const,
+      );
+      replaced = { ...replaced, service: choice === "declined" ? { choice } : await installedService(io, false) };
+    }
+  }
+  const defaults = reviewDefaults(auth, protectedPathValues, replaced, sandboxEnabled);
+  writeReview(io, defaults, home, damaged);
   const acceptance = await io.question("Accept this setup? [Y/n] ");
   if (isDefaultYesAnswer(acceptance)) return defaults;
   if (isNegativeAnswer(acceptance)) return await customizedAnswers(io, defaults);
@@ -552,6 +605,11 @@ function assertRecordedSandboxReadable(home: string, sandboxEnabled: boolean | u
   } catch (error) {
     throw new CliUsageError(`${(error as Error).message}; fix it, or rerun with --sandbox or --sandbox-off to replace it`);
   }
+}
+
+function assertRecordedProtectedPathsReadable(home: string, flags: OnboardFlags): void {
+  const problem = flags.repeated.has("--protected-path") ? undefined : unreadableProtectedPaths(home);
+  if (problem) throw new CliUsageError(`${problem}; fix it, or rerun with --protected-path to replace it`);
 }
 
 function assertRecordedPermissionReadable(home: string, permission: string | undefined): void {
@@ -575,6 +633,7 @@ export async function onboard(
   const recorded = recordedAnswers(home);
   if (flags.nonInteractive) {
     assertRecordedPermissionReadable(home, flags.values.get("--permission"));
+    assertRecordedProtectedPathsReadable(home, flags);
     return await runOnboarding(answersFromFlags(flags, recorded), machineDependencies);
   }
 
@@ -590,6 +649,7 @@ export async function onboard(
     const source = standaloneSource.authPath === destinationAuthPath ? undefined : standaloneSource;
     const answers = await interactiveAnswers(
       io, source, machineDependencies.home, flags.noBrowser, createModelRuntime, recorded, flags.sandboxEnabled,
+      { protectedPaths: unreadableProtectedPaths(home), settings: unreadablePermissionMode(home) },
     );
     return await runOnboarding(answers, machineDependencies);
   } finally {

@@ -29,7 +29,7 @@ export type {
 
 // Protected paths: owner-declared off-limits trees and repos, consumed by the permission
 // layer and by direct tool guards. OS enforcement owns the stronger boundary.
-export { isProtected, loadProtectedPaths, pathIdentities } from "./protected-paths";
+export { isProtected, loadProtectedPaths, pathIdentities, unreadableProtectedPaths } from "./protected-paths";
 export type { ProtectedPaths } from "./protected-paths";
 
 // Permission-mode reconciliation into the Pi permission-system config. A permission
