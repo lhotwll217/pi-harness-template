@@ -1,6 +1,6 @@
 import { once } from "node:events";
 import type { Command } from "commander";
-import type { GatewayClient } from "../../gateway/client";
+import type { ConfirmedGatewayClient } from "../ensure-daemon";
 import { CliUsageError } from "../args";
 
 export interface VerbInput {
@@ -76,7 +76,7 @@ export async function emit(payload: unknown): Promise<void> {
   await writeOut(`${JSON.stringify(payload, null, 2)}\n`);
 }
 
-export async function withGateway<T>(use: (client: GatewayClient) => Promise<T>): Promise<T> {
+export async function withGateway<T>(use: (client: ConfirmedGatewayClient) => Promise<T>): Promise<T> {
   const { ensureDaemon } = await import("../ensure-daemon");
   const client = await ensureDaemon();
   try {

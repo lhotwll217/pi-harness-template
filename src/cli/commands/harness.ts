@@ -29,7 +29,7 @@ export function addHarnessCommands(program: Command): void {
     notFor: "why setup is incomplete: pi-template doctor.",
     examples: ["pi-template status"],
   }, async () => await withGateway(async (client) => {
-    await emit({ health: await client.health(), ready: await client.ready() });
+    await emit({ health: client.probe.health, ready: client.probe.ready });
     return 0;
   }));
 

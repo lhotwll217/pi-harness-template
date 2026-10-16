@@ -41,7 +41,7 @@ export async function runEntry(): Promise<number> {
     return 0;
   }
   await withGateway(async (client) => {
-    await emit({ health: await client.health(), ready: await client.ready() });
+    await emit({ health: client.probe.health, ready: client.probe.ready });
   });
   return 0;
 }
