@@ -87,6 +87,8 @@ export function harnessPaths(home = defaultHome()): HarnessPaths {
 /**
  * The files that set the agent's own limits, plus the Pi directory that holds its model
  * credentials. The permission policy protects them like owner-declared protected paths.
+ * The state database is among them because the daemon runs its command schedules on the
+ * host, outside the sandbox; SQLite writes through the -wal, -shm, and -journal sidecars.
  */
 export function harnessControlPaths(paths: HarnessPaths): string[] {
   return [
@@ -97,6 +99,8 @@ export function harnessControlPaths(paths: HarnessPaths): string[] {
     paths.resourceApprovals,
     paths.daemonInfo,
     paths.piAgentDir,
+    paths.stateDb,
+    ...["-wal", "-shm", "-journal"].map((suffix) => paths.stateDb + suffix),
   ];
 }
 

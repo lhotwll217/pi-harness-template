@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import {
   createBashToolDefinition,
@@ -173,9 +173,16 @@ function bashOperations(home: string, sandbox: SandboxAdapter): BashOperations {
         await local.exec(command, cwd, { ...execution, env: commandEnvironment(execution.env ?? process.env) }),
     };
   }
+  // The sandbox resolves symlinks only in paths that exist; a control file not yet written
+  // must still be denied under the home's real path, the one the kernel matches.
+  const paths = harnessPaths(realpathSync(home));
   const enforced = {
     ...policy,
-    filesystem: { ...policy.filesystem, deniedWriteRoots: harnessControlPaths(harnessPaths(home)) },
+    filesystem: {
+      ...policy.filesystem,
+      deniedReadRoots: [...new Set([...policy.filesystem.deniedReadRoots, paths.piAgentDir])],
+      deniedWriteRoots: harnessControlPaths(paths),
+    },
   };
   return {
     exec: async (command, cwd, execution) => {

@@ -70,8 +70,13 @@ Two lists become deny rules on the permission extension's `path` surface,
 - the harness control files, which set the agent's own limits or hold its
   credentials: `settings.json`, `protected_paths.json`, `sandbox.json`,
   `sandbox-verification.json`, `resource-approvals.json`, `daemon.json` (the
-  gateway token), and the `pi/` directory (model credentials and Pi settings),
-  all under the harness home ([`harnessControlPaths`](../packages/contracts/src/harness-home.ts)).
+  gateway token), the `pi/` directory (model credentials and Pi settings), and
+  the state database `state.db` with its SQLite `-wal`, `-shm`, and `-journal`
+  files, whose command schedules the daemon runs on the host outside the
+  sandbox; all under the harness home
+  ([`harnessControlPaths`](../packages/contracts/src/harness-home.ts)). The
+  agent reads the state database through its `query_database` tool, which
+  names no path.
 
 A rule denies reading and writing the path and everything beneath it, matched as
 written and as symlink-resolved, with the reason `Pi Template protected paths`.
@@ -137,13 +142,18 @@ environment variables (`PATH`, `HOME`, locale, certificate paths and the like),
 so the daemon's own credentials stay out of transcripts.
 
 The sandbox covers bash only; the file tools run in the harness process under
-the [protected-path rules](#protected-paths) alone. On, a bash command cannot
-read or write under `<harness home>/pi` or an owner protected path, and writes
-only under its write roots. The runtime adds every control file to the
-sandbox's write denials whatever the write roots say, so no command can turn
-the sandbox off or change the permission mode, protected paths, or approvals.
-Reads outside `pi/` and the protected paths are allowed, so bash can still read
-`daemon.json`, which `pi-template` needs to reach the daemon. Off, a command
+the [protected-path rules](#protected-paths) alone. On, a bash command writes
+only under its write roots and cannot read or write an owner protected path,
+which onboarding records in `sandbox.json`'s read denials. Whatever
+`sandbox.json` records, the runtime adds `<harness home>/pi` to the sandbox's
+read denials and every control file, the state database included, to its write
+denials, without saving either to the file. It names them under the home's real
+path, so a control file not yet written is covered when the home is reached
+through a symlink such as macOS `/var`. So no command can turn the sandbox off,
+change the permission mode, protected paths, or approvals, or add a schedule
+the daemon would run on the host. Reads outside `pi/` and the protected paths
+are allowed by design, so bash can still read `daemon.json`, which
+`pi-template` needs to reach the daemon. Off, a command
 reaches everything the owner can except a literal protected path, so a glob or
 `python3 -c` with a path it builds itself reads the model credentials.
 `pi-template doctor` reads `sandbox.json` itself and reports `sandbox.enabled`,

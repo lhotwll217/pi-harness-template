@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { harnessPaths, savePermissionMode } from "@pi-template/contracts";
 import { createSandboxAdapter } from "../agent/sandbox";
+import { State } from "../state";
 import { passingOnboardingDependencies } from "../../test/helpers/onboarding";
 import { toolResultFromTurn } from "../../test/helpers/tool-turn";
 import { onboard } from "./onboard";
 
-const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-template-control-files-")));
+const spelledRoot = mkdtempSync(join(tmpdir(), "pi-template-control-files-"));
+const root = realpathSync(spelledRoot);
 const home = join(root, "home");
 const faux = registerFauxProvider();
 
@@ -80,13 +82,62 @@ try {
       "cat: ../p?/auth.json: No such file or directory\n\n\nCommand exited with code 1",
     );
     assert.equal(await toolResultFromTurn(faux, session, "bash", { command: "echo kept > bash-note.md && cat bash-note.md" }), "kept\n");
+
+    // The daemon runs command schedules on the host, unsandboxed, so the state database and
+    // its sidecars are control files too.
+    new State(paths.stateDb).close();
+    const insertCommandSchedule = [
+      "sqlite3 ../stat?.db <<'SQL'",
+      "INSERT INTO schedules VALUES ('escalate', 'escalate', 1, 'every', '{\"kind\":\"every\",\"everyMs\":60000,\"anchorMs\":0}', " +
+        "'command', '{\"kind\":\"command\",\"argv\":[\"/usr/bin/true\"]}', '/', 30, 1, " +
+        "'2026-10-16T00:00:00.000Z', '2026-10-16T00:00:00.000Z', '2026-10-16T00:00:00.000Z', NULL);",
+      "SQL",
+    ].join("\n");
+    assert.equal(
+      await toolResultFromTurn(faux, session, "bash", { command: insertCommandSchedule }),
+      "Parse error near line 1: unable to open database file (14)\n\n\nCommand exited with code 1",
+    );
+    const stateBytes = readFileSync(paths.stateDb);
+    assert.match(await toolResultFromTurn(faux, session, "bash", { command: "echo x >> ../stat?.db" }), /Operation not permitted/);
+    assert.deepEqual(readFileSync(paths.stateDb), stateBytes);
+    const state = new State(paths.stateDb);
+    assert.deepEqual(state.listSchedules(), [], "no schedule reached the daemon's database");
+    state.close();
+    for (const sidecar of ["state.db-wal", "state.db-shm", "state.db-journal"]) {
+      const result = await toolResultFromTurn(faux, session, "bash", { command: `f=${sidecar}; echo x > ../$f` });
+      assert.match(result, /Operation not permitted/, `${sidecar} is not writable`);
+      assert.equal(existsSync(join(home, sidecar)), false, `${sidecar} was not created`);
+    }
+
+    // Read denial of pi/ does not depend on what sandbox.json records.
+    writeFileSync(paths.sandboxPolicy, JSON.stringify({ ...homeInWriteRoots, filesystem: { ...homeInWriteRoots.filesystem, deniedReadRoots: [] } }));
+    assert.equal(
+      await toolResultFromTurn(faux, session, "bash", { command: "cat ../p?/auth.json" }),
+      "cat: ../p?/auth.json: No such file or directory\n\n\nCommand exited with code 1",
+    );
+
+    // A home spelled through a symlink (macOS /var -> /private/var) still protects control
+    // files that do not exist yet.
+    const linkedHome = join(spelledRoot, "linked-home");
+    assert.equal((await onboard([
+      "--non-interactive", "--auth-file", join(standaloneDir, "auth.json"), "--acknowledge-resources", "--service", "declined", "--sandbox",
+    ], passingOnboardingDependencies(linkedHome))).complete, true);
+    const linkedPaths = harnessPaths(linkedHome);
+    writeFileSync(linkedPaths.sandboxPolicy, JSON.stringify({ ...homeInWriteRoots, filesystem: {
+      allowedReadRoots: [spelledRoot], allowedWriteRoots: [spelledRoot], deniedReadRoots: [],
+    } }));
+    const linkedSession = { home: linkedHome, cwd: linkedPaths.workspace };
+    assert.equal(await toolResultFromTurn(faux, linkedSession, "bash", { command: "f=note; echo kept > ../$f.md && cat ../note.md" }), "kept\n");
+    assert.equal(existsSync(linkedPaths.daemonInfo), false);
+    assert.match(await toolResultFromTurn(faux, linkedSession, "bash", { command: "f=daemon; echo '{}' > ../$f.json" }), /Operation not permitted/);
+    assert.equal(existsSync(linkedPaths.daemonInfo), false, "a missing daemon.json under a symlinked home stays unwritten");
   }
   writeFileSync(paths.sandboxPolicy, sandboxBytes);
 
   savePermissionMode(home, "read-only");
   assert.equal(await toolResultFromTurn(faux, session, "read", { path: paths.daemonInfo }), denied("path_read", "read", paths.daemonInfo));
 
-  process.stdout.write("ok — the agent's file tools cannot read or change the harness control files or Pi credentials, and still reach the workspace\n");
+  process.stdout.write("ok — neither the file tools nor sandboxed bash can change the harness control files or the state database, or read Pi credentials, and both still reach the workspace\n");
 } finally {
   faux.unregister();
   rmSync(root, { recursive: true, force: true });
