@@ -7,17 +7,14 @@ import { mkdirSync, openSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { harnessPaths } from "@pi-template/contracts";
+import { DAEMON_PROBE_TIMEOUT_MS, harnessPaths } from "@pi-template/contracts";
 import { DAEMON_LAUNCHD_LABEL, LaunchdOwnership, launchdOwnership } from "../daemon/ensure";
 import { connectGateway, probeGateway, type GatewayClient, type GatewayProbe } from "../gateway/client";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const READY_DEADLINE_MS = 15_000;
 const READY_POLL_MS = 150;
-// Matches the startup guard in src/daemon/lifecycle.ts; a daemon that cannot answer
-// /health within it is treated as unreachable, not as absent.
-const PROBE_TIMEOUT_MS = 1_000;
-const probeDeadline = () => ({ signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+const probeDeadline = () => ({ signal: AbortSignal.timeout(DAEMON_PROBE_TIMEOUT_MS) });
 
 const delay = async (milliseconds: number): Promise<void> => {
   await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, milliseconds));
@@ -42,25 +39,32 @@ function processExists(pid: number): boolean {
   }
 }
 
-/**
- * Stale discovery (an exited pid, or a reused pid whose port is free) permits a fresh daemon.
- * A live daemon this process cannot reach is left running, with a diagnostic instead.
- */
-async function refuseUnreachableDaemon(probe: Extract<GatewayProbe, { kind: "unreachable" }>): Promise<void> {
-  const { pid, port, authToken } = probe.info;
+type UnreachableProbe = Extract<GatewayProbe, { kind: "unreachable" }>;
+
+const probeCauses = (probe: UnreachableProbe): Error[] => {
   const causes: Error[] = [];
   for (let cause = probe.cause; cause instanceof Error && !causes.includes(cause); cause = cause.cause) {
     causes.push(cause);
   }
-  const codes = causes.map((cause) => (cause as NodeJS.ErrnoException).code);
-  if (!processExists(pid) || codes.includes("ECONNREFUSED") || await loopbackPortIsFree(port)) return;
+  return causes;
+};
+const errorCode = (error: Error): unknown => (error as NodeJS.ErrnoException).code;
 
+async function discoveryIsStale(probe: UnreachableProbe): Promise<boolean> {
+  const { pid, port } = probe.info;
+  return !processExists(pid) || probeCauses(probe).some((cause) => errorCode(cause) === "ECONNREFUSED") ||
+    await loopbackPortIsFree(port);
+}
+
+async function unreachableDaemonError(probe: UnreachableProbe): Promise<Error> {
+  const { pid, port, authToken } = probe.info;
+  const causes = probeCauses(probe);
   let detail = causes.map((cause) => {
-    const code = (cause as NodeJS.ErrnoException).code;
+    const code = errorCode(cause);
     return `${cause.name}${typeof code === "string" ? ` (${code})` : ""}: ${cause.message}`;
   }).join("; ") || String(probe.cause);
   if (typeof authToken === "string" && authToken.trim()) detail = detail.replaceAll(authToken.trim(), "[redacted]");
-  const permissionHint = codes.some((code) => code === "EPERM" || code === "EACCES")
+  const permissionHint = causes.some((cause) => errorCode(cause) === "EPERM" || errorCode(cause) === "EACCES")
     ? " Check this process's sandbox or network permissions."
     : "";
   const restart = `\`launchctl kickstart -k gui/${process.getuid?.() ?? "<uid>"}/${DAEMON_LAUNCHD_LABEL}\``;
@@ -70,7 +74,7 @@ async function refuseUnreachableDaemon(probe: Extract<GatewayProbe, { kind: "unr
     [LaunchdOwnership.NotOwned]: `run ${stop}`,
     [LaunchdOwnership.Unknown]: `if launchd owns it run ${restart}, otherwise run ${stop}`,
   }[await launchdOwnership(pid, harnessPaths().home)];
-  throw new Error(
+  return new Error(
     `daemon pid ${pid} is running but this process cannot reach it at 127.0.0.1:${port}. ` +
       `Probe failed: ${detail}.${permissionHint} The daemon was not restarted. ` +
       `Verify that pid ${pid} is this harness's daemon, then ${recovery}, and retry.`,
@@ -79,11 +83,11 @@ async function refuseUnreachableDaemon(probe: Extract<GatewayProbe, { kind: "unr
 
 export async function ensureDaemon(): Promise<GatewayClient> {
   const probe = await probeGateway(probeDeadline());
-  if (probe?.kind === "reachable") {
+  if (probe.kind === "reachable") {
     const existing = await connectGateway(probeDeadline());
     if (existing) return existing;
   }
-  if (probe?.kind === "unreachable") await refuseUnreachableDaemon(probe);
+  if (probe.kind === "unreachable" && !await discoveryIsStale(probe)) throw await unreachableDaemonError(probe);
 
   const paths = harnessPaths();
   mkdirSync(paths.logsDir, { recursive: true });

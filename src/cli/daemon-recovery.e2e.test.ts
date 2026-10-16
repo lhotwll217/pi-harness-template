@@ -1,5 +1,4 @@
-// A CLI command recovers from stale discovery by itself, and leaves a live daemon it
-// cannot reach running with a diagnostic (docs/architecture.md#daemon-discovery-and-recovery).
+// Contract: docs/architecture.md#daemon-discovery-and-recovery
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -60,8 +59,7 @@ const waitForExit = async (pid: number): Promise<void> => {
     await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 25));
   }
 };
-/** Starts a helper process and resolves with its pid and first stdout chunk. */
-const helper = async (source: string): Promise<{ pid: number; output: string }> => {
+const spawnUntilFirstOutput = async (source: string): Promise<{ pid: number; output: string }> => {
   const child = spawn(process.execPath, ["-e", source], { stdio: ["ignore", "pipe", "inherit"] });
   helpers.add(child);
   const output = await new Promise<string>((resolveReady, reject) => {
@@ -101,7 +99,6 @@ try {
   assert.equal(daemonStarts(), startsBefore, "no second daemon started");
   console.log("ok — an unauthenticated probe of a live daemon explains instead of restarting");
 
-  // Lane 10 substitute: a fake launchctl and user home, so no real LaunchAgent is installed.
   writeFileSync(join(bin, "launchctl"), `#!/bin/sh\n[ "$1" = print ] && printf '\\tpid = %s\\n' "${second.pid}"\n`);
   chmodSync(join(bin, "launchctl"), 0o755);
   mkdirSync(dirname(daemonLaunchAgentPath(userHome)), { recursive: true });
@@ -134,7 +131,7 @@ try {
   assert.equal((await status()).pid, second.pid, "the hung daemon serves again once it resumes");
   console.log("ok — a hung daemon is left running with a diagnostic");
 
-  const unrelated = await helper(`setInterval(() => {}, 60_000); process.stdout.write("ready");`);
+  const unrelated = await spawnUntilFirstOutput(`setInterval(() => {}, 60_000); process.stdout.write("ready");`);
   process.kill(second.pid, "SIGKILL");
   await waitForExit(second.pid);
   writeDiscovery({ ...live, pid: unrelated.pid });
@@ -146,7 +143,7 @@ try {
   process.kill(third.pid, "SIGTERM");
   await waitForExit(third.pid);
   const token = "other-checkout-token";
-  const otherCheckout = await helper(`
+  const otherCheckout = await spawnUntilFirstOutput(`
     const server = require("node:http").createServer((request, response) => {
       if (request.headers.authorization !== "Bearer ${token}") return response.writeHead(401).end();
       response.setHeader("content-type", "application/json");
@@ -177,7 +174,7 @@ try {
 } finally {
   for (const child of helpers) child.kill("SIGKILL");
   for (const pid of started) {
-    try { process.kill(pid, "SIGCONT"); process.kill(pid, "SIGKILL"); } catch { /* already stopped */ }
+    try { process.kill(pid, "SIGCONT"); process.kill(pid, "SIGKILL"); } catch {}
   }
   rmSync(root, { recursive: true, force: true });
 }

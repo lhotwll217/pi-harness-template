@@ -29,7 +29,6 @@ export interface LaunchdServiceOptions {
   execFile?: (file: string, args: string[]) => Promise<unknown>;
 }
 
-// launchctl exit codes for a service that is not loaded.
 const LAUNCHCTL_NOT_LOADED_CODES = new Set<string | number>([3, 113]);
 
 const escapeXml = (value: string): string => value
@@ -110,7 +109,6 @@ export function createLaunchdServiceAdapter(options: LaunchdServiceOptions = {})
   };
 }
 
-/** Whether the installed LaunchAgent for `home` is the job currently running `pid`. */
 export async function launchdOwnership(
   pid: number,
   home: string,

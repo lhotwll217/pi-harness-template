@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync }
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  DAEMON_PROBE_TIMEOUT_MS,
   DomainEventKind,
   GatewayEventKind,
   ensureHarnessWorkspace,
@@ -59,7 +60,7 @@ async function liveDaemon(infoPath: string): Promise<DaemonInfo | undefined> {
   try {
     const response = await fetch(`http://127.0.0.1:${info.port}/health`, {
       headers: { authorization: `Bearer ${info.authToken}` },
-      signal: AbortSignal.timeout(1_000),
+      signal: AbortSignal.timeout(DAEMON_PROBE_TIMEOUT_MS),
     });
     if (!response.ok) return undefined;
     const health = await response.json() as DaemonHealth;

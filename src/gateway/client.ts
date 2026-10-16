@@ -35,8 +35,8 @@ export class GatewayRequestError extends Error {
   }
 }
 
-/** A failed probe is not evidence that the daemon exited; only the lifecycle path can decide that. */
 export type GatewayProbe =
+  | { kind: "absent" }
   | { kind: "reachable"; info: DaemonInfo; health: DaemonHealth; ready: DaemonReady }
   | { kind: "unreachable"; info: DaemonInfo; cause: unknown };
 
@@ -78,14 +78,12 @@ async function gatewayJson<T>(
 }
 
 export interface GatewayProbeOptions {
-  /** Bounds the probe; the caller owns the deadline. */
   signal?: AbortSignal;
 }
 
-/** Null means no usable discovery record; a record whose daemon cannot be confirmed is unreachable. */
-export async function probeGateway(options: GatewayProbeOptions = {}): Promise<GatewayProbe | null> {
+export async function probeGateway(options: GatewayProbeOptions = {}): Promise<GatewayProbe> {
   const info = readDaemonInfo();
-  if (!info) return null;
+  if (!info) return { kind: "absent" };
   try {
     if (!info.authToken) throw new Error("daemon discovery has no authentication token");
     const health = await gatewayJson<DaemonHealth>(info, "/health", { signal: options.signal });
@@ -102,7 +100,7 @@ export async function probeGateway(options: GatewayProbeOptions = {}): Promise<G
 /** Connect to an authenticated live daemon, including one with setup still required. */
 export async function connectGateway(options: GatewayProbeOptions = {}): Promise<GatewayClient | null> {
   const probe = await probeGateway(options);
-  if (probe?.kind !== "reachable") return null;
+  if (probe.kind !== "reachable") return null;
   const { info } = probe;
   const json = <T>(path: string, init?: RequestInit): Promise<T> => gatewayJson<T>(info, path, { init });
   const send = <T>(method: "POST" | "PUT", path: string, body: unknown): Promise<T> => json<T>(path, {

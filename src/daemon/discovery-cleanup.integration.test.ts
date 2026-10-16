@@ -1,5 +1,4 @@
-// A closing daemon removes only its own discovery record, so a replacement that has
-// already published daemon.json stays discoverable.
+// Contract: docs/architecture.md#daemon-discovery-and-recovery
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
