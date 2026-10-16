@@ -130,7 +130,6 @@ export const AGENT_DEFINITION: readonly AgentDefinitionEntry[] = Object.freeze([
 export const definitionIds = (definition: readonly AgentDefinitionEntry[]): string[] =>
   definition.map(({ id }) => id);
 
-/** Entries of the current agent definition missing from a recorded resource review. */
 export const unacknowledgedDefinitionIds = (acknowledged: readonly string[]): string[] =>
   definitionIds(AGENT_DEFINITION).filter((id) => !acknowledged.includes(id));
 

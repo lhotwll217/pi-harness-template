@@ -69,8 +69,8 @@ export interface SkippedSkillLink {
   reason: string;
 }
 
-/** Workspace skill entries under the home's skill policy. Pi follows linked directories without a
- * cycle check, so a link back to workspace/skills or above, or a second link to one folder, is skipped. */
+/** Pi follows linked directories without a cycle check, so a link back to workspace/skills or
+ * above, or a second link to one folder, is skipped rather than handed to Pi. */
 function workspaceSkillEntries(home: string): { paths: string[]; skipped: SkippedSkillLink[] } {
   const paths = ensureHarnessWorkspace(home);
   const policy = loadHarnessSettings(home).skillPolicy;
@@ -110,7 +110,6 @@ function recordedApprovals(home: string): { acknowledgedDefinitionIds?: unknown;
   }
 }
 
-/** Entries of the current agent definition the home's recorded resource review does not cover. */
 export function unacknowledgedResources(home?: string): string[] {
   const { acknowledgedDefinitionIds } = recordedApprovals(harnessPaths(home).home);
   return unacknowledgedDefinitionIds(Array.isArray(acknowledgedDefinitionIds) ? acknowledgedDefinitionIds : []);
@@ -307,7 +306,6 @@ export interface WorkspaceSkillReport {
   collisions: Array<{ name: string; path: string; winner: string }>;
 }
 
-/** What a session loads from workspace/skills under the home's skill policy, and what it leaves out. */
 export function inspectWorkspaceSkills(home?: string): WorkspaceSkillReport {
   const paths = ensureHarnessWorkspace(home);
   const entries = workspaceSkillEntries(paths.home);
