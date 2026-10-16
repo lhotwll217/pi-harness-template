@@ -74,7 +74,7 @@ export const SCHEMA_DOCS: readonly TableDoc[] = [
   },
 ];
 
-/** Every table and column description as plain text, for surfaces that embed the schema. */
+/** Every table and column description as plain text. */
 export function schemaReference(): string {
   const width = Math.max(...SCHEMA_DOCS.flatMap((table) => table.columns.map((column) => column.name.length)));
   return SCHEMA_DOCS.map((table) => [

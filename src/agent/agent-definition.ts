@@ -53,7 +53,7 @@ const GENERATED_SECTIONS: ReadonlyArray<readonly [marker: string, render: () => 
   ["<!-- generated: state schema -->", schemaReference],
 ];
 
-/** The identity prompt with the CLI help tree and the state schema rendered in, so neither can drift. */
+/** The identity prompt with each generated-section marker replaced by its rendered text; throws unless every marker appears exactly once. */
 export function piTemplateIdentityPrompt(): string {
   let prompt = readFileSync(identityPromptPath, "utf8");
   for (const [marker, render] of GENERATED_SECTIONS) {
