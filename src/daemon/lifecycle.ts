@@ -81,6 +81,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
   const existingDaemon = await liveDaemon(paths.daemonInfo);
   if (existingDaemon) throw daemonAlreadyRunning(existingDaemon);
   const dbPath = options.dbPath ?? paths.stateDb;
+  const repoRoot = options.repositoryRoot ?? defaultRepositoryRoot();
   const startedAt = new Date().toISOString();
   const fingerprint = runtimeFingerprint();
   const authToken = randomBytes(32).toString("base64url");
@@ -114,7 +115,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
         resources: toolDependencies,
       }),
     });
-    docs = createDocsCatalog(options.repositoryRoot ?? defaultRepositoryRoot());
+    docs = createDocsCatalog(repoRoot);
   } catch (error) {
     state.close();
     throw error;
@@ -134,6 +135,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
     startedAt,
     fingerprint,
     stale,
+    repoRoot,
   });
   const ready = (): DaemonReady => {
     const setupRequired = !isOnboardingComplete(onboardingMarker(paths.onboardingMarker));

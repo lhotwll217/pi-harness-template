@@ -20,6 +20,8 @@ export interface DaemonHealth {
   startedAt: string;
   fingerprint: string;
   stale: boolean;
+  /** The checkout the daemon runs from; a client in another checkout is served by this code. */
+  repoRoot: string;
 }
 
 export interface DaemonReady {

@@ -96,6 +96,31 @@ single-file. The adapter must preserve transactions, migrations, recovery, and
 single-writer semantics. What the template's database demonstratively stores
 remains an open decision. See [State and sessions](state-and-sessions.md).
 
+## Daemon discovery and recovery
+
+The daemon publishes `daemon.json` in the harness home (port, pid, start time,
+runtime fingerprint, bearer token, mode `0600`) once its Gateway listens. A CLI
+command trusts the record only when an authenticated `/health` agrees with it on
+pid and fingerprint. `/health` also reports the daemon's `repoRoot`; a client
+in another checkout connects to that daemon and is served by its code.
+
+The record survives a crash, so the client treats a failed probe as evidence,
+not proof, of a dead daemon. It starts a fresh daemon when the pid has exited,
+when the connection is refused, or when it can bind the recorded port; this
+covers a pid reused by an unrelated process. Otherwise the recorded process is
+alive and holds the port (for example a hung daemon or a wrong token), and the
+command fails with the pid, address, probe failure, and a manual recovery
+command instead of starting a second daemon. The diagnostic gives
+`launchctl kickstart -k` when `launchctl print` reports that the LaunchAgent for
+this harness home runs that pid, and `kill <pid>` otherwise. It never prints the
+bearer token. A closing daemon removes `daemon.json` only while the record still
+names it, so a replacement's record survives. This adopts Owner Operator's
+recovery rules
+([`039359a`](https://github.com/lhotwll217/owner-operator/commit/039359a),
+[`643f99d`](https://github.com/lhotwll217/owner-operator/commit/643f99d),
+[`b548896`](https://github.com/lhotwll217/owner-operator/commit/b548896),
+[`7e1aa60`](https://github.com/lhotwll217/owner-operator/commit/7e1aa60)).
+
 ## Trust boundary
 
 Onboarding must complete before headless or model-driven work is permitted.

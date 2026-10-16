@@ -17,11 +17,20 @@ export interface DaemonServiceAdapter {
   verify(choice: "installed" | "declined"): Promise<boolean>;
 }
 
+export enum LaunchdOwnership {
+  Owned = "owned",
+  NotOwned = "not-owned",
+  Unknown = "unknown",
+}
+
 export interface LaunchdServiceOptions {
   platform?: NodeJS.Platform;
   userHome?: string;
   execFile?: (file: string, args: string[]) => Promise<unknown>;
 }
+
+// launchctl exit codes for a service that is not loaded.
+const LAUNCHCTL_NOT_LOADED_CODES = new Set<string | number>([3, 113]);
 
 const escapeXml = (value: string): string => value
   .replaceAll("&", "&amp;")
@@ -32,6 +41,9 @@ const escapeXml = (value: string): string => value
 
 export const daemonLaunchAgentPath = (userHome = homedir()): string =>
   join(userHome, "Library", "LaunchAgents", `${DAEMON_LAUNCHD_LABEL}.plist`);
+
+const launchAgentHomeEntry = (home: string): string =>
+  `<key>PI_TEMPLATE_HOME</key><string>${escapeXml(home)}</string>`;
 
 export function daemonLaunchAgent(configuration: DaemonServiceConfiguration): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -45,7 +57,7 @@ export function daemonLaunchAgent(configuration: DaemonServiceConfiguration): st
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    <key>PI_TEMPLATE_HOME</key><string>${escapeXml(configuration.home)}</string>
+    ${launchAgentHomeEntry(configuration.home)}
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -96,4 +108,27 @@ export function createLaunchdServiceAdapter(options: LaunchdServiceOptions = {})
       }
     },
   };
+}
+
+/** Whether the installed LaunchAgent for `home` is the job currently running `pid`. */
+export async function launchdOwnership(
+  pid: number,
+  home: string,
+  options: Omit<LaunchdServiceOptions, "platform"> = {},
+): Promise<LaunchdOwnership> {
+  let plist: string;
+  try { plist = readFileSync(daemonLaunchAgentPath(options.userHome ?? homedir()), "utf8"); } catch { return LaunchdOwnership.NotOwned; }
+  if (!plist.includes(launchAgentHomeEntry(home))) return LaunchdOwnership.NotOwned;
+  const uid = process.getuid?.();
+  if (uid === undefined) return LaunchdOwnership.Unknown;
+  const execFile = options.execFile ?? (async (file, args) => await promisify(execFileCallback)(file, args));
+  try {
+    const result = await execFile("launchctl", ["print", `gui/${uid}/${DAEMON_LAUNCHD_LABEL}`]) as { stdout?: unknown };
+    const reported = /^\s*pid\s*=\s*(\d+)\s*$/m.exec(String(result?.stdout ?? ""))?.[1];
+    if (!reported) return LaunchdOwnership.Unknown;
+    return Number(reported) === pid ? LaunchdOwnership.Owned : LaunchdOwnership.NotOwned;
+  } catch (error) {
+    const code = (error as { code?: string | number }).code;
+    return code !== undefined && LAUNCHCTL_NOT_LOADED_CODES.has(code) ? LaunchdOwnership.NotOwned : LaunchdOwnership.Unknown;
+  }
 }

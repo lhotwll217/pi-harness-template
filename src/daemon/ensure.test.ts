@@ -3,8 +3,10 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  LaunchdOwnership,
   createLaunchdServiceAdapter,
   daemonLaunchAgentPath,
+  launchdOwnership,
 } from "./ensure";
 
 const root = mkdtempSync(join(tmpdir(), "pi-template-launchd-"));
@@ -28,6 +30,19 @@ try {
   assert.match(plist, /harness&amp;home/);
   assert.ok(calls.some(({ args }) => args[0] === "print" && args[1]?.includes("com.pi-template.daemon")));
 
+  const home = join(root, "harness&home");
+  const printing = (stdout: string) => ({ userHome: root, execFile: async () => ({ stdout }) });
+  assert.equal(await launchdOwnership(4242, home, printing("\tpid = 4242\n")), LaunchdOwnership.Owned);
+  assert.equal(await launchdOwnership(4242, home, printing("\tpid = 5151\n")), LaunchdOwnership.NotOwned);
+  assert.equal(await launchdOwnership(4242, home, printing("\tstate = not running\n")), LaunchdOwnership.Unknown);
+  assert.equal(await launchdOwnership(4242, join(root, "other-home"), printing("\tpid = 4242\n")), LaunchdOwnership.NotOwned);
+  const failing = (code: number) => ({
+    userHome: root,
+    execFile: async () => { throw Object.assign(new Error("launchctl failed"), { code }); },
+  });
+  assert.equal(await launchdOwnership(4242, home, failing(113)), LaunchdOwnership.NotOwned);
+  assert.equal(await launchdOwnership(4242, home, failing(1)), LaunchdOwnership.Unknown);
+
   writeFileSync(plistPath, "stale configuration");
   assert.equal(await service.verify("installed"), false);
   assert.equal(await service.verify("declined"), true);
@@ -42,7 +57,9 @@ try {
     /macOS/,
   );
 
-  process.stdout.write("ok — launchd installation verifies exact configuration and loaded job\n");
+  assert.equal(await launchdOwnership(4242, home, printing("\tpid = 4242\n")), LaunchdOwnership.NotOwned);
+
+  process.stdout.write("ok — launchd installation verifies exact configuration and loaded job, and ownership of a pid\n");
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
