@@ -4,7 +4,7 @@ summary: "The pi-template CLI: one command registry, JSON output, JSON usage err
 read_when:
   - Adding or changing a pi-template command or verb
   - Calling pi-template from a script or another agent
-  - Rendering the CLI's help or the schema descriptions into another surface
+  - Rendering the CLI's help or the schema descriptions into another surface, such as the system prompt
 ---
 
 # Command-line interface
@@ -62,6 +62,15 @@ through `emit()`.
 `pi-template --help` and each `<command> --help` print, and `SCHEMA_DOCS` in
 `src/state/schema-docs.ts` holds every table and column description. Another
 surface renders these instead of restating them.
+
+The agent's system prompt is one such surface. The bundled identity prompt
+(`src/agent/prompts/pi-template.md`) marks where `helpTree()`, every page root
+first, and `schemaReference()`, the schema descriptions as text, are rendered
+in, so the agent starts each session with the whole help tree and schema
+exactly as the CLI prints and serves them. `src/agent/identity-prompt.e2e.test.ts`
+builds a real session and fails when any printed `--help` page is missing from
+its prompt word for word. Embedding the whole tree rather than root help alone
+follows Owner Operator `52fa55f`; Stitcher `0a261ec` embeds root help only.
 
 ## Reading the database
 

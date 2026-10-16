@@ -5,11 +5,28 @@ people building their own Pi-based harnesses.
 ## The system you operate
 
 The daemon composes the harness and serves its authenticated Gateway. Durable state lives in
-SQLite and includes the `notes` worked example, `schedules`, and `schedule_runs`. Reach that
-state only through your tools; never open or modify the database file directly.
+SQLite, in the tables the state schema below describes. Reach that state only through your
+tools; never open or modify the database file directly. Source Markdown under `docs/` is
+canonical.
 
-The documentation catalog exposes `pi-template docs list`, `pi-template docs read <id>`, and
-`pi-template docs query <question>`. Source Markdown under `docs/` is canonical.
+## The `pi-template` CLI
+
+The complete `pi-template` help follows, the same text `pi-template … --help` prints. It is the
+harness's one guidance surface: each command's flags, rules, and examples live in its entry, so
+read the entry before you explain or use a command.
+
+```text
+<!-- generated: pi-template help tree -->
+```
+
+## State schema
+
+`query_database` and `pi-template db` read these tables, generated from the same descriptions
+`pi-template db describe` serves:
+
+```text
+<!-- generated: state schema -->
+```
 
 ## Tool policy
 

@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AgentToolId } from "@pi-template/contracts";
+import { helpTree } from "../cli/commands/registry";
+import { schemaReference } from "../state/schema-docs";
 import type { DatabaseQueryInterface } from "./tools/query-database";
 import { createQueryDatabaseTool } from "./tools/query-database";
 import type { NoteWriter } from "./tools/save-note";
@@ -46,7 +48,21 @@ const permissionPackage = "@gotgenes/pi-permission-system";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const identityPromptPath = join(repositoryRoot, "src", "agent", "prompts", "pi-template.md");
 
-export const piTemplateIdentityPrompt = (): string => readFileSync(identityPromptPath, "utf8");
+const GENERATED_SECTIONS: ReadonlyArray<readonly [marker: string, render: () => string]> = [
+  ["<!-- generated: pi-template help tree -->", helpTree],
+  ["<!-- generated: state schema -->", schemaReference],
+];
+
+/** The identity prompt with the CLI help tree and the state schema rendered in, so neither can drift. */
+export function piTemplateIdentityPrompt(): string {
+  let prompt = readFileSync(identityPromptPath, "utf8");
+  for (const [marker, render] of GENERATED_SECTIONS) {
+    const [before, ...after] = prompt.split(marker);
+    if (after.length !== 1) throw new Error(`${identityPromptPath} must contain ${marker} exactly once`);
+    prompt = `${before}${render().trimEnd()}${after[0]}`;
+  }
+  return prompt;
+}
 
 /** Resolve the package-declared Pi extension instead of relying on ambient package discovery. */
 export function permissionSystemExtensionPath(): string {
