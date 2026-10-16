@@ -185,6 +185,38 @@ try {
   writeDiscovery(live);
   console.log("ok — a daemon that answers one probe and then stalls gets the hung-daemon diagnostic");
 
+  const stallsAfterBothProbes = await spawnUntilFirstOutput(`
+    let answered = 0;
+    const server = require("node:http").createServer((request, response) => {
+      if (answered++ >= 4) return;
+      response.setHeader("content-type", "application/json");
+      if (request.url === "/health") return response.end(JSON.stringify({
+        ok: true, port: server.address().port, pid: process.pid, startedAt: "then",
+        fingerprint: "stall-fingerprint", stale: false, repoRoot: "/elsewhere/pi-template",
+      }));
+      response.end(JSON.stringify({ ready: true, setupRequired: true, modules: { state: true, scheduler: true, gateway: true } }));
+    });
+    server.listen(0, "127.0.0.1", () => process.stdout.write(String(server.address().port)));
+  `);
+  writeDiscovery({
+    port: Number(stallsAfterBothProbes.output),
+    pid: stallsAfterBothProbes.pid,
+    startedAt: "then",
+    fingerprint: "stall-fingerprint",
+    authToken: stallToken,
+  });
+  const confirmed = await runCli(["status"]);
+  assert.equal(confirmed.status, 0, `status reports the probe that confirmed the daemon: ${confirmed.stderr}`);
+  assert.deepEqual(JSON.parse(confirmed.stdout), {
+    health: {
+      ok: true, port: Number(stallsAfterBothProbes.output), pid: stallsAfterBothProbes.pid, startedAt: "then",
+      fingerprint: "stall-fingerprint", stale: false, repoRoot: "/elsewhere/pi-template",
+    },
+    ready: { ready: true, setupRequired: true, modules: { state: true, scheduler: true, gateway: true } },
+  });
+  writeDiscovery(live);
+  console.log("ok — status prints the confirming probe, so a daemon that stalls after both probes cannot hang it");
+
   const unrelated = await spawnUntilFirstOutput(`setInterval(() => {}, 60_000); process.stdout.write("ready");`);
   process.kill(second.pid, "SIGKILL");
   await waitForExit(second.pid);

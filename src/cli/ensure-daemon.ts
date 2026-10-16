@@ -17,7 +17,7 @@ import {
   launchdOwnership,
   startDaemonService,
 } from "../daemon/ensure";
-import { connectGateway, gatewayClient, probeGateway, type GatewayClient, type GatewayProbe } from "../gateway/client";
+import { gatewayClient, probeGateway, type GatewayClient, type GatewayProbe } from "../gateway/client";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const READY_DEADLINE_MS = 15_000;
@@ -48,6 +48,13 @@ function processExists(pid: number): boolean {
 }
 
 type UnreachableProbe = Extract<GatewayProbe, { kind: "unreachable" }>;
+type ReachableProbe = Extract<GatewayProbe, { kind: "reachable" }>;
+
+/** A client together with the probe that confirmed its daemon, which `status` reports. */
+export type ConfirmedGatewayClient = GatewayClient & { readonly probe: ReachableProbe };
+
+const confirmedClient = (probe: ReachableProbe): ConfirmedGatewayClient =>
+  Object.assign(gatewayClient(probe.info), { probe });
 
 const launchdRestart = (): string =>
   `\`launchctl kickstart -k gui/${process.getuid?.() ?? "<uid>"}/${DAEMON_LAUNCHD_LABEL}\``;
@@ -92,10 +99,21 @@ async function unreachableDaemonError(probe: UnreachableProbe): Promise<Error> {
   );
 }
 
-async function daemonNotReadyError(startedByLaunchd: boolean, logPath: string): Promise<Error> {
+async function daemonNotReadyError(
+  startedByLaunchd: boolean,
+  launchdPidBeforeStart: number | undefined,
+  logPath: string,
+): Promise<Error> {
   const timedOut = `daemon did not become ready within ${READY_DEADLINE_MS / 1000}s`;
-  const pid = startedByLaunchd ? await launchdJobPid() : undefined;
-  if (pid === undefined) return new Error(`${timedOut}; see ${logPath}`);
+  if (!startedByLaunchd) return new Error(`${timedOut}; see ${logPath}`);
+  const pid = await launchdJobPid();
+  if (pid === undefined || pid !== launchdPidBeforeStart) {
+    return new Error(
+      `${timedOut}. launchd started the daemon job for this harness home` +
+        `${pid === undefined ? "" : ` and now runs pid ${pid}`}, but it never became ready; ` +
+        `it may be failing at startup or starting slowly. See ${logPath}.`,
+    );
+  }
   const { daemonInfo } = harnessPaths();
   return new Error(
     `${timedOut}. launchd runs pid ${pid} for this harness home, but no reachable daemon has published ` +
@@ -104,17 +122,18 @@ async function daemonNotReadyError(startedByLaunchd: boolean, logPath: string): 
   );
 }
 
-export async function ensureDaemon(): Promise<GatewayClient> {
+export async function ensureDaemon(): Promise<ConfirmedGatewayClient> {
   let probe = await probeGateway(probeDeadline());
   // A daemon can answer one probe and stall on the next; the confirming probe sends that case
   // through the same classification as a daemon that stalls from the start.
   if (probe.kind === "reachable") probe = await probeGateway(probeDeadline());
-  if (probe.kind === "reachable") return gatewayClient(probe.info);
+  if (probe.kind === "reachable") return confirmedClient(probe);
   if (probe.kind === "unreachable" && !await discoveryIsStale(probe)) throw await unreachableDaemonError(probe);
 
   const paths = harnessPaths();
   const logPath = join(paths.logsDir, "daemon.log");
   const startedByLaunchd = launchdManagesHome(paths.home);
+  const launchdPidBeforeStart = startedByLaunchd ? await launchdJobPid() : undefined;
   if (startedByLaunchd) {
     await startDaemonService();
   } else {
@@ -132,9 +151,9 @@ export async function ensureDaemon(): Promise<GatewayClient> {
 
   const deadline = Date.now() + READY_DEADLINE_MS;
   for (;;) {
-    const client = await connectGateway(probeDeadline());
-    if (client) return client;
-    if (Date.now() >= deadline) throw await daemonNotReadyError(startedByLaunchd, logPath);
+    const started = await probeGateway(probeDeadline());
+    if (started.kind === "reachable") return confirmedClient(started);
+    if (Date.now() >= deadline) throw await daemonNotReadyError(startedByLaunchd, launchdPidBeforeStart, logPath);
     await delay(READY_POLL_MS);
   }
 }

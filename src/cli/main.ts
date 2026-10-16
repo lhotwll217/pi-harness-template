@@ -10,7 +10,7 @@ import {
 } from "@pi-template/contracts";
 import { type GatewayClient } from "../gateway/client";
 import { CliUsageError, parseCliArgs, resolveBareInvocation } from "./args";
-import { ensureDaemon } from "./ensure-daemon";
+import { ensureDaemon, type ConfirmedGatewayClient } from "./ensure-daemon";
 
 const USAGE = `Pi Harness Template
 
@@ -38,8 +38,9 @@ const output = (value: unknown): void => {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 };
 
-async function outputStatus(client: GatewayClient): Promise<void> {
-  output({ health: await client.health(), ready: await client.ready() });
+// Reports the probe that confirmed the daemon: a daemon that stalls after it cannot hang `status`.
+function outputStatus(client: ConfirmedGatewayClient): void {
+  output({ health: client.probe.health, ready: client.probe.ready });
 }
 
 async function openInteractive(client: GatewayClient): Promise<void> {
@@ -60,7 +61,7 @@ function requireOnboarded(): void {
 }
 
 // Any command that needs the Gateway starts the daemon itself when none is running.
-const requireGateway = async (): Promise<GatewayClient> => await ensureDaemon();
+const requireGateway = async (): Promise<ConfirmedGatewayClient> => await ensureDaemon();
 
 const delay = async (milliseconds: number): Promise<void> => {
   await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
@@ -110,7 +111,7 @@ async function run(): Promise<void> {
     const client = await requireGateway();
     try {
       if (destination === "interactive") await openInteractive(client);
-      else await outputStatus(client);
+      else outputStatus(client);
     } finally {
       client.close();
     }
@@ -150,7 +151,7 @@ async function run(): Promise<void> {
   try {
     switch (command.kind) {
       case "status":
-        await outputStatus(client);
+        outputStatus(client);
         return;
       case "doctor": {
         const report = await client.doctor() as { ok?: boolean };
