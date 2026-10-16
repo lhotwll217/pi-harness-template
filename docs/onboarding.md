@@ -29,13 +29,21 @@ interactive commands, the daemon, and headless scheduled work.
    workspace-provided resources eligible for loading.
 5. Choose a capability and approval posture.
 6. Review protected paths and data boundaries.
-7. Configure and verify operating-system sandbox enforcement separately from permissions.
+7. Record the operating-system sandbox choice, off unless the owner opts in, and
+   verify enforcement when it is on.
 8. Install or configure the daemon service if the selected platform supports it.
 9. Run model-free readiness checks.
 10. Write a completed-version marker only after every required stage succeeds.
 
 Each stage must be safe to repeat. Resuming setup starts from durable stage state,
 not from guesses about partially created files.
+
+A rerun on a completed home runs every stage again. Each answer it does not
+replace keeps the value the home records: an omitted flag, or a prompt left at
+its default. The completion marker is withdrawn only after the rerun has every
+answer it needs, and is written again when the last stage passes, so a rerun
+that fails a stage leaves setup incomplete. Homes onboarded before the
+agent-definition acknowledgment was recorded must acknowledge it once more.
 
 ## Fail-closed rule
 
@@ -64,8 +72,9 @@ allow it**, and it is a trade the owner makes deliberately:
   that visibility.
 
 Onboarding is never reduced to a switch: an agent that drives it still goes
-through every stage, and the sandbox stage still runs its real enforcement
-probe and fails closed. Automation changes *who operates the flow*, never
+through every stage, and the sandbox stage, when the owner opted in
+([the sandbox is opt-in](security.md#the-sandbox-is-opt-in)), still runs its
+real enforcement probe and fails closed. Automation changes *who operates the flow*, never
 *whether the verification happens*.
 
 ### The login handoff (`--no-browser`)
@@ -121,7 +130,8 @@ Owner Operator's pattern — never a subcommand the owner must discover:
   workspace approval, sandbox defaults, and service — is shown together and
   accepted with a single confirmation. Declining the summary drops into
   per-question customization. Consolidation never skips a stage predicate or
-  the sandbox probe; it only consolidates the asking.
+  the probe of an opted-in sandbox; it only consolidates the asking. The review
+  defaults to permission mode `allow` and the sandbox off.
 
 ## Decided
 
@@ -131,9 +141,10 @@ Owner Operator's pattern — never a subcommand the owner must discover:
 - Provider login and credential import follow the entry behavior above:
   toolkit-owned OAuth flows plus guided import, resolving what a product must
   support before onboarding can complete.
-- Sandbox enforcement (stage 7) is verified through the adopted
+- Sandbox enforcement (stage 7), when the owner opts in with `--sandbox`, is
+  verified through the adopted
   [sandbox adapter](security.md#sandbox-adapter-boundary); there is no
-  complete-with-warning path.
+  complete-with-warning path. A new home records the sandbox off.
 - macOS (launchd) is the first always-on service platform, ported from Owner
   Operator's daemon management; other platforms follow.
 
