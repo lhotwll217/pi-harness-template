@@ -6,7 +6,7 @@ import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { harnessPaths } from "@pi-template/contracts";
 import { createSandboxAdapter, type SandboxAdapter } from "../agent/sandbox";
 import { passingOnboardingDependencies } from "../../test/helpers/onboarding";
-import { toolTurn } from "../../test/helpers/tool-turn";
+import { toolResultFromTurn } from "../../test/helpers/tool-turn";
 import { onboard } from "./onboard";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-template-legacy-sandbox-")));
@@ -53,7 +53,7 @@ try {
   const command = `cat ${canary}`;
 
   writeFileSync(paths.sandboxPolicy, JSON.stringify(legacyPolicy));
-  const legacyOutput = await toolTurn(faux, session, "bash", { command });
+  const legacyOutput = await toolResultFromTurn(faux, session, "bash", { command });
   assert.deepEqual(sandboxedCommands, [command], "a sandbox.json without enabled runs bash through the sandbox");
   if (probe.unavailable) {
     process.stdout.write(`SKIP — real sandbox unavailable for the legacy read check: ${probe.reason}\n`);
@@ -62,7 +62,7 @@ try {
   }
 
   writeFileSync(paths.sandboxPolicy, JSON.stringify({ ...legacyPolicy, enabled: false }));
-  assert.equal(await toolTurn(faux, session, "bash", { command }), "canary\n");
+  assert.equal(await toolResultFromTurn(faux, session, "bash", { command }), "canary\n");
   assert.deepEqual(sandboxedCommands, [command], "enabled false runs bash on the host");
 
   process.stdout.write("ok — a sandbox.json written before enabled existed still runs bash sandboxed; enabled false runs it on the host\n");

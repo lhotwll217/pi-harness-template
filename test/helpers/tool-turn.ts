@@ -7,11 +7,7 @@ const unusedGateway: InteractiveGateway = {
   async createNote() { throw new Error("not used"); },
 };
 
-/**
- * Run one prompt in which the faux model calls one tool, and return the text the tool gave
- * back to the model.
- */
-export async function toolTurn(
+export async function toolResultFromTurn(
   faux: ReturnType<typeof registerFauxProvider>,
   session: Omit<InteractiveSessionOptions, "gateway" | "model">,
   tool: string,

@@ -85,7 +85,8 @@ see:
 - a `grep` or `find` rooted above a protected path, which descends into it: a
   `grep` rooted at the harness home prints matching lines of `pi/auth.json`.
 
-Only the sandbox constrains bash past those gaps. Protected `repos` are recorded
+With the sandbox on, bash still cannot reach `pi/` or an owner protected path
+through the first gap; nothing closes the second. Protected `repos` are recorded
 in `protected_paths.json`, but no runtime rule enforces them yet.
 
 Secrets remain under the harness home or provider store and must not appear in

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { harnessPaths, savePermissionMode } from "@pi-template/contracts";
 import { passingOnboardingDependencies } from "../../test/helpers/onboarding";
-import { toolTurn } from "../../test/helpers/tool-turn";
+import { toolResultFromTurn } from "../../test/helpers/tool-turn";
 import { onboard } from "./onboard";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-template-control-files-")));
@@ -34,27 +34,27 @@ try {
   const denied = (surface: "path_read" | "path_write", tool: string, path: string, rule = path) =>
     `[pi-permission-system] Denied by policy: '${surface}' for tool '${tool}' for path '${path}' (rule '${rule}'). Reason: Pi Template protected paths.`;
 
-  assert.equal(await toolTurn(faux, session, "read", { path: paths.piAuth }), denied("path_read", "read", paths.piAuth, `${paths.piAgentDir}/*`));
+  assert.equal(await toolResultFromTurn(faux, session, "read", { path: paths.piAuth }), denied("path_read", "read", paths.piAuth, `${paths.piAgentDir}/*`));
   for (const path of [paths.daemonInfo, paths.settings, paths.protectedPaths, paths.resourceApprovals, paths.sandboxVerification]) {
-    assert.equal(await toolTurn(faux, session, "read", { path }), denied("path_read", "read", path));
+    assert.equal(await toolResultFromTurn(faux, session, "read", { path }), denied("path_read", "read", path));
   }
   const sandboxOff = JSON.stringify({ ...JSON.parse(sandboxBytes), enabled: false });
   assert.equal(
-    await toolTurn(faux, session, "write", { path: paths.sandboxPolicy, content: sandboxOff }),
+    await toolResultFromTurn(faux, session, "write", { path: paths.sandboxPolicy, content: sandboxOff }),
     denied("path_write", "write", paths.sandboxPolicy),
   );
   assert.equal(readFileSync(paths.sandboxPolicy, "utf8"), sandboxBytes);
   assert.equal(
-    await toolTurn(faux, session, "bash", { command: `cat ${paths.piAuth}` }),
+    await toolResultFromTurn(faux, session, "bash", { command: `cat ${paths.piAuth}` }),
     denied("path_read", "bash", paths.piAuth, `${paths.piAgentDir}/*`),
   );
 
   const note = join(paths.workspace, "note.md");
-  assert.equal(await toolTurn(faux, session, "write", { path: note, content: "kept\n" }), `Successfully wrote to ${note}`);
-  assert.equal(await toolTurn(faux, session, "read", { path: note }), "kept\n");
+  assert.equal(await toolResultFromTurn(faux, session, "write", { path: note, content: "kept\n" }), `Successfully wrote to ${note}`);
+  assert.equal(await toolResultFromTurn(faux, session, "read", { path: note }), "kept\n");
 
   savePermissionMode(home, "read-only");
-  assert.equal(await toolTurn(faux, session, "read", { path: paths.daemonInfo }), denied("path_read", "read", paths.daemonInfo));
+  assert.equal(await toolResultFromTurn(faux, session, "read", { path: paths.daemonInfo }), denied("path_read", "read", paths.daemonInfo));
 
   process.stdout.write("ok — the agent's file tools cannot read or change the harness control files or Pi credentials, and still reach the workspace\n");
 } finally {

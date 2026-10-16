@@ -545,7 +545,6 @@ async function interactiveAnswers(
   throw new CliUsageError("answer y or n to accept this setup");
 }
 
-/** A recorded sandbox choice that cannot be read stops the run instead of turning the sandbox off. */
 function assertRecordedSandboxReadable(home: string, sandboxEnabled: boolean | undefined): void {
   if (sandboxEnabled !== undefined) return;
   try {
@@ -555,7 +554,6 @@ function assertRecordedSandboxReadable(home: string, sandboxEnabled: boolean | u
   }
 }
 
-/** A recorded permission mode that cannot be read stops the run instead of becoming the default. */
 function assertRecordedPermissionReadable(home: string, permission: string | undefined): void {
   const problem = permission === undefined ? unreadablePermissionMode(home) : undefined;
   if (problem) throw new CliUsageError(`${problem}; fix it, or rerun with --permission to replace it`);

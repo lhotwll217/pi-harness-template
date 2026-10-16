@@ -25,7 +25,6 @@ export const DEFAULT_TOOL_POSTURE: readonly string[] = Object.freeze([
   "read", "grep", "find", "ls", "bash", "edit", "write",
 ]);
 export const DEFAULT_PERMISSION_MODE: PermissionMode = "allow";
-/** The mode a damaged settings.json yields: an unreadable choice must not widen access. */
 const FAIL_CLOSED_PERMISSION_MODE: PermissionMode = "read-only";
 
 const SKILL_MODES = new Set(["bundled", "all-workspace", "allowlist"]);
