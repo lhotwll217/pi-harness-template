@@ -100,8 +100,11 @@ export async function probeGateway(options: GatewayProbeOptions = {}): Promise<G
 /** Connect to an authenticated live daemon, including one with setup still required. */
 export async function connectGateway(options: GatewayProbeOptions = {}): Promise<GatewayClient | null> {
   const probe = await probeGateway(options);
-  if (probe.kind !== "reachable") return null;
-  const { info } = probe;
+  return probe.kind === "reachable" ? gatewayClient(probe.info) : null;
+}
+
+/** A client for the daemon a reachable probe found. */
+export function gatewayClient(info: DaemonInfo): GatewayClient {
   const json = <T>(path: string, init?: RequestInit): Promise<T> => gatewayJson<T>(info, path, { init });
   const send = <T>(method: "POST" | "PUT", path: string, body: unknown): Promise<T> => json<T>(path, {
     method,

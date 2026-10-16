@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   LaunchdOwnership,
   createLaunchdServiceAdapter,
+  daemonLaunchAgent,
   daemonLaunchAgentPath,
+  launchdManagesHome,
   launchdOwnership,
 } from "./ensure";
 
@@ -58,6 +60,21 @@ try {
   );
 
   assert.equal(await launchdOwnership(4242, home, printing("\tpid = 4242\n")), LaunchdOwnership.NotOwned);
+
+  const realHome = join(realpathSync(root), "real-harness");
+  const linkedHome = join(root, "linked-harness");
+  mkdirSync(realHome);
+  symlinkSync(realHome, linkedHome);
+  writeFileSync(plistPath, daemonLaunchAgent({
+    home: `${linkedHome}/`,
+    executable: "/install/pi-template",
+    workingDirectory: "/install",
+  }));
+  for (const spelling of [realHome, `${realHome}/`, linkedHome, join(root, "linked-harness", "..", "real-harness")]) {
+    assert.equal(launchdManagesHome(spelling, root), true, `${spelling} names the LaunchAgent's home`);
+    assert.equal(await launchdOwnership(4242, spelling, printing("\tpid = 4242\n")), LaunchdOwnership.Owned);
+  }
+  assert.equal(launchdManagesHome(join(root, "harness&home"), root), false);
 
   process.stdout.write("ok — launchd installation verifies exact configuration and loaded job, and ownership of a pid\n");
 } finally {

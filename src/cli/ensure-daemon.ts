@@ -12,11 +12,12 @@ import { DAEMON_PROBE_TIMEOUT_MS, harnessPaths } from "@pi-template/contracts";
 import {
   DAEMON_LAUNCHD_LABEL,
   LaunchdOwnership,
+  launchdJobPid,
   launchdManagesHome,
   launchdOwnership,
   startDaemonService,
 } from "../daemon/ensure";
-import { connectGateway, probeGateway, type GatewayClient, type GatewayProbe } from "../gateway/client";
+import { connectGateway, gatewayClient, probeGateway, type GatewayClient, type GatewayProbe } from "../gateway/client";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const READY_DEADLINE_MS = 15_000;
@@ -48,6 +49,9 @@ function processExists(pid: number): boolean {
 
 type UnreachableProbe = Extract<GatewayProbe, { kind: "unreachable" }>;
 
+const launchdRestart = (): string =>
+  `\`launchctl kickstart -k gui/${process.getuid?.() ?? "<uid>"}/${DAEMON_LAUNCHD_LABEL}\``;
+
 const probeCauses = (probe: UnreachableProbe): Error[] => {
   const causes: Error[] = [];
   for (let cause = probe.cause; cause instanceof Error && !causes.includes(cause); cause = cause.cause) {
@@ -74,7 +78,7 @@ async function unreachableDaemonError(probe: UnreachableProbe): Promise<Error> {
   const permissionHint = causes.some((cause) => errorCode(cause) === "EPERM" || errorCode(cause) === "EACCES")
     ? " Check this process's sandbox or network permissions."
     : "";
-  const restart = `\`launchctl kickstart -k gui/${process.getuid?.() ?? "<uid>"}/${DAEMON_LAUNCHD_LABEL}\``;
+  const restart = launchdRestart();
   const stop = `\`kill ${pid}\` (if it does not exit, \`kill -9 ${pid}\`)`;
   const recovery = {
     [LaunchdOwnership.Owned]: `run ${restart}`,
@@ -88,17 +92,30 @@ async function unreachableDaemonError(probe: UnreachableProbe): Promise<Error> {
   );
 }
 
+async function daemonNotReadyError(startedByLaunchd: boolean, logPath: string): Promise<Error> {
+  const timedOut = `daemon did not become ready within ${READY_DEADLINE_MS / 1000}s`;
+  const pid = startedByLaunchd ? await launchdJobPid() : undefined;
+  if (pid === undefined) return new Error(`${timedOut}; see ${logPath}`);
+  const { daemonInfo } = harnessPaths();
+  return new Error(
+    `${timedOut}. launchd runs pid ${pid} for this harness home, but no reachable daemon has published ` +
+      `${daemonInfo}. The daemon was not restarted. If ${daemonInfo} was removed while pid ${pid} was running, ` +
+      `run ${launchdRestart()}, and retry. See ${logPath}.`,
+  );
+}
+
 export async function ensureDaemon(): Promise<GatewayClient> {
-  const probe = await probeGateway(probeDeadline());
-  if (probe.kind === "reachable") {
-    const existing = await connectGateway(probeDeadline());
-    if (existing) return existing;
-  }
+  let probe = await probeGateway(probeDeadline());
+  // A daemon can answer one probe and stall on the next; the confirming probe sends that case
+  // through the same classification as a daemon that stalls from the start.
+  if (probe.kind === "reachable") probe = await probeGateway(probeDeadline());
+  if (probe.kind === "reachable") return gatewayClient(probe.info);
   if (probe.kind === "unreachable" && !await discoveryIsStale(probe)) throw await unreachableDaemonError(probe);
 
   const paths = harnessPaths();
   const logPath = join(paths.logsDir, "daemon.log");
-  if (launchdManagesHome(paths.home)) {
+  const startedByLaunchd = launchdManagesHome(paths.home);
+  if (startedByLaunchd) {
     await startDaemonService();
   } else {
     mkdirSync(paths.logsDir, { recursive: true });
@@ -117,9 +134,7 @@ export async function ensureDaemon(): Promise<GatewayClient> {
   for (;;) {
     const client = await connectGateway(probeDeadline());
     if (client) return client;
-    if (Date.now() >= deadline) {
-      throw new Error(`daemon did not become ready within ${READY_DEADLINE_MS / 1000}s; see ${logPath}`);
-    }
+    if (Date.now() >= deadline) throw await daemonNotReadyError(startedByLaunchd, logPath);
     await delay(READY_POLL_MS);
   }
 }

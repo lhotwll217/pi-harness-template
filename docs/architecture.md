@@ -101,7 +101,9 @@ remains an open decision. See [State and sessions](state-and-sessions.md).
 The daemon publishes `daemon.json` in the harness home (port, pid, start time,
 runtime fingerprint, bearer token, mode `0600`) once its Gateway listens. A CLI
 command trusts the record only when an authenticated `/health` agrees with it on
-pid and fingerprint. `/health` also reports the daemon's `repoRoot`; a client
+pid and fingerprint in two consecutive probes, each bounded at one second, so a
+daemon that answers once and then stalls gets the same diagnostic as one that
+stalls from the start. `/health` also reports the daemon's `repoRoot`; a client
 in another checkout connects to that daemon and is served by its code.
 
 The record survives a crash, so the client treats a failed probe as evidence,
@@ -117,14 +119,21 @@ bearer token. A closing daemon removes `daemon.json` only while the record still
 names it, so a replacement's record survives.
 
 When the CLI starts a daemon and the installed LaunchAgent names this harness
-home, launchd starts it: `launchctl enable` and `launchctl kickstart -k` on
-`gui/<uid>/com.pi-template.daemon`, and when launchd reports the job not loaded
-(exit 3 or 113), `launchctl bootstrap` of the plist and a second kickstart. Any
-other `launchctl` failure fails the command rather than starting a detached
-daemon that would hold the port the LaunchAgent's `KeepAlive` restarts need.
-Without that LaunchAgent the CLI starts a detached `pi-template daemon` from its
-own checkout. A reachable daemon is never restarted, whichever checkout it runs
-from.
+home (compared as resolved real paths), launchd starts it: `launchctl enable`
+and `launchctl kickstart` without `-k` on `gui/<uid>/com.pi-template.daemon`, so
+a job launchd already runs (restarted by `KeepAlive`, or started by a concurrent
+command) is left alone while its record appears. When launchd reports the job
+not loaded (exit 3 or 113), the CLI runs `launchctl bootstrap` of the plist and
+a second kickstart; a failed bootstrap is accepted when `launchctl print` then
+finds the job loaded, since a concurrent command bootstrapped it. Any other
+`launchctl` failure, or a call that takes over five seconds, fails the command
+rather than starting a detached daemon that would hold the port the
+LaunchAgent's `KeepAlive` restarts need. If no reachable daemon publishes its
+record within 15 seconds while launchd reports a running pid (for example after
+`daemon.json` was removed by hand), the command names that pid and gives
+`launchctl kickstart -k` instead of killing it. Without that LaunchAgent the CLI
+starts a detached `pi-template daemon` from its own checkout. A reachable daemon
+is never restarted, whichever checkout it runs from.
 
 This adopts Owner Operator's recovery rules
 ([`039359a`](https://github.com/lhotwll217/owner-operator/commit/039359a),
@@ -135,6 +144,8 @@ launchd start sequence (`startDaemonProcess` in `src/daemon/ensure.ts` at
 [`21d5d29`](https://github.com/lhotwll217/owner-operator/blob/21d5d29/src/daemon/ensure.ts)).
 Owner Operator decides launchd ownership by comparing the home with its default
 path; this harness's plist records its home, so the check reads that entry.
+Owner Operator kickstarts with `-k`, which kills a running job; this harness
+drops `-k` because it starts a daemon only when discovery is absent or stale.
 
 ## Trust boundary
 

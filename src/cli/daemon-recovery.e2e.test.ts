@@ -23,15 +23,21 @@ const helpers = new Set<ChildProcess>();
 
 interface CliResult { status: number | null; stdout: string; stderr: string }
 
+const COMMAND_DEADLINE_MS = 30_000;
+
 const runCli = async (args: string[], env = environment): Promise<CliResult> =>
   await new Promise((resolveRun, reject) => {
     const child = spawn(join(repositoryRoot, "pi-template"), args, { cwd: repositoryRoot, env });
+    const deadline = setTimeout(() => child.kill("SIGKILL"), COMMAND_DEADLINE_MS);
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += String(chunk); });
     child.stderr.on("data", (chunk) => { stderr += String(chunk); });
     child.once("error", reject);
-    child.once("close", (status) => resolveRun({ status, stdout, stderr }));
+    child.once("close", (status) => {
+      clearTimeout(deadline);
+      resolveRun({ status, stdout, stderr });
+    });
   });
 
 const status = async (env = environment): Promise<DaemonHealth> => {
@@ -43,6 +49,12 @@ const status = async (env = environment): Promise<DaemonHealth> => {
   return body.health;
 };
 
+const unreachableDiagnostic = (pid: number, port: number, probeFailure: string, recovery?: string): string =>
+  `pi-template: daemon pid ${pid} is running but this process cannot reach it at 127.0.0.1:${port}. ` +
+    `Probe failed: ${probeFailure}. The daemon was not restarted. ` +
+    `Verify that pid ${pid} is this harness's daemon, then ` +
+    `${recovery ?? `run \`kill ${pid}\` (if it does not exit, \`kill -9 ${pid}\`)`}, and retry.\n`;
+const PROBE_TIMEOUT = "TimeoutError: The operation was aborted due to timeout";
 const discovery = (): DaemonInfo => JSON.parse(readFileSync(paths.daemonInfo, "utf8")) as DaemonInfo;
 const writeDiscovery = (info: DaemonInfo): void => writeFileSync(paths.daemonInfo, JSON.stringify(info));
 const isAlive = (pid: number): boolean => {
@@ -88,10 +100,7 @@ try {
   assert.equal(unauthorized.status, 1);
   assert.equal(
     unauthorized.stderr,
-    `pi-template: daemon pid ${second.pid} is running but this process cannot reach it at 127.0.0.1:${live.port}. ` +
-      `Probe failed: GatewayRequestError: Gateway /health: "unauthorized". The daemon was not restarted. ` +
-      `Verify that pid ${second.pid} is this harness's daemon, then run \`kill ${second.pid}\` ` +
-      `(if it does not exit, \`kill -9 ${second.pid}\`), and retry.\n`,
+    unreachableDiagnostic(second.pid, live.port, `GatewayRequestError: Gateway /health: "unauthorized"`),
   );
   assert.equal(`${unauthorized.stdout}${unauthorized.stderr}`.includes(wrongToken), false, "the token is never printed");
   assert.equal(isAlive(second.pid), true, "the unreachable daemon keeps running");
@@ -116,13 +125,27 @@ try {
   assert.equal(isAlive(second.pid), true);
   console.log("ok — a launchd-owned daemon's diagnostic gives the launchd recovery command");
 
+  writeFileSync(join(bin, "launchctl"), "#!/bin/sh\nexec sleep 600\n");
+  const hungLaunchctl = await runCli(["status"], { ...environment, HOME: userHome, PATH: `${bin}:${process.env.PATH ?? ""}` });
+  assert.equal(hungLaunchctl.status, 1, "a hung launchctl is abandoned instead of hanging the command");
+  assert.equal(
+    hungLaunchctl.stderr,
+    unreachableDiagnostic(
+      second.pid,
+      live.port,
+      `GatewayRequestError: Gateway /health: "unauthorized"`,
+      `if launchd owns it run \`launchctl kickstart -k gui/${process.getuid!()}/com.pi-template.daemon\`, ` +
+        `otherwise run \`kill ${second.pid}\` (if it does not exit, \`kill -9 ${second.pid}\`)`,
+    ),
+  );
+  console.log("ok — a hung launchctl print leaves ownership unknown and the command still explains");
+
   writeDiscovery(live);
   process.kill(second.pid, "SIGSTOP");
   try {
     const hung = await runCli(["status"]);
     assert.equal(hung.status, 1);
-    assert.match(hung.stderr, new RegExp(`daemon pid ${second.pid} is running but this process cannot reach it`));
-    assert.match(hung.stderr, /Probe failed: TimeoutError: .*The daemon was not restarted\./);
+    assert.equal(hung.stderr, unreachableDiagnostic(second.pid, live.port, PROBE_TIMEOUT));
     assert.equal(discovery().pid, second.pid);
     assert.equal(daemonStarts(), startsBefore);
   } finally {
@@ -130,6 +153,37 @@ try {
   }
   assert.equal((await status()).pid, second.pid, "the hung daemon serves again once it resumes");
   console.log("ok — a hung daemon is left running with a diagnostic");
+
+  const stallToken = "stall-token";
+  const stallsAfterOneProbe = await spawnUntilFirstOutput(`
+    let answered = 0;
+    const server = require("node:http").createServer((request, response) => {
+      if (answered++ >= 2) return;
+      response.setHeader("content-type", "application/json");
+      if (request.url === "/health") return response.end(JSON.stringify({
+        ok: true, port: server.address().port, pid: process.pid, startedAt: "then",
+        fingerprint: "stall-fingerprint", stale: false, repoRoot: "/elsewhere/pi-template",
+      }));
+      response.end(JSON.stringify({ ready: true, setupRequired: true, modules: { state: true, scheduler: true, gateway: true } }));
+    });
+    server.listen(0, "127.0.0.1", () => process.stdout.write(String(server.address().port)));
+  `);
+  const stallPort = Number(stallsAfterOneProbe.output);
+  writeDiscovery({
+    port: stallPort,
+    pid: stallsAfterOneProbe.pid,
+    startedAt: "then",
+    fingerprint: "stall-fingerprint",
+    authToken: stallToken,
+  });
+  const stalled = await runCli(["status"]);
+  assert.equal(stalled.status, 1);
+  assert.equal(stalled.stderr, unreachableDiagnostic(stallsAfterOneProbe.pid, stallPort, PROBE_TIMEOUT));
+  assert.equal(discovery().pid, stallsAfterOneProbe.pid, "no second daemon replaced the discovery record");
+  assert.equal(daemonStarts(), startsBefore, "no second daemon started");
+  assert.equal(isAlive(second.pid), true);
+  writeDiscovery(live);
+  console.log("ok — a daemon that answers one probe and then stalls gets the hung-daemon diagnostic");
 
   const unrelated = await spawnUntilFirstOutput(`setInterval(() => {}, 60_000); process.stdout.write("ready");`);
   process.kill(second.pid, "SIGKILL");

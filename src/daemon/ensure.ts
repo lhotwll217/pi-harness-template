@@ -1,7 +1,7 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 export const DAEMON_LAUNCHD_LABEL = "com.pi-template.daemon";
@@ -29,9 +29,15 @@ export interface LaunchdServiceOptions {
   execFile?: (file: string, args: string[]) => Promise<unknown>;
 }
 
-const execFileAsync = async (file: string, args: string[]): Promise<unknown> =>
-  await promisify(execFileCallback)(file, args);
+// Matches the sandbox probe's bound (src/agent/sandbox/anthropic-sandbox.ts); launchctl answers in milliseconds.
+const LAUNCHCTL_TIMEOUT_MS = 5_000;
+const execFileAsync = async (file: string, args: string[]): Promise<{ stdout: string }> =>
+  await promisify(execFileCallback)(file, args, { timeout: LAUNCHCTL_TIMEOUT_MS });
 const LAUNCHCTL_NOT_LOADED_CODES = new Set<string | number>([3, 113]);
+const launchctlReportsNotLoaded = (error: unknown): boolean => {
+  const code = (error as { code?: string | number }).code;
+  return code !== undefined && LAUNCHCTL_NOT_LOADED_CODES.has(code);
+};
 
 const escapeXml = (value: string): string => value
   .replaceAll("&", "&amp;")
@@ -39,12 +45,26 @@ const escapeXml = (value: string): string => value
   .replaceAll(">", "&gt;")
   .replaceAll('"', "&quot;")
   .replaceAll("'", "&apos;");
+const unescapeXml = (value: string): string => value
+  .replaceAll("&apos;", "'")
+  .replaceAll("&quot;", '"')
+  .replaceAll("&gt;", ">")
+  .replaceAll("&lt;", "<")
+  .replaceAll("&amp;", "&");
+
+const canonicalPath = (path: string): string => {
+  const absolute = resolve(path);
+  try {
+    return realpathSync(absolute);
+  } catch {
+    return absolute;
+  }
+};
 
 export const daemonLaunchAgentPath = (userHome = homedir()): string =>
   join(userHome, "Library", "LaunchAgents", `${DAEMON_LAUNCHD_LABEL}.plist`);
 
-const launchAgentHomeEntry = (home: string): string =>
-  `<key>PI_TEMPLATE_HOME</key><string>${escapeXml(home)}</string>`;
+const LAUNCH_AGENT_HOME_ENTRY = /<key>PI_TEMPLATE_HOME<\/key><string>([^<]*)<\/string>/;
 
 export function daemonLaunchAgent(configuration: DaemonServiceConfiguration): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -58,7 +78,7 @@ export function daemonLaunchAgent(configuration: DaemonServiceConfiguration): st
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    ${launchAgentHomeEntry(configuration.home)}
+    <key>PI_TEMPLATE_HOME</key><string>${escapeXml(configuration.home)}</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -112,26 +132,52 @@ export function createLaunchdServiceAdapter(options: LaunchdServiceOptions = {})
 }
 
 export function launchdManagesHome(home: string, userHome = homedir()): boolean {
+  let entry: string | undefined;
   try {
-    return readFileSync(daemonLaunchAgentPath(userHome), "utf8").includes(launchAgentHomeEntry(home));
+    entry = LAUNCH_AGENT_HOME_ENTRY.exec(readFileSync(daemonLaunchAgentPath(userHome), "utf8"))?.[1];
   } catch {
     return false;
   }
+  return entry !== undefined && canonicalPath(unescapeXml(entry)) === canonicalPath(home);
 }
 
+const launchdTarget = (uid: number): string => `gui/${uid}/${DAEMON_LAUNCHD_LABEL}`;
+const reportedPid = (printed: { stdout?: unknown } | undefined): number | undefined => {
+  const pid = /^\s*pid\s*=\s*(\d+)\s*$/m.exec(String(printed?.stdout ?? ""))?.[1];
+  return pid === undefined ? undefined : Number(pid);
+};
+
+/** The pid launchd reports for the daemon job, or undefined when it reports none or cannot be asked. */
+export async function launchdJobPid(): Promise<number | undefined> {
+  const uid = process.getuid?.();
+  if (uid === undefined) return undefined;
+  try {
+    return reportedPid(await execFileAsync("launchctl", ["print", launchdTarget(uid)]));
+  } catch {
+    return undefined;
+  }
+}
+
+// Called only when discovery is absent or stale, so a job launchd is already running is left alone:
+// KeepAlive or a concurrent command may have just started it, and its record is about to appear.
 export async function startDaemonService(): Promise<void> {
   const uid = process.getuid?.();
   if (uid === undefined) throw new Error("the installed daemon LaunchAgent requires a Unix user id");
   const domain = `gui/${uid}`;
-  const target = `${domain}/${DAEMON_LAUNCHD_LABEL}`;
+  const target = launchdTarget(uid);
   await execFileAsync("launchctl", ["enable", target]);
   try {
-    await execFileAsync("launchctl", ["kickstart", "-k", target]);
+    await execFileAsync("launchctl", ["kickstart", target]);
   } catch (error) {
-    const code = (error as { code?: string | number }).code;
-    if (code === undefined || !LAUNCHCTL_NOT_LOADED_CODES.has(code)) throw error;
-    await execFileAsync("launchctl", ["bootstrap", domain, daemonLaunchAgentPath()]);
-    await execFileAsync("launchctl", ["kickstart", "-k", target]);
+    if (!launchctlReportsNotLoaded(error)) throw error;
+    try {
+      await execFileAsync("launchctl", ["bootstrap", domain, daemonLaunchAgentPath()]);
+    } catch (bootstrapError) {
+      // A concurrent command can bootstrap the job between this kickstart and bootstrap.
+      const loaded = await execFileAsync("launchctl", ["print", target]).then(() => true, () => false);
+      if (!loaded) throw bootstrapError;
+    }
+    await execFileAsync("launchctl", ["kickstart", target]);
   }
 }
 
@@ -145,12 +191,10 @@ export async function launchdOwnership(
   if (uid === undefined) return LaunchdOwnership.Unknown;
   const execFile = options.execFile ?? execFileAsync;
   try {
-    const result = await execFile("launchctl", ["print", `gui/${uid}/${DAEMON_LAUNCHD_LABEL}`]) as { stdout?: unknown };
-    const reported = /^\s*pid\s*=\s*(\d+)\s*$/m.exec(String(result?.stdout ?? ""))?.[1];
-    if (!reported) return LaunchdOwnership.Unknown;
-    return Number(reported) === pid ? LaunchdOwnership.Owned : LaunchdOwnership.NotOwned;
+    const reported = reportedPid(await execFile("launchctl", ["print", launchdTarget(uid)]) as { stdout?: unknown });
+    if (reported === undefined) return LaunchdOwnership.Unknown;
+    return reported === pid ? LaunchdOwnership.Owned : LaunchdOwnership.NotOwned;
   } catch (error) {
-    const code = (error as { code?: string | number }).code;
-    return code !== undefined && LAUNCHCTL_NOT_LOADED_CODES.has(code) ? LaunchdOwnership.NotOwned : LaunchdOwnership.Unknown;
+    return launchctlReportsNotLoaded(error) ? LaunchdOwnership.NotOwned : LaunchdOwnership.Unknown;
   }
 }
