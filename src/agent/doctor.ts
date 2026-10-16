@@ -9,6 +9,7 @@ import {
 } from "@pi-template/contracts";
 import { agentDefinitionSummary } from "./agent-definition";
 import { configuredWorkspaceSkillNames } from "./runtime";
+import { readSandboxPolicy } from "./sandbox";
 
 type JsonObject = Record<string, unknown>;
 
@@ -42,7 +43,7 @@ export interface DoctorReport {
     model: { available: boolean; selected: string | null };
     resources: { reviewed: boolean; bundled: string[]; workspaceSkills: string[]; workspaceContext: boolean };
     permission: { configured: boolean; mode: string; configPath: string };
-    sandbox: { verified: boolean; reason: string };
+    sandbox: { enabled: boolean; verified: boolean; reason: string };
     daemon: { configured: boolean; configuration: "installed" | "declined" | "not-configured" };
   };
 }
@@ -56,7 +57,23 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
   const model = typeof piSettings.defaultModel === "string" ? piSettings.defaultModel : "";
   const selected = provider && model ? `${provider}/${model}` : null;
   const progress = readObject(paths.onboardingProgress) as Partial<OnboardingProgress>;
-  const sandbox = readObject(join(paths.home, "sandbox-verification.json"));
+  const verification = readObject(join(paths.home, "sandbox-verification.json"));
+  // The policy file decides, so a hand edit to sandbox.json shows at once.
+  let sandbox: DoctorReport["checks"]["sandbox"];
+  try {
+    const policy = readSandboxPolicy(paths.home);
+    sandbox = !policy
+      ? { enabled: false, verified: false, reason: "no sandbox policy; bash runs on the host" }
+      : !policy.enabled
+      ? { enabled: false, verified: false, reason: "turned off in sandbox.json; bash runs on the host" }
+      : {
+          enabled: true,
+          verified: verification.ok === true,
+          reason: typeof verification.reason === "string" ? verification.reason : "not verified",
+        };
+  } catch (error) {
+    sandbox = { enabled: true, verified: false, reason: error instanceof Error ? error.message : String(error) };
+  }
   let modelAvailable = false;
   if (selected) {
     if (options.providerModelVerifier) {
@@ -92,17 +109,15 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
       mode: settings.permissionMode,
       configPath: paths.piPermissionConfig,
     },
-    sandbox: {
-      verified: sandbox.ok === true,
-      reason: typeof sandbox.reason === "string" ? sandbox.reason : "not verified",
-    },
+    sandbox,
     daemon: {
       configured: service === "installed" || service === "declined",
       configuration: service,
     },
   };
   const ok = checks.roots.ok && checks.provider.available && checks.model.available &&
-    checks.resources.reviewed && checks.permission.configured && checks.sandbox.verified && checks.daemon.configured;
+    checks.resources.reviewed && checks.permission.configured &&
+    (checks.sandbox.verified || !checks.sandbox.enabled) && checks.daemon.configured;
   return { ok, checks };
 }
 
@@ -120,7 +135,7 @@ export function formatDoctorReport(report: DoctorReport): string {
     `Workspace skills: ${checks.resources.workspaceSkills.join(", ") || "none"}`,
     `Workspace context: ${checks.resources.workspaceContext ? "approved" : "not approved"}`,
     `Permission mode: ${checks.permission.mode} (${checks.permission.configured ? "configured" : "not configured"})`,
-    `Sandbox: ${checks.sandbox.verified ? "verified" : "not verified"} (${checks.sandbox.reason})`,
+    `Sandbox: ${checks.sandbox.enabled ? `on, ${checks.sandbox.verified ? "verified" : "not verified"}` : "off"} (${checks.sandbox.reason})`,
     `Daemon: ${checks.daemon.configuration}`,
   ].join("\n") + "\n";
 }

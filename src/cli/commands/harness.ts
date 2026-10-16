@@ -15,6 +15,8 @@ const ONBOARD_OPTIONS: ReadonlyArray<[string, string]> = [
   ["--approve-workspace-context", "load the workspace's context files"],
   ["--protected-path <path>", "path the agent must not write (repeatable)"],
   ["--protected-repo <repo>", "repository the agent must not write (repeatable)"],
+  ["--sandbox", "turn the sandbox on for bash"],
+  ["--sandbox-off", "turn the sandbox off"],
   ["--sandbox-read <path>", "sandbox read root (repeatable; default cwd)"],
   ["--sandbox-write <path>", "sandbox write root (repeatable; default cwd)"],
   ["--network-domain <host>", "sandbox admits this host (repeatable)"],
@@ -48,7 +50,9 @@ export function addHarnessCommands(program: Command): void {
     useWhen: "the owner sets the harness up or revisits a recorded answer.",
     rules: [
       "Interactive by default; --non-interactive takes every answer from flags.",
-      "--non-interactive needs --provider, --api-key or --auth-file, --model, --permission, --service, and --acknowledge-resources. Sandbox roots default to cwd.",
+      "--non-interactive needs --provider, --api-key or --auth-file, --model, --permission, --service, and --acknowledge-resources.",
+      "The sandbox stays off unless --sandbox turns it on (--sandbox-off turns it off); its roots default to cwd.",
+      "On an onboarded home, every omitted flag keeps its recorded answer.",
     ],
     examples: [
       "pi-template onboard",

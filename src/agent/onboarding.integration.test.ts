@@ -19,6 +19,7 @@ import {
 const root = mkdtempSync(join(tmpdir(), "pi-template-onboarding-"));
 let tick = 0;
 let sandboxPasses = true;
+let sandboxProbes = 0;
 let readinessPasses = true;
 const serviceChoices: string[] = [];
 
@@ -31,6 +32,7 @@ const dependencies = (): OnboardingDependencies => ({
   sandbox: {
     async execute() { throw new Error("not used during onboarding"); },
     async verify() {
+      sandboxProbes += 1;
       return {
         ok: sandboxPasses,
         unavailable: false,
@@ -54,6 +56,7 @@ const dependencies = (): OnboardingDependencies => ({
 });
 
 const policy = {
+  enabled: true,
   filesystem: { allowedReadRoots: [root], allowedWriteRoots: [root], deniedReadRoots: [] },
   process: { allowSubprocesses: true },
   network: { mode: "deny" as const, allowedDomains: [] },
@@ -213,6 +216,38 @@ try {
   assert.equal(completed.marker?.version, ONBOARDING_VERSION);
   assert.ok(existsSync(harnessPaths(resumeHome).onboardingMarker));
 
+  // A rerun runs every stage again with the answers it gives, and keeps every recorded one it omits.
+  const recordedFiles = () => ["protected_paths.json", "resource-approvals.json", "sandbox.json"]
+    .map((file) => readFileSync(join(resumeHome, file), "utf8"));
+  const beforeRerun = recordedFiles();
+  const rerun = await runOnboarding({ capabilities: { permissionMode: "read-only" } }, { ...dependencies(), home: resumeHome });
+  assert.equal(rerun.complete, true);
+  assert.equal(JSON.parse(readFileSync(harnessPaths(resumeHome).settings, "utf8")).permissionMode, "read-only");
+  assert.deepEqual(recordedFiles(), beforeRerun);
+  assert.notEqual(rerun.marker?.completedAt, completed.marker?.completedAt);
+
+  // A rerun that cannot finish keeps the marker it would otherwise withdraw.
+  writeFileSync(join(resumeHome, "resource-approvals.json"), JSON.stringify({ workspaceContext: true }));
+  await assert.rejects(
+    runOnboarding({}, { ...dependencies(), home: resumeHome }),
+    (error) => error instanceof OnboardingStageError && error.stage === "resources",
+  );
+  assert.ok(existsSync(harnessPaths(resumeHome).onboardingMarker));
+
+  // An owner who leaves the sandbox off is not probed, even where the probe would fail.
+  const offHome = join(root, "sandbox-off");
+  sandboxPasses = false;
+  const probesBefore = sandboxProbes;
+  const off = await runOnboarding(
+    { ...completeAnswers(), sandbox: { policy: { ...policy, enabled: false } } },
+    { ...dependencies(), home: offHome },
+  );
+  assert.equal(off.complete, true);
+  assert.equal(sandboxProbes, probesBefore);
+  assert.equal(JSON.parse(readFileSync(join(offHome, "sandbox.json"), "utf8")).enabled, false);
+  assert.equal(existsSync(join(offHome, "sandbox-verification.json")), false);
+  sandboxPasses = true;
+
   const sandboxHome = join(root, "sandbox-failure");
   sandboxPasses = false;
   await assert.rejects(
@@ -240,7 +275,7 @@ try {
   assert.equal(Object.keys(reopened.progress.stages)[0], "home");
   assert.equal(reopened.marker?.version, ONBOARDING_VERSION);
 
-  process.stdout.write("ok — onboarding resumes durably, fails closed, marks last, and reopens old versions\n");
+  process.stdout.write("ok — onboarding resumes durably, fails closed, marks last, reruns keeping recorded answers, skips an off sandbox, and reopens old versions\n");
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

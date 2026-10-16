@@ -18,6 +18,7 @@ export function testOnboardingAnswers(root: string): OnboardingAnswers {
     protectedPaths: { paths: [], repos: [] },
     sandbox: {
       policy: {
+        enabled: true,
         filesystem: { allowedReadRoots: [root], allowedWriteRoots: [root], deniedReadRoots: [] },
         process: { allowSubprocesses: true },
         network: { mode: "deny", allowedDomains: [] },

@@ -6,7 +6,6 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  DEFAULT_PERMISSION_MODE,
   DEFAULT_TOOL_POSTURE,
   ensureHarnessWorkspace,
   harnessPaths,
@@ -27,7 +26,7 @@ try {
 
   // Defaults when nothing is saved.
   const defaults = loadHarnessSettings(home);
-  assert.equal(defaults.permissionMode, DEFAULT_PERMISSION_MODE);
+  assert.equal(defaults.permissionMode, "allow");
   assert.deepEqual(defaults.toolPosture, [...DEFAULT_TOOL_POSTURE]);
   assert.deepEqual(defaults.skillPolicy, { mode: "bundled", allowlist: [] });
 
@@ -42,7 +41,7 @@ try {
 
   writeFileSync(harnessPaths(home).settings, JSON.stringify({ permissionMode: "bogus", toolPosture: ["nope"] }));
   const repaired = loadHarnessSettings(home);
-  assert.equal(repaired.permissionMode, DEFAULT_PERMISSION_MODE);
+  assert.equal(repaired.permissionMode, "allow");
   assert.deepEqual(repaired.toolPosture, [...DEFAULT_TOOL_POSTURE]);
 
   assert.throws(() => saveHarnessSettings(home, { alwaysOn: "maybe" as never }));

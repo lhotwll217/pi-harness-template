@@ -2,11 +2,13 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import {
   createBashToolDefinition,
+  createLocalBashOperations,
   createAgentSessionFromServices,
   createAgentSessionServices,
   SessionManager,
   SettingsManager,
   type AgentSessionServices,
+  type BashOperations,
   type ResourceLoader,
   type SessionStartEvent,
   type ToolDefinition,
@@ -24,7 +26,7 @@ import {
   piTemplateIdentityPrompt,
   type AgentToolDependencies,
 } from "./agent-definition";
-import { createSandboxAdapter, type SandboxAdapter, type SandboxPolicy } from "./sandbox";
+import { commandEnvironment, createSandboxAdapter, readSandboxPolicy, type SandboxAdapter } from "./sandbox";
 
 export interface AgentResourceOptions extends AgentToolDependencies {
   home?: string;
@@ -65,16 +67,6 @@ function workspaceContextApproved(home: string): boolean {
     return value?.workspaceContext === true;
   } catch {
     return false;
-  }
-}
-
-function sandboxPolicy(home: string): SandboxPolicy {
-  try {
-    const value = JSON.parse(readFileSync(join(home, "sandbox.json"), "utf8")) as SandboxPolicy;
-    if (!value?.filesystem || !value.process || !value.network) throw new Error("invalid sandbox policy");
-    return value;
-  } catch (error) {
-    throw new Error(`sandbox policy is unavailable under ${home}`, { cause: error });
   }
 }
 
@@ -155,6 +147,33 @@ function assertHeadlessApprovalPolicy(home: string): void {
   }
 }
 
+/** Bash runs in the OS sandbox only when the home's policy turns it on (docs/security.md#the-sandbox-is-opt-in). */
+function bashOperations(home: string, sandbox: SandboxAdapter): BashOperations {
+  const policy = readSandboxPolicy(home);
+  if (!policy?.enabled) {
+    const local = createLocalBashOperations();
+    return {
+      exec: async (command, cwd, execution) =>
+        await local.exec(command, cwd, { ...execution, env: commandEnvironment(execution.env ?? process.env) }),
+    };
+  }
+  return {
+    exec: async (command, cwd, execution) => {
+      const { exitCode, timedOut } = await sandbox.execute(policy, {
+        command,
+        cwd,
+        env: execution.env,
+        signal: execution.signal,
+        timeoutMs: execution.timeout === undefined ? undefined : execution.timeout * 1000,
+        onOutput: execution.onData,
+      });
+      // Pi's bash tool turns this message into "Command timed out after N seconds".
+      if (timedOut) throw new Error(`timeout:${execution.timeout}`);
+      return { exitCode };
+    },
+  };
+}
+
 export async function createHarnessSession(options: HarnessSessionOptions) {
   const paths = ensureHarnessWorkspace(options.home);
   if (options.headless) assertHeadlessApprovalPolicy(paths.home);
@@ -167,24 +186,7 @@ export async function createHarnessSession(options: HarnessSessionOptions) {
   const sandbox = options.sandbox ?? createSandboxAdapter();
   const customTools: Array<ToolDefinition<any, any, any>> = [...resources.tools];
   if (enabledNames.includes("bash")) {
-    const policy = sandboxPolicy(paths.home);
-    customTools.push(createBashToolDefinition(options.cwd, {
-      operations: {
-        exec: async (command, cwd, execution) => {
-          const { exitCode, timedOut } = await sandbox.execute(policy, {
-            command,
-            cwd,
-            env: execution.env,
-            signal: execution.signal,
-            timeoutMs: execution.timeout === undefined ? undefined : execution.timeout * 1000,
-            onOutput: execution.onData,
-          });
-          // Pi's bash tool turns this message into "Command timed out after N seconds".
-          if (timedOut) throw new Error(`timeout:${execution.timeout}`);
-          return { exitCode };
-        },
-      },
-    }));
+    customTools.push(createBashToolDefinition(options.cwd, { operations: bashOperations(paths.home, sandbox) }));
   }
   const sessionManager = options.sessionManager ?? (options.ephemeral
     ? SessionManager.inMemory(options.cwd)

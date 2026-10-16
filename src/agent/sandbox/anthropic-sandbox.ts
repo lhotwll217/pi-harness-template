@@ -8,6 +8,7 @@ import {
   type SandboxRuntimeConfig,
 } from "@anthropic-ai/sandbox-runtime";
 import {
+  commandEnvironment,
   failedSandboxChecks,
   type SandboxAdapter,
   type SandboxPolicy,
@@ -99,14 +100,6 @@ async function spawnSandboxed(
   env: NodeJS.ProcessEnv,
   request: SandboxedCommandRequest,
 ): Promise<SandboxedCommandResult> {
-  const safeEnvironment = (source: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv => {
-    const allowed = new Set([
-      "PATH", "SHELL", "TERM", "LANG", "HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP",
-      "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "GIT_SSL_CAINFO", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
-      "GIT_SSH_COMMAND",
-    ]);
-    return Object.fromEntries(Object.entries(source ?? {}).filter(([name]) => allowed.has(name) || name.startsWith("LC_")));
-  };
   const proxyNames = new Set([
     "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
     "http_proxy", "https_proxy", "all_proxy", "no_proxy",
@@ -132,9 +125,9 @@ async function spawnSandboxed(
     const child = spawn(argv[0]!, argv.slice(1), {
       cwd: request.cwd,
       env: {
-        ...safeEnvironment(process.env),
-        ...safeEnvironment(request.env),
-        ...safeEnvironment(env),
+        ...commandEnvironment(process.env),
+        ...commandEnvironment(request.env),
+        ...commandEnvironment(env),
         ...sandboxProxyEnvironment,
       },
       stdio: ["ignore", "pipe", "pipe"],

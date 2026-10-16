@@ -9,12 +9,19 @@ import {
   type Credential,
 } from "@earendil-works/pi-ai";
 import { getAgentDir, ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { harnessPaths, isPermissionMode, type PermissionMode, type SkillPolicy } from "@pi-template/contracts";
+import {
+  DEFAULT_PERMISSION_MODE,
+  harnessPaths,
+  isPermissionMode,
+  type PermissionMode,
+  type SkillPolicy,
+} from "@pi-template/contracts";
 import {
   AGENT_DEFINITION,
   definitionIds,
   agentDefinitionSummary,
   readStandaloneCredentials,
+  recordedAnswers,
   runOnboarding,
   type OnboardingAnswers,
   type OnboardingDependencies,
@@ -27,6 +34,8 @@ interface OnboardFlags {
   noBrowser: boolean;
   acknowledgeResources: boolean;
   approveWorkspaceContext: boolean;
+  /** `--sandbox` or `--sandbox-off`; undefined keeps the recorded choice. */
+  sandboxEnabled: boolean | undefined;
   values: Map<string, string>;
   repeated: Map<string, string[]>;
 }
@@ -86,12 +95,19 @@ function parseFlags(argv: readonly string[]): OnboardFlags {
   let noBrowser = process.env.PI_TEMPLATE_NO_BROWSER === "1";
   let acknowledgeResources = false;
   let approveWorkspaceContext = false;
+  let sandboxEnabled: boolean | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     if (flag === "--no-browser") { noBrowser = true; continue; }
     if (flag === "--non-interactive") { nonInteractive = true; continue; }
     if (flag === "--acknowledge-resources") { acknowledgeResources = true; continue; }
     if (flag === "--approve-workspace-context") { approveWorkspaceContext = true; continue; }
+    if (flag === "--sandbox" || flag === "--sandbox-off") {
+      const enabled = flag === "--sandbox";
+      if (sandboxEnabled === !enabled) throw new CliUsageError("choose one of --sandbox or --sandbox-off");
+      sandboxEnabled = enabled;
+      continue;
+    }
     if (!VALUES.has(flag) && !REPEATED.has(flag)) throw new CliUsageError(`unknown onboard option: ${flag}`);
     const value = argv[++index];
     if (!value || value.startsWith("--")) throw new CliUsageError(`${flag} needs a value`);
@@ -99,7 +115,7 @@ function parseFlags(argv: readonly string[]): OnboardFlags {
     else if (values.has(flag)) throw new CliUsageError(`${flag} may be provided only once`);
     else values.set(flag, value);
   }
-  return { nonInteractive, noBrowser, acknowledgeResources, approveWorkspaceContext, values, repeated };
+  return { nonInteractive, noBrowser, acknowledgeResources, approveWorkspaceContext, sandboxEnabled, values, repeated };
 }
 
 function skillPolicy(mode: string, allowlist: string[]): SkillPolicy {
@@ -129,7 +145,8 @@ function importAnswer(source: PiImportSource): NonNullable<OnboardingAnswers["au
   };
 }
 
-function answersFromFlags(flags: OnboardFlags): OnboardingAnswers {
+/** Flag answers over the home's recorded answers, over first-run defaults. */
+function answersFromFlags(flags: OnboardFlags, recorded: OnboardingAnswers): OnboardingAnswers {
   const provider = flags.values.get("--provider");
   const authFile = flags.values.get("--auth-file");
   const apiKey = flags.values.get("--api-key");
@@ -152,9 +169,14 @@ function answersFromFlags(flags: OnboardFlags): OnboardingAnswers {
   if (service === "installed" && (!serviceExecutable || !serviceWorkingDirectory)) {
     throw new CliUsageError("--service installed requires --executable and --working-directory");
   }
-  const readRoots = (flags.repeated.get("--sandbox-read") ?? [process.cwd()]).map((path) => resolve(path));
-  const writeRoots = (flags.repeated.get("--sandbox-write") ?? [process.cwd()]).map((path) => resolve(path));
-  const domains = flags.repeated.get("--network-domain") ?? [];
+  const recordedPolicy = recorded.sandbox?.policy;
+  const readRoots = flags.repeated.get("--sandbox-read")?.map((path) => resolve(path)) ??
+    recordedPolicy?.filesystem.allowedReadRoots ?? [resolve(process.cwd())];
+  const writeRoots = flags.repeated.get("--sandbox-write")?.map((path) => resolve(path)) ??
+    recordedPolicy?.filesystem.allowedWriteRoots ?? [resolve(process.cwd())];
+  const domains = flags.repeated.get("--network-domain");
+  const workspaceSkills = flags.values.get("--workspace-skills");
+  const skills = flags.repeated.get("--skill");
   return {
     auth: authFile
       ? importAnswer(piImportSource(authFile))
@@ -164,19 +186,28 @@ function answersFromFlags(flags: OnboardFlags): OnboardingAnswers {
     model: provider && model ? { provider, model } : undefined,
     resources: flags.acknowledgeResources ? {
       acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION),
-      skillPolicy: skillPolicy(flags.values.get("--workspace-skills") ?? "bundled", flags.repeated.get("--skill") ?? []),
-      approveWorkspaceContext: flags.approveWorkspaceContext,
+      skillPolicy: workspaceSkills !== undefined || skills !== undefined
+        ? skillPolicy(workspaceSkills ?? "bundled", skills ?? [])
+        : recorded.resources?.skillPolicy ?? skillPolicy("bundled", []),
+      approveWorkspaceContext: flags.approveWorkspaceContext || (recorded.resources?.approveWorkspaceContext ?? false),
     } : undefined,
     capabilities: permission && isPermissionMode(permission) ? { permissionMode: permission } : undefined,
     protectedPaths: {
-      paths: (flags.repeated.get("--protected-path") ?? []).map((path) => resolve(path)),
-      repos: flags.repeated.get("--protected-repo") ?? [],
+      paths: flags.repeated.get("--protected-path")?.map((path) => resolve(path)) ?? recorded.protectedPaths?.paths ?? [],
+      repos: flags.repeated.get("--protected-repo") ?? recorded.protectedPaths?.repos ?? [],
     },
     sandbox: {
       policy: {
-        filesystem: { allowedReadRoots: readRoots, allowedWriteRoots: writeRoots, deniedReadRoots: [] },
-        process: { allowSubprocesses: true },
-        network: { mode: domains.length ? "allowlist" : "deny", allowedDomains: domains },
+        enabled: flags.sandboxEnabled ?? recordedPolicy?.enabled ?? false,
+        filesystem: {
+          allowedReadRoots: readRoots,
+          allowedWriteRoots: writeRoots,
+          deniedReadRoots: recordedPolicy?.filesystem.deniedReadRoots ?? [],
+        },
+        process: recordedPolicy?.process ?? { allowSubprocesses: true },
+        network: domains
+          ? { mode: "allowlist", allowedDomains: domains }
+          : recordedPolicy?.network ?? { mode: "deny", allowedDomains: [] },
       },
     },
     service: service === undefined
@@ -387,31 +418,32 @@ function protectedPaths(raw: string): string[] {
   return raw.split(",").map((path) => path.trim()).filter(Boolean).map((path) => resolve(path));
 }
 
+/** The review's starting point: the home's recorded answers, else first-run defaults. */
 function reviewDefaults(
-  home: string | undefined,
   auth: InteractiveAuthSelection,
   protectedPathValues: string[],
+  recorded: OnboardingAnswers,
+  sandboxEnabled: boolean | undefined,
 ): ReviewedSetup {
-  const paths = harnessPaths(home);
   const root = resolve(process.cwd());
+  const policy = recorded.sandbox?.policy ?? {
+    enabled: false,
+    filesystem: { allowedReadRoots: [root], allowedWriteRoots: [root], deniedReadRoots: [] },
+    process: { allowSubprocesses: true },
+    network: { mode: "deny", allowedDomains: [] },
+  };
   return {
     auth: auth.answer,
     model: { provider: auth.provider, model: auth.model },
     resources: {
       acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION),
-      skillPolicy: { mode: "bundled", allowlist: [] },
-      approveWorkspaceContext: true,
+      skillPolicy: recorded.resources?.skillPolicy ?? { mode: "bundled", allowlist: [] },
+      approveWorkspaceContext: recorded.resources?.approveWorkspaceContext ?? true,
     },
-    capabilities: { permissionMode: "read-only" },
-    protectedPaths: { paths: protectedPathValues, repos: [] },
-    sandbox: {
-      policy: {
-        filesystem: { allowedReadRoots: [root], allowedWriteRoots: [root], deniedReadRoots: [] },
-        process: { allowSubprocesses: true },
-        network: { mode: "deny", allowedDomains: [] },
-      },
-    },
-    service: { choice: "declined" },
+    capabilities: recorded.capabilities ?? { permissionMode: DEFAULT_PERMISSION_MODE },
+    protectedPaths: { paths: protectedPathValues, repos: recorded.protectedPaths?.repos ?? [] },
+    sandbox: { policy: { ...policy, enabled: sandboxEnabled ?? policy.enabled } },
+    service: recorded.service ?? { choice: "declined" },
   };
 }
 
@@ -424,16 +456,21 @@ function writeReview(io: InteractiveOnboardingIO, answers: ReviewedSetup, home: 
   for (const resource of agentDefinitionSummary()) {
     io.write(`    ${resource.id} — ${resource.description}\n`);
   }
-  io.write("  Skill policy: bundled\n");
-  io.write("  Permission mode: read-only\n");
+  const { skillPolicy } = answers.resources;
+  io.write(`  Skill policy: ${skillPolicy.mode}${skillPolicy.allowlist.length ? ` (${skillPolicy.allowlist.join(", ")})` : ""}\n`);
+  io.write(`  Permission mode: ${answers.capabilities.permissionMode}\n`);
   io.write(`  Protected paths: ${answers.protectedPaths.paths.join(", ") || "none"}\n`);
   io.write("  Workspace files to approve:\n");
   io.write(`    ${paths.workspaceInstructions}\n`);
   io.write(`    ${paths.workspaceMemory}\n`);
-  io.write(`  Sandbox allowed read roots: ${answers.sandbox.policy.filesystem.allowedReadRoots.join(", ")}\n`);
-  io.write(`  Sandbox allowed write roots: ${answers.sandbox.policy.filesystem.allowedWriteRoots.join(", ")}\n`);
-  io.write("  Network: deny\n");
-  io.write("  Service: declined\n");
+  const { policy } = answers.sandbox;
+  io.write(policy.enabled
+    ? "  Sandbox: on\n"
+    : "  Sandbox: off, bash runs with your permissions (rerun onboarding with --sandbox to turn it on)\n");
+  io.write(`  Sandbox allowed read roots: ${policy.filesystem.allowedReadRoots.join(", ")}\n`);
+  io.write(`  Sandbox allowed write roots: ${policy.filesystem.allowedWriteRoots.join(", ")}\n`);
+  io.write(`  Network: ${policy.network.mode}${policy.network.allowedDomains.length ? ` (${policy.network.allowedDomains.join(", ")})` : ""}\n`);
+  io.write(`  Service: ${answers.service.choice}\n`);
 }
 
 async function customizedAnswers(
@@ -448,16 +485,23 @@ async function customizedAnswers(
   }
   const acknowledge = await io.question("Acknowledge this exact agent definition? [y/N] ");
   if (!isAffirmativeAnswer(acknowledge)) throw new CliUsageError("agent definition was not acknowledged");
-  const permissionRaw = (await io.question("Permission mode [read-only/ask/allow]: ")).trim() || "read-only";
+  const permissionRaw = (await io.question("Permission mode [allow/ask/read-only]: ")).trim() ||
+    defaults.capabilities.permissionMode;
   if (!isPermissionMode(permissionRaw)) throw new CliUsageError("permission mode must be ask, allow, or read-only");
   const workspaceContext = await io.question("Approve workspace AGENTS.md and MEMORY.md? [y/N] ");
-  const serviceRaw = (await io.question("Daemon service [declined/installed]: ")).trim() || "declined";
+  const serviceRaw = (await io.question("Daemon service [declined/installed]: ")).trim() || defaults.service.choice;
   if (serviceRaw !== "declined" && serviceRaw !== "installed") throw new CliUsageError("service choice must be declined or installed");
+  const keepsInstall = defaults.service.choice === "installed";
+  const executableRaw = serviceRaw === "installed"
+    ? (await io.question(`Absolute pi-template executable path${keepsInstall ? " (blank keeps the installed service)" : ""}: `)).trim()
+    : "";
   const service = serviceRaw === "declined"
     ? { choice: "declined" as const }
+    : keepsInstall && !executableRaw
+    ? { choice: "installed" as const }
     : {
         choice: "installed" as const,
-        executable: resolve((await io.question("Absolute pi-template executable path: ")).trim()),
+        executable: resolve(executableRaw),
         workingDirectory: resolve((await io.question("Daemon working directory: ")).trim()),
       };
   return {
@@ -465,7 +509,7 @@ async function customizedAnswers(
     model: { provider: defaults.model.provider, model },
     resources: {
       acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION),
-      skillPolicy: { mode: "bundled", allowlist: [] },
+      skillPolicy: defaults.resources.skillPolicy,
       approveWorkspaceContext: isAffirmativeAnswer(workspaceContext),
     },
     capabilities: { permissionMode: permissionRaw as PermissionMode },
@@ -479,10 +523,18 @@ async function interactiveAnswers(
   home: string | undefined,
   preferDeviceCode: boolean,
   createRuntime: CreateModelRuntime,
+  recorded: OnboardingAnswers,
+  sandboxEnabled: boolean | undefined,
 ): Promise<OnboardingAnswers> {
   const auth = await interactiveAuth(io, source, preferDeviceCode, createRuntime);
-  const protectedRaw = (await io.question("Protected paths (comma-separated, blank for none): ")).trim();
-  const defaults = reviewDefaults(home, auth, protectedPaths(protectedRaw));
+  const recordedPaths = recorded.protectedPaths?.paths;
+  const protectedRaw = (await io.question(recordedPaths
+    ? `Protected paths (comma-separated, none to clear) [${recordedPaths.join(", ") || "none"}]: `
+    : "Protected paths (comma-separated, blank for none): ")).trim();
+  const protectedPathValues = recordedPaths && !protectedRaw
+    ? recordedPaths
+    : protectedRaw.toLowerCase() === "none" ? [] : protectedPaths(protectedRaw);
+  const defaults = reviewDefaults(auth, protectedPathValues, recorded, sandboxEnabled);
   writeReview(io, defaults, home);
   const acceptance = await io.question("Accept this setup? [Y/n] ");
   if (isDefaultYesAnswer(acceptance)) return defaults;
@@ -501,7 +553,8 @@ export async function onboard(
     createModelRuntime = (options) => ModelRuntime.create(options),
     ...machineDependencies
   } = dependencies;
-  if (flags.nonInteractive) return await runOnboarding(answersFromFlags(flags), machineDependencies);
+  const recorded = recordedAnswers(machineDependencies.home);
+  if (flags.nonInteractive) return await runOnboarding(answersFromFlags(flags, recorded), machineDependencies);
 
   const rl = interactiveIO ? undefined : readline.createInterface({ input: process.stdin, output: process.stdout });
   const io: InteractiveOnboardingIO = interactiveIO ?? {
@@ -513,7 +566,9 @@ export async function onboard(
     const destinationAuthPath = resolve(harnessPaths(machineDependencies.home).piAuth);
     const standaloneSource = piImportSource(standalonePiAuthPath ?? join(getAgentDir(), "auth.json"));
     const source = standaloneSource.authPath === destinationAuthPath ? undefined : standaloneSource;
-    const answers = await interactiveAnswers(io, source, machineDependencies.home, flags.noBrowser, createModelRuntime);
+    const answers = await interactiveAnswers(
+      io, source, machineDependencies.home, flags.noBrowser, createModelRuntime, recorded, flags.sandboxEnabled,
+    );
     return await runOnboarding(answers, machineDependencies);
   } finally {
     rl?.close();
