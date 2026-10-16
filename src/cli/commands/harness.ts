@@ -8,7 +8,7 @@ const ONBOARD_OPTIONS: ReadonlyArray<[string, string]> = [
   ["--api-key <key>", "provider API key (or --auth-file)"],
   ["--auth-file <path>", "import credentials from a Pi auth.json"],
   ["--model <id>", "model id for the provider"],
-  ["--permission <mode>", "permission mode: allow, ask, or read-only"],
+  ["--permission <mode>", "permission mode: allow (default), ask, or read-only"],
   ["--acknowledge-resources", "accept the bundled agent resources"],
   ["--workspace-skills <policy>", "bundled, all, or allowlist (with --skill)"],
   ["--skill <name>", "allowlisted workspace skill (repeatable)"],
@@ -50,9 +50,9 @@ export function addHarnessCommands(program: Command): void {
     useWhen: "the owner sets the harness up or revisits a recorded answer.",
     rules: [
       "Interactive by default; --non-interactive takes every answer from flags.",
-      "--non-interactive needs --provider, --api-key or --auth-file, --model, --permission, --service, and --acknowledge-resources.",
+      "--non-interactive needs --provider, --api-key or --auth-file, --model, --service, and --acknowledge-resources. --permission defaults to allow.",
       "The sandbox stays off unless --sandbox turns it on (--sandbox-off turns it off); its roots default to cwd.",
-      "On an onboarded home, every omitted flag keeps its recorded answer.",
+      "On an onboarded home, every omitted flag keeps its recorded answer; a recorded sandbox or permission choice that cannot be read stops the rerun until its flag replaces it.",
     ],
     examples: [
       "pi-template onboard",

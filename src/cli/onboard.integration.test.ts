@@ -288,9 +288,40 @@ try {
   assert.deepEqual(settingsAfter, { ...settingsBefore, permissionMode: "ask" });
   assert.deepEqual(restAfter, restBefore);
 
+  const flagsSandboxPath = join(flagsHome, "sandbox.json");
+  const verificationBytes = readFileSync(join(flagsHome, "sandbox-verification.json"), "utf8");
+  const { process: _process, enabled: _enabled, ...legacyWithoutProcess } = flagsSandbox();
+  const damagedSandboxes = [
+    readFileSync(flagsSandboxPath, "utf8").replace(/\}\s*$/, ",}\n"),
+    JSON.stringify(legacyWithoutProcess),
+  ];
+  for (const damaged of damagedSandboxes) {
+    writeFileSync(flagsSandboxPath, damaged);
+    const stopped = {
+      name: "CliUsageError",
+      message: `sandbox policy is invalid under ${flagsHome}; fix it, or rerun with --sandbox or --sandbox-off to replace it`,
+    };
+    await assert.rejects(onboard(["--non-interactive"], flagsDependencies), stopped);
+    const untouched = scriptedInteraction([]);
+    await assert.rejects(onboard([], { ...flagsDependencies, interactiveIO: untouched.io }), stopped);
+    assert.deepEqual(untouched.questions(), []);
+    assert.equal(readFileSync(flagsSandboxPath, "utf8"), damaged);
+    assert.equal(readFileSync(join(flagsHome, "sandbox-verification.json"), "utf8"), verificationBytes);
+  }
+
   assert.equal((await onboard(["--non-interactive", "--sandbox-off"], flagsDependencies)).complete, true);
   assert.equal(flagsSandbox().enabled, false);
   assert.equal(existsSync(join(flagsHome, "sandbox-verification.json")), false);
+
+  const flagsSettingsPath = harnessPaths(flagsHome).settings;
+  writeFileSync(flagsSettingsPath, JSON.stringify({ ...JSON.parse(readFileSync(flagsSettingsPath, "utf8")), permissionMode: "bogus" }));
+  await assert.rejects(onboard(["--non-interactive"], flagsDependencies), {
+    name: "CliUsageError",
+    message: `settings record an invalid permission mode "bogus" at ${flagsSettingsPath}; fix it, or rerun with --permission to replace it`,
+  });
+  assert.equal(JSON.parse(readFileSync(flagsSettingsPath, "utf8")).permissionMode, "bogus");
+  assert.equal((await onboard(["--non-interactive", "--permission", "ask"], flagsDependencies)).complete, true);
+  assert.equal(JSON.parse(readFileSync(flagsSettingsPath, "utf8")).permissionMode, "ask");
   await assert.rejects(onboard(["--non-interactive", "--sandbox", "--sandbox-off"], flagsDependencies), {
     name: "CliUsageError",
     message: "choose one of --sandbox or --sandbox-off",
@@ -306,9 +337,10 @@ try {
 
   const importedDefaultHome = join(root, "imported-default-home");
   assert.equal((await onboard([
-    "--non-interactive", "--auth-file", standaloneAuth, "--permission", "allow", "--service", "declined", "--acknowledge-resources",
+    "--non-interactive", "--auth-file", standaloneAuth, "--service", "declined", "--acknowledge-resources",
   ], passingOnboardingDependencies(importedDefaultHome))).complete, true);
   assert.equal(JSON.parse(readFileSync(harnessPaths(importedDefaultHome).piSettings, "utf8")).defaultModel, "imported-model");
+  assert.equal(JSON.parse(readFileSync(harnessPaths(importedDefaultHome).settings, "utf8")).permissionMode, "allow");
 
   const manualHome = join(root, "manual-home");
   const manualInteraction = scriptedInteraction([

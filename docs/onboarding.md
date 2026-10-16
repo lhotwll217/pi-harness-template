@@ -45,6 +45,15 @@ answer it needs, and is written again when the last stage passes, so a rerun
 that fails a stage leaves setup incomplete. Homes onboarded before the
 agent-definition acknowledgment was recorded must acknowledge it once more.
 
+A recorded answer the rerun cannot read stops it before anything is written,
+rather than falling back to a default that could widen access: a `sandbox.json`
+that does not parse or lacks part of its policy stops until `--sandbox` or
+`--sandbox-off` replaces it, and a non-interactive rerun whose `settings.json`
+does not parse or records an unknown permission mode stops until `--permission`
+replaces it.
+Non-interactive onboarding without `--permission` takes the recorded mode, or
+`allow` on a new home.
+
 ## Fail-closed rule
 
 Until the current onboarding contract is complete, the daemon may expose

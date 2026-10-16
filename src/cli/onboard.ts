@@ -13,6 +13,7 @@ import {
   DEFAULT_PERMISSION_MODE,
   harnessPaths,
   isPermissionMode,
+  unreadablePermissionMode,
   type PermissionMode,
   type SkillPolicy,
 } from "@pi-template/contracts";
@@ -20,6 +21,7 @@ import {
   AGENT_DEFINITION,
   definitionIds,
   agentDefinitionSummary,
+  readSandboxPolicy,
   readStandaloneCredentials,
   recordedAnswers,
   runOnboarding,
@@ -189,7 +191,11 @@ function answersFromFlags(flags: OnboardFlags, recorded: OnboardingAnswers): Onb
         : recorded.resources?.skillPolicy ?? skillPolicy("bundled", []),
       approveWorkspaceContext: flags.approveWorkspaceContext || (recorded.resources?.approveWorkspaceContext ?? false),
     } : undefined,
-    capabilities: permission && isPermissionMode(permission) ? { permissionMode: permission } : undefined,
+    capabilities: {
+      permissionMode: permission && isPermissionMode(permission)
+        ? permission
+        : recorded.capabilities?.permissionMode ?? DEFAULT_PERMISSION_MODE,
+    },
     protectedPaths: {
       paths: flags.repeated.get("--protected-path")?.map((path) => resolve(path)) ?? recorded.protectedPaths?.paths ?? [],
       repos: flags.repeated.get("--protected-repo") ?? recorded.protectedPaths?.repos ?? [],
@@ -539,6 +545,22 @@ async function interactiveAnswers(
   throw new CliUsageError("answer y or n to accept this setup");
 }
 
+/** A recorded sandbox choice that cannot be read stops the run instead of turning the sandbox off. */
+function assertRecordedSandboxReadable(home: string, sandboxEnabled: boolean | undefined): void {
+  if (sandboxEnabled !== undefined) return;
+  try {
+    readSandboxPolicy(home);
+  } catch (error) {
+    throw new CliUsageError(`${(error as Error).message}; fix it, or rerun with --sandbox or --sandbox-off to replace it`);
+  }
+}
+
+/** A recorded permission mode that cannot be read stops the run instead of becoming the default. */
+function assertRecordedPermissionReadable(home: string, permission: string | undefined): void {
+  const problem = permission === undefined ? unreadablePermissionMode(home) : undefined;
+  if (problem) throw new CliUsageError(`${problem}; fix it, or rerun with --permission to replace it`);
+}
+
 export async function onboard(
   argv: readonly string[],
   dependencies: CliOnboardingDependencies = {},
@@ -550,8 +572,13 @@ export async function onboard(
     createModelRuntime = (options) => ModelRuntime.create(options),
     ...machineDependencies
   } = dependencies;
-  const recorded = recordedAnswers(machineDependencies.home);
-  if (flags.nonInteractive) return await runOnboarding(answersFromFlags(flags, recorded), machineDependencies);
+  const home = harnessPaths(machineDependencies.home).home;
+  assertRecordedSandboxReadable(home, flags.sandboxEnabled);
+  const recorded = recordedAnswers(home);
+  if (flags.nonInteractive) {
+    assertRecordedPermissionReadable(home, flags.values.get("--permission"));
+    return await runOnboarding(answersFromFlags(flags, recorded), machineDependencies);
+  }
 
   const rl = interactiveIO ? undefined : readline.createInterface({ input: process.stdin, output: process.stdout });
   const io: InteractiveOnboardingIO = interactiveIO ?? {

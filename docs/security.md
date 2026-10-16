@@ -40,9 +40,11 @@ extension's config while keeping owner-authored rules:
 | `ask` | allow | allow | ask |
 | `read-only` | allow | deny | deny |
 
-A fresh home defaults to `allow`, so the agent can act from its first turn.
-`read-only` stays supported: permission system 39 withholds a tool its policy
-denies outright, so under `read-only` the agent has no `bash` at all.
+A fresh home defaults to `allow`, so the agent can act from its first turn. A
+`settings.json` that records no mode also means `allow`; one that does not parse
+or records an unknown mode means `read-only`, so a damaged choice never widens
+access. `read-only` stays supported: permission system 39 withholds a tool its
+policy denies outright, so under `read-only` the agent has no `bash` at all.
 
 ## Interactive and headless authority
 
