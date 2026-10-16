@@ -41,6 +41,7 @@ try {
     "model",
     "resources",
     "permission",
+    "protectedPaths",
     "sandbox",
     "daemon",
   ]);
@@ -61,6 +62,7 @@ try {
   });
   assert.match(formatDoctorReport(off), /^Sandbox: off \(turned off in sandbox.json; bash runs on the host\)$/m);
   assert.equal(off.ok, true);
+  assert.deepEqual(off.checks.protectedPaths, { readable: true, reason: "none recorded" });
 
   unlinkSync(join(home, "sandbox.json"));
   const missing = await runDoctor({ home, providerModelVerifier: () => true });
@@ -75,6 +77,21 @@ try {
     enabled: true, verified: false, reason: `sandbox policy is invalid under ${home}`,
   });
   assert.equal(invalid.ok, false);
+
+  writeFileSync(join(home, "sandbox.json"), JSON.stringify({ ...policy, enabled: false }));
+  writeFileSync(paths.protectedPaths, JSON.stringify({ paths: ["/a", "/b"], repos: ["Personal"] }));
+  const recorded = await runDoctor({ home, providerModelVerifier: () => true });
+  assert.deepEqual(recorded.checks.protectedPaths, { readable: true, reason: "2 paths, 1 repo" });
+  assert.match(formatDoctorReport(recorded), /^Protected paths: 2 paths, 1 repo$/m);
+  assert.equal(recorded.ok, true);
+  writeFileSync(paths.protectedPaths, `{ "paths": ["/a"], }`);
+  const damaged = await runDoctor({ home, providerModelVerifier: () => true });
+  const damage = `protected paths are not valid JSON at ${paths.protectedPaths}; the agent will not start without the owner's protected paths. ` +
+    "Fix the file, or record them again with `pi-template onboard` (non-interactive: `pi-template onboard --non-interactive --protected-path <dir>`)";
+  assert.deepEqual(damaged.checks.protectedPaths, { readable: false, reason: damage });
+  assert.equal(formatDoctorReport(damaged).includes(`Protected paths: unreadable (${damage})\n`), true);
+  assert.equal(damaged.ok, false);
+  unlinkSync(paths.protectedPaths);
 
   writeFileSync(paths.piAuth, JSON.stringify({ anthropic: { type: "api_key", key: secret } }));
   writeFileSync(paths.piSettings, JSON.stringify({ defaultProvider: "anthropic", defaultModel: "claude-sonnet-5" }));

@@ -5,10 +5,11 @@ import {
   ONBOARDING_VERSION,
   ensureHarnessWorkspace,
   loadHarnessSettings,
+  loadProtectedPaths,
   type OnboardingProgress,
 } from "@pi-template/contracts";
 import { agentDefinitionSummary } from "./agent-definition";
-import { configuredWorkspaceSkillNames } from "./runtime";
+import { configuredWorkspaceSkillNames, protectedPathsProblem } from "./runtime";
 import { readSandboxPolicy } from "./sandbox";
 
 type JsonObject = Record<string, unknown>;
@@ -43,6 +44,7 @@ export interface DoctorReport {
     model: { available: boolean; selected: string | null };
     resources: { reviewed: boolean; bundled: string[]; workspaceSkills: string[]; workspaceContext: boolean };
     permission: { configured: boolean; mode: string; configPath: string };
+    protectedPaths: { readable: boolean; reason: string };
     sandbox: { enabled: boolean; verified: boolean; reason: string };
     daemon: { configured: boolean; configuration: "installed" | "declined" | "not-configured" };
   };
@@ -73,6 +75,14 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
   } catch (error) {
     sandbox = { enabled: true, verified: false, reason: error instanceof Error ? error.message : String(error) };
   }
+  const protectedProblem = protectedPathsProblem(paths.home);
+  const recordedProtected = loadProtectedPaths(paths.home);
+  const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+  const protectedPaths: DoctorReport["checks"]["protectedPaths"] = protectedProblem
+    ? { readable: false, reason: protectedProblem }
+    : existsSync(paths.protectedPaths)
+    ? { readable: true, reason: `${count(recordedProtected.paths.length, "path")}, ${count(recordedProtected.repos.length, "repo")}` }
+    : { readable: true, reason: "none recorded" };
   let modelAvailable = false;
   if (selected) {
     if (options.providerModelVerifier) {
@@ -108,6 +118,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
       mode: settings.permissionMode,
       configPath: paths.piPermissionConfig,
     },
+    protectedPaths,
     sandbox,
     daemon: {
       configured: service === "installed" || service === "declined",
@@ -116,6 +127,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
   };
   const ok = checks.roots.ok && checks.provider.available && checks.model.available &&
     checks.resources.reviewed && checks.permission.configured &&
+    checks.protectedPaths.readable &&
     (checks.sandbox.verified || !checks.sandbox.enabled) && checks.daemon.configured;
   return { ok, checks };
 }
@@ -134,6 +146,7 @@ export function formatDoctorReport(report: DoctorReport): string {
     `Workspace skills: ${checks.resources.workspaceSkills.join(", ") || "none"}`,
     `Workspace context: ${checks.resources.workspaceContext ? "approved" : "not approved"}`,
     `Permission mode: ${checks.permission.mode} (${checks.permission.configured ? "configured" : "not configured"})`,
+    `Protected paths: ${checks.protectedPaths.readable ? checks.protectedPaths.reason : `unreadable (${checks.protectedPaths.reason})`}`,
     `Sandbox: ${checks.sandbox.enabled ? `on, ${checks.sandbox.verified ? "verified" : "not verified"}` : "off"} (${checks.sandbox.reason})`,
     `Daemon: ${checks.daemon.configuration}`,
   ].join("\n") + "\n";

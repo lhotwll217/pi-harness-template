@@ -20,6 +20,7 @@ import {
   harnessPaths,
   loadHarnessSettings,
   reconcilePermissionSettings,
+  unreadableProtectedPaths,
   type AgentToolId,
 } from "@pi-template/contracts";
 import {
@@ -72,11 +73,25 @@ function workspaceContextApproved(home: string): boolean {
   }
 }
 
+/** Why no session may start over this home's protected_paths.json, with the recovery; undefined when none. */
+export function protectedPathsProblem(home: string): string | undefined {
+  const problem = unreadableProtectedPaths(home);
+  return problem && `${problem}; the agent will not start without the owner's protected paths. ` +
+    "Fix the file, or record them again with `pi-template onboard` " +
+    "(non-interactive: `pi-template onboard --non-interactive --protected-path <dir>`)";
+}
+
+function assertProtectedPathsReadable(home: string): void {
+  const problem = protectedPathsProblem(home);
+  if (problem) throw new Error(problem);
+}
+
 /** Build Pi's cwd-bound services with every ambient resource source disabled. */
 export async function createHarnessSessionServices(
   options: AgentResourceOptions,
 ): Promise<HarnessSessionServices> {
   const paths = ensureHarnessWorkspace(options.home);
+  assertProtectedPathsReadable(paths.home);
   process.env.PI_CODING_AGENT_DIR = paths.piAgentDir;
   reconcilePermissionSettings(paths.home);
   const settingsManager = SettingsManager.create(paths.workspace, paths.piAgentDir, { projectTrusted: false });
@@ -181,6 +196,7 @@ function bashOperations(home: string, sandbox: SandboxAdapter): BashOperations {
 
 export async function createHarnessSession(options: HarnessSessionOptions) {
   const paths = ensureHarnessWorkspace(options.home);
+  assertProtectedPathsReadable(paths.home);
   if (options.headless) assertHeadlessApprovalPolicy(paths.home);
   const resources = await createHarnessSessionServices(options);
   const definedToolNames = resources.tools.map(({ name }) => name);

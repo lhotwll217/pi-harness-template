@@ -95,6 +95,13 @@ cannot read or write `pi/` or an owner protected path, and cannot write any
 control file. Protected `repos` are recorded in `protected_paths.json`, but no
 runtime rule enforces them yet.
 
+A missing `protected_paths.json` protects nothing. One that does not parse, or
+lists anything but strings, stops every session (interactive, `pi-template
+prompt`, and scheduled) before the permission rules are rebuilt, and
+`pi-template doctor` reports not ready, naming the file, until the owner fixes
+it or records the paths again with `pi-template onboard`
+([rerun rules](onboarding.md)).
+
 Secrets remain under the harness home or provider store and must not appear in
 logs, readiness output, transcripts, events, or error messages.
 
