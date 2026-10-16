@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -54,6 +54,24 @@ try {
   assert.deepEqual(report.checks.sandbox, { enabled: true, verified: true, reason: "verified" });
   assert.match(output, /^Sandbox: on, verified \(verified\)$/m);
   assert.equal(report.ok, true);
+
+  const skill = (dir: string, name: string) => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), `---\nname: ${name}\ndescription: The ${name} test skill.\n---\n`);
+  };
+  skill(join(paths.workspaceSkills, "dropped"), "dropped");
+  skill(join(home, "linked-source"), "linked");
+  symlinkSync(join(home, "linked-source"), join(paths.workspaceSkills, "linked"));
+  symlinkSync(join(home, "moved-skill"), join(paths.workspaceSkills, "stale"));
+  const skills = await runDoctor({ home, providerModelVerifier: () => true });
+  assert.deepEqual(skills.checks.resources.workspaceSkills, ["dropped", "linked"]);
+  assert.deepEqual(skills.checks.resources.brokenWorkspaceSkillLinks, [{ name: "stale", target: join(home, "moved-skill") }]);
+  assert.ok(formatDoctorReport(skills).includes(
+    `Workspace skills: dropped, linked\n  broken link, not loaded: stale -> ${join(home, "moved-skill")}\n`,
+  ));
+  assert.equal(skills.ok, true);
+  saveHarnessSettings(home, { skillPolicy: { mode: "bundled", allowlist: [] } });
+  assert.deepEqual((await runDoctor({ home, providerModelVerifier: () => true })).checks.resources.workspaceSkills, []);
 
   writeFileSync(join(home, "sandbox.json"), JSON.stringify({ ...policy, enabled: false }));
   const off = await runDoctor({ home, providerModelVerifier: () => true });
@@ -110,7 +128,7 @@ try {
   writeFileSync(paths.piSettings, JSON.stringify({ defaultProvider: "anthropic", defaultModel: "no-such-model" }));
   assert.equal((await runDoctor({ home })).checks.model.available, false);
 
-  process.stdout.write("ok — doctor reports readiness shape without secret material and names the sandbox state\n");
+  process.stdout.write("ok — doctor reports readiness shape without secret material and names the sandbox state and broken skill links\n");
 } finally {
   rmSync(home, { recursive: true, force: true });
 }

@@ -20,7 +20,7 @@ export interface HarnessSettings {
   alwaysOn?: "installed" | "declined";
 }
 
-export const DEFAULT_SKILL_POLICY: SkillPolicy = Object.freeze({ mode: "bundled", allowlist: [] as [] });
+export const DEFAULT_SKILL_POLICY: SkillPolicy = Object.freeze({ mode: "all-workspace", allowlist: [] as [] });
 export const DEFAULT_TOOL_POSTURE: readonly string[] = Object.freeze([
   "read", "grep", "find", "ls", "bash", "edit", "write",
 ]);
@@ -36,7 +36,6 @@ export interface HarnessPaths {
   home: string;
   workspace: string;
   workspaceInstructions: string;
-  workspaceMemory: string;
   workspaceSkills: string;
   workspaceArtifacts: string;
   piAgentDir: string;
@@ -63,7 +62,6 @@ export function harnessPaths(home = defaultHome()): HarnessPaths {
     home,
     workspace,
     workspaceInstructions: join(workspace, "AGENTS.md"),
-    workspaceMemory: join(workspace, "MEMORY.md"),
     workspaceSkills: join(workspace, "skills"),
     workspaceArtifacts: join(workspace, "artifacts"),
     piAgentDir,
@@ -123,7 +121,6 @@ export function ensureHarnessWorkspace(home = defaultHome()): HarnessPaths {
   mkdirSync(paths.piAgentDir, { recursive: true });
   mkdirSync(paths.logsDir, { recursive: true });
   writeMissing(paths.workspaceInstructions, "# Pi Template instructions\n\nRecord persistent owner instructions for the harness agent here.\n");
-  writeMissing(paths.workspaceMemory, "# Memory\n\nRecord durable facts for the harness agent here.\n");
   return paths;
 }
 

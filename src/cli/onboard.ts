@@ -11,6 +11,7 @@ import {
 import { getAgentDir, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
   DEFAULT_PERMISSION_MODE,
+  DEFAULT_SKILL_POLICY,
   harnessPaths,
   isPermissionMode,
   unreadablePermissionMode,
@@ -210,8 +211,8 @@ function answersFromFlags(flags: OnboardFlags, recorded: OnboardingAnswers): Onb
     resources: flags.acknowledgeResources ? {
       acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION),
       skillPolicy: workspaceSkills !== undefined || skills !== undefined
-        ? skillPolicy(workspaceSkills ?? "bundled", skills ?? [])
-        : recorded.resources?.skillPolicy ?? skillPolicy("bundled", []),
+        ? skillPolicy(workspaceSkills ?? "all", skills ?? [])
+        : recorded.resources?.skillPolicy ?? DEFAULT_SKILL_POLICY,
       approveWorkspaceContext: flags.approveWorkspaceContext || (recorded.resources?.approveWorkspaceContext ?? false),
     } : undefined,
     capabilities: {
@@ -475,7 +476,7 @@ function reviewDefaults(
     model: { provider: auth.provider, model: auth.model },
     resources: {
       acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION),
-      skillPolicy: recorded.resources?.skillPolicy ?? { mode: "bundled", allowlist: [] },
+      skillPolicy: recorded.resources?.skillPolicy ?? DEFAULT_SKILL_POLICY,
       approveWorkspaceContext: recorded.resources?.approveWorkspaceContext ?? true,
     },
     capabilities: recorded.capabilities ?? { permissionMode: DEFAULT_PERMISSION_MODE },
@@ -503,9 +504,7 @@ function writeReview(
   io.write(`  Skill policy: ${skillPolicy.mode}${skillPolicy.allowlist.length ? ` (${skillPolicy.allowlist.join(", ")})` : ""}\n`);
   io.write(`  Permission mode: ${answers.capabilities.permissionMode}\n`);
   io.write(`  Protected paths: ${answers.protectedPaths.paths.join(", ") || "none"}\n`);
-  io.write("  Workspace files to approve:\n");
-  io.write(`    ${paths.workspaceInstructions}\n`);
-  io.write(`    ${paths.workspaceMemory}\n`);
+  io.write(`  Workspace file to approve: ${paths.workspaceInstructions}\n`);
   const { policy } = answers.sandbox;
   io.write(policy.enabled
     ? "  Sandbox: on\n"
@@ -562,7 +561,8 @@ async function customizedAnswers(
   const permissionRaw = (await io.question("Permission mode [allow/ask/read-only]: ")).trim() ||
     defaults.capabilities.permissionMode;
   if (!isPermissionMode(permissionRaw)) throw new CliUsageError("permission mode must be ask, allow, or read-only");
-  const workspaceContext = await io.question("Approve workspace AGENTS.md and MEMORY.md? [y/N] ");
+  const approvedContext = defaults.resources.approveWorkspaceContext;
+  const workspaceContext = (await io.question(`Approve workspace AGENTS.md? ${approvedContext ? "[Y/n]" : "[y/N]"} `)).trim();
   const serviceRaw = (await io.question("Daemon service [declined/installed]: ")).trim() || defaults.service.choice;
   if (serviceRaw !== "declined" && serviceRaw !== "installed") throw new CliUsageError("service choice must be declined or installed");
   const service = serviceRaw === "declined"
@@ -574,7 +574,7 @@ async function customizedAnswers(
     resources: {
       acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION),
       skillPolicy: defaults.resources.skillPolicy,
-      approveWorkspaceContext: isAffirmativeAnswer(workspaceContext),
+      approveWorkspaceContext: workspaceContext ? isAffirmativeAnswer(workspaceContext) : approvedContext,
     },
     capabilities: { permissionMode: permissionRaw as PermissionMode },
     service,

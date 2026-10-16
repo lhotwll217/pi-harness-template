@@ -54,9 +54,9 @@ try {
   writeFileSync(join(cwd, ".pi", "extensions", "ambient.ts"), "export default () => undefined;\n");
 
   const instructions = "# Harness instructions\n\nUse the owned runtime.\n";
-  const memory = "# Memory\n\nThe Gateway is the only CLI transport.\n";
+  const staleMemory = "# Memory\n\nThe Gateway is the only CLI transport.\n";
   writeFileSync(paths.workspaceInstructions, instructions);
-  writeFileSync(paths.workspaceMemory, memory);
+  writeFileSync(join(paths.workspace, "MEMORY.md"), staleMemory);
   writeFileSync(join(home, "resource-approvals.json"), JSON.stringify({ workspaceContext: true }));
   writeFileSync(paths.protectedPaths, JSON.stringify({ paths: [protectedRoot], repos: [] }));
   writeFileSync(join(home, "sandbox.json"), JSON.stringify({
@@ -104,7 +104,7 @@ try {
   });
 
   assert.deepEqual(runtime.loadedResourceIds, definitionIds(AGENT_DEFINITION));
-  assert.deepEqual(runtime.runtime.services.resourceLoader.getSkills().skills, []);
+  assert.deepEqual(runtime.runtime.services.resourceLoader.getSkills().skills.map(({ name }) => name), ["writing-for-agents"]);
   assert.deepEqual(runtime.runtime.services.resourceLoader.getPrompts().prompts, []);
   const loadedExtensions = runtime.runtime.services.resourceLoader.getExtensions().extensions;
   assert.deepEqual(
@@ -115,8 +115,8 @@ try {
   );
   assert.deepEqual(runtime.runtime.services.resourceLoader.getAgentsFiles().agentsFiles, [
     { path: paths.workspaceInstructions, content: instructions },
-    { path: paths.workspaceMemory, content: memory },
   ]);
+  assert.equal(runtime.runtime.session.systemPrompt.includes(staleMemory.trim()), false);
   assert.ok(runtime.runtime.session.systemPrompt.startsWith(piTemplateIdentityPrompt().trimEnd()));
   assert.match(runtime.runtime.session.systemPrompt, /list_tables.*describe_table.*bounded `SELECT`/s);
   assert.match(runtime.runtime.session.systemPrompt, /single State writer/);

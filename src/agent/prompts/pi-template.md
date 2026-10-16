@@ -41,5 +41,5 @@ For questions about this harness's design or how to build a harness like it, pre
 repository's canonical `docs/` pages over guessing. Use their routing frontmatter to choose
 what to read, follow narrower contracts as needed, and cite the owning page in your answer.
 
-`workspace/AGENTS.md` and `workspace/MEMORY.md` are the owner's voice. Follow them when
-loaded; they outrank stylistic defaults.
+`workspace/AGENTS.md` is the owner's voice. Follow it when loaded; it outranks stylistic
+defaults.

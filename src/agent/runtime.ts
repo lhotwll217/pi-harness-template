@@ -1,10 +1,11 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, readlinkSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import {
   createBashToolDefinition,
   createLocalBashOperations,
   createAgentSessionFromServices,
   createAgentSessionServices,
+  loadSkills,
   SessionManager,
   SettingsManager,
   type AgentSessionServices,
@@ -112,10 +113,8 @@ export async function createHarnessSessionServices(
   const tools = AGENT_DEFINITION
     .filter((entry) => entry.kind === "tool")
     .map((entry) => entry.create(options)) as ToolDefinition[];
-  const approvedContext = workspaceContextApproved(paths.home)
-    ? [paths.workspaceInstructions, paths.workspaceMemory]
-        .filter(existsSync)
-        .map((path) => ({ path, content: readFileSync(path, "utf8") }))
+  const approvedContext = workspaceContextApproved(paths.home) && existsSync(paths.workspaceInstructions)
+    ? [{ path: paths.workspaceInstructions, content: readFileSync(paths.workspaceInstructions, "utf8") }]
     : [];
 
   const services = await createAgentSessionServices({
@@ -265,14 +264,25 @@ export async function createHarnessSession(options: HarnessSessionOptions) {
   };
 }
 
+/** Names of the workspace skills a session loads under the home's skill policy; a bundled skill wins a name collision. */
 export function configuredWorkspaceSkillNames(home?: string): string[] {
   const paths = ensureHarnessWorkspace(home);
-  const roots = safeWorkspaceSkillPaths(paths.home);
-  if (roots.length === 1 && roots[0] === paths.workspaceSkills) {
-    return readdirSync(paths.workspaceSkills, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map(({ name }) => name)
-      .sort();
-  }
-  return roots.map((path) => path.slice(path.lastIndexOf(sep) + 1)).sort();
+  const bundled = AGENT_DEFINITION.filter((entry) => entry.kind === "skill");
+  const { skills } = loadSkills({
+    cwd: paths.workspace,
+    agentDir: paths.piAgentDir,
+    skillPaths: [...bundled.map(({ path }) => path), ...safeWorkspaceSkillPaths(paths.home)],
+    includeDefaults: false,
+  });
+  const bundledNames = new Set(bundled.map(({ name }) => name));
+  return skills.map(({ name }) => name).filter((name) => !bundledNames.has(name)).sort();
+}
+
+/** Links in workspace/skills whose target is gone; Pi skips them without a diagnostic. */
+export function brokenWorkspaceSkillLinks(home?: string): Array<{ name: string; target: string }> {
+  const paths = ensureHarnessWorkspace(home);
+  return readdirSync(paths.workspaceSkills, { withFileTypes: true })
+    .filter((entry) => entry.isSymbolicLink() && !existsSync(join(paths.workspaceSkills, entry.name)))
+    .map(({ name }) => ({ name, target: readlinkSync(join(paths.workspaceSkills, name)) }))
+    .sort((left, right) => left.name.localeCompare(right.name));
 }

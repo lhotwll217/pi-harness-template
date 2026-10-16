@@ -101,11 +101,11 @@ try {
   assert.match(transcript, /tool:query_database.*Read-only progressive disclosure/s);
   assert.match(transcript, /tool:save_note.*Persist the notes worked example/s);
   assert.match(transcript, /extension:permission-system.*Apply the reviewed Pi permission policy/s);
-  assert.match(transcript, /Skill policy: bundled/);
+  assert.match(transcript, /^ {2}Skill policy: all-workspace$/m);
   assert.match(transcript, /^ {2}Permission mode: allow$/m);
   assert.match(transcript, /^ {2}Sandbox: off, bash runs with your permissions \(rerun onboarding with --sandbox to turn it on\)$/m);
-  assert.ok(transcript.includes(importedPaths.workspaceInstructions));
-  assert.ok(transcript.includes(importedPaths.workspaceMemory));
+  assert.ok(transcript.includes(`  Workspace file to approve: ${importedPaths.workspaceInstructions}\n`));
+  assert.doesNotMatch(transcript, /MEMORY/);
   assert.ok(transcript.includes(`Sandbox allowed read roots: ${process.cwd()}`));
   assert.ok(transcript.includes(`Sandbox allowed write roots: ${process.cwd()}`));
   assert.match(transcript, /Network: deny/);
@@ -126,7 +126,7 @@ try {
   });
   const reviewedSettings = JSON.parse(readFileSync(importedPaths.settings, "utf8"));
   assert.equal(reviewedSettings.permissionMode, "allow");
-  assert.deepEqual(reviewedSettings.skillPolicy, { mode: "bundled", allowlist: [] });
+  assert.deepEqual(reviewedSettings.skillPolicy, { mode: "all-workspace", allowlist: [] });
   assert.equal(reviewedSettings.alwaysOn, "declined");
   const reviewedSandbox = JSON.parse(readFileSync(join(importedHome, "sandbox.json"), "utf8"));
   assert.deepEqual(reviewedSandbox.filesystem.allowedReadRoots, [process.cwd()]);
@@ -230,7 +230,7 @@ try {
   assert.equal(customInteraction.questions()[3], "Model id [imported-model]: ");
   assert.equal(customInteraction.questions()[4], "Acknowledge this exact agent definition? [y/N] ");
   assert.equal(customInteraction.questions()[5], "Permission mode [allow/ask/read-only]: ");
-  assert.equal(customInteraction.questions()[6], "Approve workspace AGENTS.md and MEMORY.md? [y/N] ");
+  assert.equal(customInteraction.questions()[6], "Approve workspace AGENTS.md? [Y/n] ");
   assert.equal(customInteraction.questions()[7], "Daemon service [declined/installed]: ");
   assert.deepEqual(JSON.parse(readFileSync(harnessPaths(customHome).protectedPaths, "utf8")), {
     paths: ["/sensitive"],
@@ -297,6 +297,22 @@ try {
   assert.match(replacedSettings.transcript(), /^ {2}Service: declined$/m);
   assert.equal(JSON.parse(readFileSync(customSettingsPath, "utf8")).permissionMode, "ask");
   assert.equal(JSON.parse(readFileSync(customSettingsPath, "utf8")).alwaysOn, "declined");
+
+  const approvals = (home: string) => JSON.parse(readFileSync(join(home, "resource-approvals.json"), "utf8")).workspaceContext;
+  for (const [home, recorded, prompt] of [
+    [importedHome, true, "Approve workspace AGENTS.md? [Y/n] "],
+    [customHome, false, "Approve workspace AGENTS.md? [y/N] "],
+  ] as const) {
+    assert.equal(approvals(home), recorded);
+    const blankConsent = scriptedInteraction(["", "", "n", "", "y", "", "", ""]);
+    assert.equal((await onboard([], {
+      ...passingOnboardingDependencies(home),
+      interactiveIO: blankConsent.io,
+      standalonePiAuthPath: standaloneAuth,
+    })).complete, true);
+    assert.equal(blankConsent.questions()[6], prompt);
+    assert.equal(approvals(home), recorded, "a blank consent answer keeps the recorded approval");
+  }
 
   const flagsHome = join(root, "flags-home");
   let flagsModel: { provider: string; model: string } | undefined;

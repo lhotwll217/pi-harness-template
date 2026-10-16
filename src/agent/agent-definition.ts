@@ -47,6 +47,7 @@ export type AgentDefinitionEntry =
 const permissionPackage = "@gotgenes/pi-permission-system";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const identityPromptPath = join(repositoryRoot, "src", "agent", "prompts", "pi-template.md");
+const writingForAgentsSkillPath = join(repositoryRoot, "src", "agent", "skills", "writing-for-agents");
 
 const GENERATED_SECTIONS: ReadonlyArray<readonly [marker: string, render: () => string]> = [
   ["<!-- generated: pi-template help tree -->", helpTree],
@@ -109,6 +110,13 @@ export const AGENT_DEFINITION: readonly AgentDefinitionEntry[] = Object.freeze([
     name: AgentToolId.SaveNote,
     description: "Persist the notes worked example through the State writer.",
     create: ({ notes }: AgentToolDependencies) => createSaveNoteTool(notes),
+  },
+  {
+    id: "skill:writing-for-agents",
+    kind: "skill",
+    name: "writing-for-agents",
+    description: "Write and review documents agents consume, such as skills and AGENTS.md.",
+    path: writingForAgentsSkillPath,
   },
   {
     id: "extension:permission-system",

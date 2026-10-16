@@ -175,7 +175,7 @@ function sameJson(left: unknown, right: unknown): boolean {
 function verifyHome(paths: HarnessPaths): boolean {
   return [paths.home, paths.workspace, paths.workspaceSkills, paths.workspaceArtifacts, paths.piAgentDir, paths.logsDir]
     .every((path) => existsSync(path) && statSync(path).isDirectory()) &&
-    [paths.workspaceInstructions, paths.workspaceMemory].every((path) => existsSync(path) && statSync(path).isFile());
+    existsSync(paths.workspaceInstructions) && statSync(paths.workspaceInstructions).isFile();
 }
 
 /** The answers onboarding wrote to a home; an answer it never wrote is undefined, never a default. */
