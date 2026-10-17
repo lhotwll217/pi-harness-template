@@ -146,8 +146,12 @@ const NO_DAEMON = '{"error":"the pi-template daemon is not running",' +
   '"hint":"the owner starts it with `pi-template status`; the agent never starts it"}';
 const COMMAND_SCHEDULE_REFUSAL = '{"status":403,"error":"agent callers cannot create, change, or run a command schedule",' +
   '"hint":"the owner runs pi-template schedule add -- <argv>"}';
-const refusal = (mode: string, reason: string) => `Refused in ${mode} mode: the agent's bash runs only pi-template <command> [arguments] ` +
-  `as plain words, and ${reason}. Quote arguments with '...' or "..."; variables, redirects, pipes, globs, and chained commands are refused.`;
+const refusal = (mode: string, reason: string) => mode === "ask"
+  ? `Refused in ask mode: a bash command that names pi-template must be pi-template <command> [arguments] ` +
+    `as plain words, and ${reason}. Quote arguments with '...' or "..."; variables, redirects, pipes, globs, and chained commands ` +
+    "are refused around pi-template. A command that does not name pi-template needs the owner's approval."
+  : `Refused in ${mode} mode: the agent's bash runs only pi-template <command> [arguments] ` +
+    `as plain words, and ${reason}. Quote arguments with '...' or "..."; variables, redirects, pipes, globs, and chained commands are refused.`;
 const NO_APPROVER = "[pi-permission-system] This 'bash' call (rule '*') requires approval, but no interactive UI is available.";
 const sandboxPolicy = (enabled: boolean) => JSON.stringify({
   enabled,

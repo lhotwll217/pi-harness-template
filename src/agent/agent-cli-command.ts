@@ -47,9 +47,12 @@ export function agentCliArgv(command: string): AgentCliCommand {
 export const namesAgentCli = (command: string): boolean =>
   command.replace(/['"\\]/g, "").toLowerCase().split(/[^a-z0-9_\-./]+/).some((word) => word.endsWith("pi-template"));
 
-export const agentCliRefusal = (mode: string, reason: string): string =>
-  `Refused in ${mode} mode: the agent's bash runs only pi-template <command> [arguments] as plain words, and ${reason}. ` +
-  `Quote arguments with '...' or "..."; variables, redirects, pipes, globs, and chained commands are refused.`;
+export const agentCliRefusal = (mode: string, reason: string): string => mode === "ask"
+  ? `Refused in ask mode: a bash command that names pi-template must be pi-template <command> [arguments] as plain words, ` +
+    `and ${reason}. Quote arguments with '...' or "..."; variables, redirects, pipes, globs, and chained commands are ` +
+    "refused around pi-template. A command that does not name pi-template needs the owner's approval."
+  : `Refused in ${mode} mode: the agent's bash runs only pi-template <command> [arguments] as plain words, and ${reason}. ` +
+    `Quote arguments with '...' or "..."; variables, redirects, pipes, globs, and chained commands are refused.`;
 
 export const shellWords = (argv: readonly string[]): string =>
   argv.map((value) => `'${value.replaceAll("'", `'\\''`)}'`).join(" ");
