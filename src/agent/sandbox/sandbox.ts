@@ -1,5 +1,5 @@
-import { readFileSync, realpathSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, resolve } from "node:path";
+import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { getDefaultWritePaths } from "@anthropic-ai/sandbox-runtime";
 import { harnessPaths } from "@pi-template/contracts";
 
@@ -169,18 +169,32 @@ function containsHome(root: string, home: HomeLocation): boolean {
 
 const WRITE_ROOT_RECOVERY = "`pi-template onboard --sandbox-write <dir>`, or turn the sandbox off with `--sandbox-off`";
 
+/** The symlink on a path's spelling whose target does not exist, if any; nothing beneath it can exist. */
+function brokenSymlink(path: string): string | undefined {
+  const { existing, missing } = existingPart(path);
+  if (!missing.length) return undefined;
+  const first = join(existing, missing[0]!);
+  try {
+    return lstatSync(first).isSymbolicLink() ? first : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function writeRootSpellingProblem(root: string): string | undefined {
   if (/[*?[\]]/.test(root)) return "has glob characters";
   if (root.startsWith("~")) return "starts with ~";
   if (!isAbsolute(root)) return "is not an absolute path";
-  return undefined;
+  const link = brokenSymlink(root);
+  return link && `passes through the broken symlink ${link}`;
 }
 
 /**
  * Why sandboxed bash, under this policy, could write somewhere inside the harness home, or
  * undefined when it cannot. Containment is decided by file identity, so letter case, Unicode
  * form, firmlinks, and symlinks cannot hide the home; roots the sandbox library would expand
- * (globs, ~, relative paths) are refused outright, and its built-in write paths count as roots.
+ * (globs, ~, relative paths) and roots through a broken symlink, which has no identity to compare,
+ * are refused outright, and the library's built-in write paths count as roots.
  */
 export function homeInWriteRootsProblem(home: string, policy: SandboxPolicy): string | undefined {
   if (!policy.enabled) return undefined;

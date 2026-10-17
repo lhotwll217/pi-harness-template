@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
@@ -90,6 +90,19 @@ try {
     }, `a hand-edited ${writeRoot} root at onboarding`);
   }
 
+  const brokenLink = join(realRoot, "broken-link");
+  symlinkSync(join(realRoot, "not-there-yet"), brokenLink);
+  for (const writeRoot of [brokenLink, join(brokenLink, "below")]) {
+    const refusal = misspelled(writeRoot, `passes through the broken symlink ${brokenLink}`);
+    const home = join(realRoot, `broken-link-home-${basename(writeRoot)}`);
+    await assert.rejects(onboard(sandboxed(writeRoot), passingOnboardingDependencies(home)), { message: `sandbox: ${refusal}` },
+      `a ${writeRoot} write root at onboarding`);
+    assert.equal(existsSync(harnessPaths(home).sandboxPolicy), false, `a ${writeRoot} write root is never recorded`);
+    turnSandboxOn(editedHome, [beside, writeRoot]);
+    await assert.rejects(createAgentResources({ home: editedHome, cwd: beside, ...resources }), { message: refusal },
+      `a hand-edited ${writeRoot} root at session start`);
+  }
+
   const interactiveHome = join(realRoot, "interactive-home");
   const questions: string[] = [];
   await assert.rejects(onboard(["--sandbox", "--sandbox-read", beside, "--sandbox-write", `${realRoot}/**`], {
@@ -100,7 +113,7 @@ try {
   assert.deepEqual(questions, [], "interactive onboarding refuses the write root before asking anything");
 
   process.stdout.write("ok — a write root that reaches the harness home through a glob, letter case, Unicode form, firmlink, ~, " +
-    "or the sandbox's built-in paths is refused at onboarding and at session start\n");
+    "a broken symlink, or the sandbox's built-in paths is refused at onboarding and at session start\n");
 } finally {
   faux.unregister();
   rmSync(realRoot, { recursive: true, force: true });

@@ -181,7 +181,9 @@ inside one of those is refused the same way. A root the library would rewrite
 before use is refused outright: one with glob characters (`*`, `?`, `[`, `]`;
 the library drops a trailing `/**`), one starting with `~` (the library expands
 it to `$HOME`), and a relative one (the library resolves it against the
-daemon's working directory).
+daemon's working directory). A root whose spelling passes through a symlink
+whose target does not exist is refused too: it has no file identity to compare,
+and the target the link later reaches could lie above the home.
 Onboarding refuses such a root before writing anything, naming the root and
 the home; interactive onboarding checks the roots its review would propose
 before it asks for authentication. Every sandboxed session (interactive, `pi-template prompt`, and
