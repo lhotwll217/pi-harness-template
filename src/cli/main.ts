@@ -1,15 +1,23 @@
 import { CommanderError } from "commander";
+import { isAgentCaller } from "@pi-template/contracts";
 import { harnessProgram } from "./commands/registry";
 
 // Commander reports help as an "error" too; only real usage mistakes exit 2.
 const HELP_CODES = new Set(["commander.helpDisplayed", "commander.version"]);
 
 try {
-  if (process.argv.length === 2) {
+  const agentCaller = isAgentCaller() ? await import("./agent-caller") : undefined;
+  const ownerOnly = agentCaller?.ownerOnlyCall(process.argv.slice(2));
+  if (agentCaller && ownerOnly) {
+    process.stderr.write(`${JSON.stringify(agentCaller.ownerOnlyRefusal(ownerOnly))}\n`);
+    process.exitCode = 2;
+  } else if (process.argv.length === 2) {
     const { runEntry } = await import("./entry");
     process.exitCode = await runEntry();
   } else {
-    await harnessProgram().parseAsync(process.argv);
+    const program = harnessProgram();
+    agentCaller?.refuseOwnerCommands(program);
+    await program.parseAsync(process.argv);
   }
 } catch (error) {
   if (error instanceof CommanderError) {

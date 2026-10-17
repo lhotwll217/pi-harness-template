@@ -98,8 +98,7 @@ try {
   assert.match(transcript, /fixture-provider/);
   assert.match(transcript, /imported-model/);
   assert.match(transcript, /prompt:identity.*Define the Pi Harness Template agent/s);
-  assert.match(transcript, /tool:query_database.*Read-only progressive disclosure/s);
-  assert.match(transcript, /tool:save_note.*Persist the notes worked example/s);
+  assert.doesNotMatch(transcript, /tool:/);
   assert.match(transcript, /extension:permission-system.*Apply the reviewed Pi permission policy/s);
   assert.match(transcript, /^ {2}Skill policy: all-workspace$/m);
   assert.match(transcript, /^ {2}Permission mode: allow$/m);

@@ -30,8 +30,15 @@ export enum AgentToolId {
   Ls = "ls",
   Read = "read",
   Write = "write",
-  QueryDatabase = "query_database",
-  SaveNote = "save_note",
+}
+
+export const RETIRED_AGENT_TOOL_IDS: Readonly<Record<string, AgentToolId>> = Object.freeze({
+  query_database: AgentToolId.Bash,
+  save_note: AgentToolId.Bash,
+});
+
+export function withoutRetiredAgentTools(ids: readonly string[]): string[] {
+  return [...new Set(ids.map((id) => RETIRED_AGENT_TOOL_IDS[id] ?? id))];
 }
 
 export type ScheduleTrigger =

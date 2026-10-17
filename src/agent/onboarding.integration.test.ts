@@ -241,6 +241,14 @@ try {
   assert.deepEqual(recordedFiles(), beforeRerun);
   assert.notEqual(rerun.marker?.completedAt, completed.marker?.completedAt);
 
+  const approvals = JSON.parse(readFileSync(join(resumeHome, "resource-approvals.json"), "utf8")) as { acknowledgedDefinitionIds: string[] };
+  writeFileSync(join(resumeHome, "resource-approvals.json"), JSON.stringify({
+    ...approvals,
+    acknowledgedDefinitionIds: ["prompt:identity", "tool:query_database", "tool:save_note", ...approvals.acknowledgedDefinitionIds.slice(1)],
+  }));
+  assert.equal((await runOnboarding({}, { ...dependencies(), home: resumeHome })).complete, true);
+  assert.deepEqual(recordedFiles(), beforeRerun);
+
   writeFileSync(join(resumeHome, "resource-approvals.json"), JSON.stringify({ workspaceContext: true }));
   await assert.rejects(
     runOnboarding({}, { ...dependencies(), home: resumeHome }),

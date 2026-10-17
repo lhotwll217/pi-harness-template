@@ -20,9 +20,6 @@ const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-template-damaged-protec
 const home = join(root, "home");
 const secretDir = join(root, "secret");
 const faux = registerFauxProvider();
-const unused = async (): Promise<never> => { throw new Error("not used"); };
-const gateway = { queryDatabase: unused, createNote: unused };
-const resources = { query: { listTables: unused, describeTable: unused, runQuery: unused }, notes: { createNote: unused } };
 
 try {
   const model = faux.getModel();
@@ -51,7 +48,7 @@ try {
     "Fix the file, or record them again with `pi-template onboard` (non-interactive: `pi-template onboard --non-interactive --protected-path <dir>`)";
 
   await assert.rejects(toolResultFromTurn(faux, session, "read", { path: secret }), { message: refusal });
-  await assert.rejects(createInteractiveSessionRuntime({ ...session, gateway, model }), { message: refusal });
+  await assert.rejects(createInteractiveSessionRuntime({ ...session, model }), { message: refusal });
   const prompt = { kind: ScheduledPayloadKind.Prompt, prompt: `Read ${secret}`, toolsAllow: [] } as const;
   const scheduled: ScheduledPromptRunRequest = {
     payload: prompt,
@@ -72,8 +69,8 @@ try {
     runId: "run-1",
     signal: new AbortController().signal,
   };
-  await assert.rejects(createScheduledPromptRunner({ home, resources })(scheduled), { message: refusal });
-  await assert.rejects(createAgentResources({ home, cwd: paths.workspace, ...resources }), { message: refusal });
+  await assert.rejects(createScheduledPromptRunner({ home })(scheduled), { message: refusal });
+  await assert.rejects(createAgentResources({ home, cwd: paths.workspace }), { message: refusal });
   assert.equal(readFileSync(paths.piPermissionConfig, "utf8"), permissionBytes, "no refused session rewrites the permission rules");
 
   unlinkSync(paths.protectedPaths);

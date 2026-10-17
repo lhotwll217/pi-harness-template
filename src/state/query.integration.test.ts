@@ -60,7 +60,7 @@ try {
   const byName = new Map(tables.map((table) => [table.name, table]));
   assert.equal(byName.get("notes")?.rows, 2);
   assert.match(byName.get("notes")?.description ?? "", /worked example/i);
-  assert.equal(byName.get("schema_migrations")?.rows, 1);
+  assert.equal(byName.get("schema_migrations")?.rows, 2);
   assert.ok(byName.get("schema_migrations")?.description !== "(undocumented)");
   for (const table of tables) {
     assert.notEqual(table.description, "(undocumented)", `${table.name} has a table description`);

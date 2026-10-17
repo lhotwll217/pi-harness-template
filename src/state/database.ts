@@ -13,7 +13,7 @@ import {
   type ScheduleTrigger,
 } from "@pi-template/contracts";
 
-export const LATEST_SCHEMA_VERSION = 1;
+export const LATEST_SCHEMA_VERSION = 2;
 
 interface Migration {
   version: number;
@@ -74,6 +74,21 @@ CREATE TABLE schedule_runs (
 
 CREATE INDEX idx_schedule_runs_schedule_created
   ON schedule_runs(schedule_id, created_at DESC);
+`,
+  },
+  {
+    version: 2,
+    sql: `
+UPDATE schedules
+SET payload_json = json_set(payload_json, '$.toolsAllow', json((
+  SELECT json_group_array(DISTINCT CASE value WHEN 'query_database' THEN 'bash' WHEN 'save_note' THEN 'bash' ELSE value END)
+  FROM json_each(schedules.payload_json, '$.toolsAllow')
+)))
+WHERE payload_kind = 'prompt'
+  AND EXISTS (
+    SELECT 1 FROM json_each(schedules.payload_json, '$.toolsAllow')
+    WHERE value IN ('query_database', 'save_note')
+  );
 `,
   },
 ];

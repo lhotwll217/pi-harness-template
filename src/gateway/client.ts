@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { request as httpRequest } from "node:http";
+import { Readable } from "node:stream";
 import {
   harnessPaths,
   type DaemonHealth,
@@ -51,6 +53,35 @@ function readDaemonInfo(): DaemonInfo | null {
   }
 }
 
+export type GatewayTransport = (path: string, init?: RequestInit) => Promise<Response>;
+
+const ownerTransport = (info: DaemonInfo): GatewayTransport => async (path, init) => {
+  const headers = new Headers(init?.headers);
+  headers.set("authorization", `Bearer ${info.authToken}`);
+  return await fetch(`http://127.0.0.1:${info.port}${path}`, { ...init, headers });
+};
+
+/** Node's fetch cannot dial a unix socket without undici, so the agent transport wraps node:http in a Response. */
+export const agentTransport = (socketPath: string): GatewayTransport => async (path, init) =>
+  await new Promise<Response>((resolveResponse, reject) => {
+    const outgoing = httpRequest({
+      socketPath,
+      agent: false,
+      path,
+      method: init?.method ?? "GET",
+      headers: Object.fromEntries(new Headers(init?.headers)),
+      signal: init?.signal ?? undefined,
+    }, (incoming) => {
+      const headers = new Headers();
+      for (const [name, value] of Object.entries(incoming.headers)) {
+        if (value !== undefined) headers.set(name, Array.isArray(value) ? value.join(", ") : value);
+      }
+      resolveResponse(new Response(Readable.toWeb(incoming) as ReadableStream, { status: incoming.statusCode ?? 500, headers }));
+    });
+    outgoing.once("error", reject);
+    outgoing.end(typeof init?.body === "string" ? init.body : undefined);
+  });
+
 interface GatewayJsonOptions {
   init?: RequestInit;
   acceptStatuses?: readonly number[];
@@ -58,15 +89,12 @@ interface GatewayJsonOptions {
 }
 
 async function gatewayJson<T>(
-  info: DaemonInfo,
+  transport: GatewayTransport,
   path: string,
   options: GatewayJsonOptions = {},
 ): Promise<T> {
-  const headers = new Headers(options.init?.headers);
-  headers.set("authorization", `Bearer ${info.authToken}`);
-  const response = await fetch(`http://127.0.0.1:${info.port}${path}`, {
+  const response = await transport(path, {
     ...options.init,
-    headers,
     ...(options.signal ? { signal: options.signal } : {}),
   });
   if (!response.ok && !options.acceptStatuses?.includes(response.status)) {
@@ -86,8 +114,9 @@ export async function probeGateway(options: GatewayProbeOptions = {}): Promise<G
   if (!info) return { kind: "absent" };
   try {
     if (!info.authToken) throw new Error("daemon discovery has no authentication token");
-    const health = await gatewayJson<DaemonHealth>(info, "/health", { signal: options.signal });
-    const ready = await gatewayJson<DaemonReady>(info, "/ready", { acceptStatuses: [503], signal: options.signal });
+    const transport = ownerTransport(info);
+    const health = await gatewayJson<DaemonHealth>(transport, "/health", { signal: options.signal });
+    const ready = await gatewayJson<DaemonReady>(transport, "/ready", { acceptStatuses: [503], signal: options.signal });
     if (health.pid !== info.pid || health.fingerprint !== info.fingerprint) {
       throw new Error("Gateway identity does not match daemon discovery");
     }
@@ -100,12 +129,22 @@ export async function probeGateway(options: GatewayProbeOptions = {}): Promise<G
 /** Connect to an authenticated live daemon, including one with setup still required. */
 export async function connectGateway(options: GatewayProbeOptions = {}): Promise<GatewayClient | null> {
   const probe = await probeGateway(options);
-  return probe.kind === "reachable" ? gatewayClient(probe.info) : null;
+  return probe.kind === "reachable" ? gatewayClient(ownerTransport(probe.info)) : null;
 }
 
-/** A client for the daemon a reachable probe found. */
-export function gatewayClient(info: DaemonInfo): GatewayClient {
-  const json = <T>(path: string, init?: RequestInit): Promise<T> => gatewayJson<T>(info, path, { init });
+export async function probeAgentGateway(socketPath: string, options: GatewayProbeOptions = {}): Promise<{ health: DaemonHealth; ready: DaemonReady }> {
+  const transport = agentTransport(socketPath);
+  const health = await gatewayJson<DaemonHealth>(transport, "/health", { signal: options.signal });
+  const ready = await gatewayJson<DaemonReady>(transport, "/ready", { acceptStatuses: [503], signal: options.signal });
+  return { health, ready };
+}
+
+export function ownerGatewayClient(info: DaemonInfo): GatewayClient {
+  return gatewayClient(ownerTransport(info));
+}
+
+export function gatewayClient(transport: GatewayTransport): GatewayClient {
+  const json = <T>(path: string, init?: RequestInit): Promise<T> => gatewayJson<T>(transport, path, { init });
   const send = <T>(method: "POST" | "PUT", path: string, body: unknown): Promise<T> => json<T>(path, {
     method,
     headers: { "content-type": "application/json" },
@@ -118,7 +157,7 @@ export function gatewayClient(info: DaemonInfo): GatewayClient {
 
   return {
     health: () => json<DaemonHealth>("/health"),
-    ready: () => gatewayJson<DaemonReady>(info, "/ready", { acceptStatuses: [503] }),
+    ready: () => gatewayJson<DaemonReady>(transport, "/ready", { acceptStatuses: [503] }),
     listNotes: () => json<Note[]>("/notes"),
     createNote: (input: NoteCreateInput) => send<Note>("POST", "/notes", input),
     deleteNote: (id: string) => remove(`/notes/${encodeURIComponent(id)}`),
@@ -145,10 +184,7 @@ export function gatewayClient(info: DaemonInfo): GatewayClient {
 
       void (async () => {
         try {
-          const response = await fetch(`http://127.0.0.1:${info.port}/events`, {
-            headers: { authorization: `Bearer ${info.authToken}` },
-            signal: controller.signal,
-          });
+          const response = await transport("/events", { signal: controller.signal });
           if (!response.ok) throw new Error(`Gateway /events: ${response.status}`);
           const reader = response.body?.getReader();
           if (!reader) throw new Error("Gateway event stream has no body");

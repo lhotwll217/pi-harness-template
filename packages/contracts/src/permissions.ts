@@ -16,6 +16,7 @@ import {
   parseTree,
   type Node,
 } from "jsonc-parser";
+import { AGENT_CLI_COMMANDS } from "./agent-cli";
 import { loadProtectedPaths, pathIdentities } from "./protected-paths";
 import {
   DEFAULT_PERMISSION_MODE,
@@ -41,12 +42,14 @@ export interface PiPermissionConfig {
 
 const PROTECTED_REASON = "Pi Template protected paths";
 // Keep these explicit defaults aligned with the agent tool catalog. Unlisted tools safely fall
-// back to the selected mode; the lists identify known reads, bounded harness state changes, and
-// risky generic changes separately.
-const READ_SURFACES = ["read", "grep", "find", "ls", "skill", "query_database"];
-const NATIVE_STATE_SURFACES = ["save_note"];
+// back to the selected mode; the lists identify known reads and risky generic changes separately.
+const READ_SURFACES = ["read", "grep", "find", "ls", "skill"];
 const CHANGE_SURFACES = ["edit", "write"];
-const MANAGED_SURFACES = [...READ_SURFACES, ...NATIVE_STATE_SURFACES, ...CHANGE_SURFACES, "external_directory", "bash"];
+const MANAGED_SURFACES = [...READ_SURFACES, ...CHANGE_SURFACES, "external_directory", "bash"];
+const RETIRED_SURFACES = ["query_database", "save_note"];
+/** Allowed in every mode, read-only included, so the agent reaches its CLI. One rule per command,
+ * not `pi-template *`, which would let read-only run `onboard --permission allow`. */
+const AGENT_CLI_RULES: readonly string[] = AGENT_CLI_COMMANDS.map((command) => `pi-template ${command} *`);
 const JSON_FORMAT = { insertSpaces: true, tabSize: 2, eol: "\n" };
 
 type JsonRecord = Record<string, unknown>;
@@ -103,8 +106,17 @@ function changeAction(mode: PermissionMode): PiPermissionState {
   return mode === "allow" ? "allow" : mode === "read-only" ? "deny" : "ask";
 }
 
-function nativeStateAction(mode: PermissionMode): PiPermissionState {
-  return mode === "read-only" ? "deny" : "allow";
+/** The owner's bash rules after `*` and the generated CLI rules, so the last matching rule, an owner deny, wins. */
+function withAgentCliRules(rules: PiPermissionPatternMap): PiPermissionPatternMap {
+  const { "*": fallback, ...ownerRules } = rules;
+  const generated = Object.fromEntries(AGENT_CLI_RULES.filter((rule) => !(rule in ownerRules)).map((rule) => [rule, "allow" as const]));
+  return { "*": fallback, ...generated, ...ownerRules };
+}
+
+function pathWriteRules(existing: unknown, mode: PermissionMode): PiPermissionPatternMap | undefined {
+  if (mode !== "allow") return withDefault(existing, changeAction(mode));
+  const { "*": _harnessDefault, ...ownerRules } = patternMap(existing);
+  return Object.keys(ownerRules).length ? ownerRules : undefined;
 }
 
 function permissionPolicy(
@@ -117,13 +129,14 @@ function permissionPolicy(
     ...(existing as Record<string, PiPermissionState | PiPermissionPatternMap>),
     "*": action,
   };
+  for (const surface of RETIRED_SURFACES) delete next[surface];
   for (const surface of READ_SURFACES) next[surface] = withDefault(existing[surface], "allow");
-  for (const surface of NATIVE_STATE_SURFACES) {
-    next[surface] = withDefault(existing[surface], nativeStateAction(mode));
-  }
   for (const surface of CHANGE_SURFACES) next[surface] = withDefault(existing[surface], action);
   next.external_directory = withDefault(existing.external_directory, "allow");
-  next.bash = withDefault(existing.bash, action);
+  next.bash = withAgentCliRules(withDefault(existing.bash, action));
+  const pathWrite = pathWriteRules(existing.path_write, mode);
+  if (pathWrite) next.path_write = pathWrite;
+  else delete next.path_write;
 
   const currentPathRules = patternMap(existing.path);
   const ownerPathRules: PiPermissionPatternMap = {};
@@ -197,12 +210,15 @@ function setJsoncDefaultFirst(text: string, path: (string | number)[], value: un
   return setJsoncValue(withoutLateDefault, path, value, true);
 }
 
-function setJsoncAfterDefault(text: string, path: (string | number)[], value: unknown): string {
+function setJsoncAfter(text: string, path: (string | number)[], value: unknown, after: string): string {
   return applyEdits(text, modify(text, path, value, {
     formattingOptions: JSON_FORMAT,
-    getInsertionIndex: (properties) => Math.max(0, properties.indexOf("*") + 1),
+    getInsertionIndex: (properties) => Math.max(0, properties.indexOf(after) + 1),
   }));
 }
+
+const setJsoncAfterDefault = (text: string, path: (string | number)[], value: unknown): string =>
+  setJsoncAfter(text, path, value, "*");
 
 function reconcilePermissionDocument(
   text: string,
@@ -212,11 +228,30 @@ function reconcilePermissionDocument(
   if (!isRecord(existingPermission)) return setJsoncValue(text, ["permission"], nextPermission);
 
   let nextText = setJsoncValue(text, ["permission", "*"], nextPermission["*"], true);
+  for (const surface of RETIRED_SURFACES) nextText = removeJsoncProperty(nextText, ["permission", surface]);
   for (const surface of MANAGED_SURFACES) {
     const nextSurface = nextPermission[surface] as PiPermissionPatternMap;
     nextText = isPatternMap(existingPermission[surface])
       ? setJsoncDefaultFirst(nextText, ["permission", surface, "*"], nextSurface["*"])
       : setJsoncValue(nextText, ["permission", surface], nextSurface);
+  }
+  const existingBash = existingPermission.bash;
+  if (isPatternMap(existingBash)) {
+    let previous = "*";
+    for (const rule of AGENT_CLI_RULES.filter((generated) => !(generated in existingBash))) {
+      nextText = setJsoncAfter(nextText, ["permission", "bash", rule], "allow", previous);
+      previous = rule;
+    }
+  }
+  const nextPathWrite = nextPermission.path_write as PiPermissionPatternMap | undefined;
+  if (!nextPathWrite) {
+    nextText = removeJsoncProperty(nextText, ["permission", "path_write"]);
+  } else if (isPatternMap(existingPermission.path_write)) {
+    nextText = "*" in nextPathWrite
+      ? setJsoncDefaultFirst(nextText, ["permission", "path_write", "*"], nextPathWrite["*"])
+      : removeJsoncProperty(nextText, ["permission", "path_write", "*"]);
+  } else {
+    nextText = setJsoncValue(nextText, ["permission", "path_write"], nextPathWrite);
   }
 
   const existingPath = existingPermission.path;

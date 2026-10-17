@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,6 +33,11 @@ try {
   reconcilePermissionSettings(home);
   writeFileSync(paths.onboardingProgress, JSON.stringify({ version: ONBOARDING_VERSION, stages: { resources: "2026-10-16T12:00:00.000Z" } }));
   writeFileSync(paths.resourceApprovals, JSON.stringify({ acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION), workspaceContext: false }));
+  const agentSocket = createServer((request, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(request.url === "/health" ? { pid: process.pid } : { ready: true }));
+  });
+  await new Promise<void>((resolveListen) => agentSocket.listen(paths.agentSocket, resolveListen));
 
   const report = await runDoctor({
     home,
@@ -48,7 +54,11 @@ try {
     "protectedPaths",
     "sandbox",
     "daemon",
+    "agentCli",
   ]);
+  const reached = { reachable: true, reason: `the agent's bash reaches the daemon through ${paths.agentSocket}` };
+  assert.deepEqual(report.checks.agentCli, reached, "sandbox on, on macOS");
+  assert.match(formatDoctorReport(report), new RegExp(`^Agent CLI: reachable \\(the agent's bash reaches the daemon through ${paths.agentSocket.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)$`, "m"));
   assert.equal(report.checks.provider.available, true);
   assert.equal(report.checks.model.available, true);
   assert.equal(report.checks.daemon.configuration, "declined");
@@ -104,8 +114,6 @@ try {
     const session = await createAgentResources({
       home: process.env.LOOP_HOME,
       cwd: process.env.LOOP_HOME,
-      query: { listTables: () => [], describeTable: () => ({ description: "", columns: [] }), runQuery: () => ({ rows: [], truncated: false }) },
-      notes: { createNote: () => ({ id: "n", body: "", createdAt: "", updatedAt: "" }) },
     });
     process.stdout.write(JSON.stringify({
       skipped: doctor.checks.resources.skippedSkillLinks,
@@ -179,6 +187,8 @@ try {
   assert.match(formatDoctorReport(off), /^Sandbox: off \(turned off in sandbox.json; bash runs on the host\)$/m);
   assert.equal(off.ok, true);
   assert.deepEqual(off.checks.protectedPaths, { readable: true, reason: "none recorded" });
+  assert.deepEqual((await runDoctor({ home, providerModelVerifier: () => true, platform: "linux" })).checks.agentCli, reached,
+    "sandbox off: the platform does not matter");
 
   unlinkSync(join(home, "sandbox.json"));
   const missing = await runDoctor({ home, providerModelVerifier: () => true });
@@ -225,6 +235,39 @@ try {
   assert.equal((await runDoctor({ home })).checks.model.available, true);
   writeFileSync(paths.piSettings, JSON.stringify({ defaultProvider: "anthropic", defaultModel: "no-such-model" }));
   assert.equal((await runDoctor({ home })).checks.model.available, false);
+
+  saveHarnessSettings(home, { alwaysOn: "declined" });
+  writeFileSync(paths.piSettings, JSON.stringify({ defaultProvider: "fake", defaultModel: "model" }));
+  writeFileSync(join(home, "sandbox.json"), JSON.stringify(policy));
+  const linux = await runDoctor({ home, providerModelVerifier: () => true, platform: "linux" });
+  assert.deepEqual(linux.checks.agentCli, {
+    reachable: false,
+    reason: "the sandbox admits one unix socket only on macOS, so sandboxed bash on linux cannot reach the daemon",
+  });
+  assert.equal(linux.ok, false);
+  assert.equal((await runDoctor({ home, providerModelVerifier: () => true, platform: "darwin" })).ok, true);
+  await new Promise<void>((resolveClose) => agentSocket.close(() => resolveClose()));
+  const stopped = await runDoctor({ home, providerModelVerifier: () => true, platform: "darwin" });
+  assert.deepEqual(stopped.checks.agentCli, {
+    reachable: false,
+    reason: `the daemon does not answer on the agent socket ${paths.agentSocket} (ENOENT)`,
+  });
+  assert.equal(stopped.ok, false);
+  assert.match(formatDoctorReport(stopped), /^Agent CLI: unreachable \(the daemon does not answer on the agent socket .* \(ENOENT\)\)$/m);
+  // macOS listens on a 104-byte socket path and refuses 105.
+  const limitHome = join(home, "y".repeat(104 - Buffer.byteLength(join(home, "y", "agent.sock")) + 1));
+  ensureHarnessWorkspace(limitHome);
+  assert.equal(Buffer.byteLength(join(limitHome, "agent.sock")), 104);
+  assert.deepEqual((await runDoctor({ home: limitHome, providerModelVerifier: () => true, platform: "darwin" })).checks.agentCli, {
+    reachable: false,
+    reason: `the daemon does not answer on the agent socket ${join(limitHome, "agent.sock")} (ENOENT)`,
+  });
+  const longHome = join(home, "y".repeat(104 - Buffer.byteLength(join(home, "y", "agent.sock")) + 2));
+  ensureHarnessWorkspace(longHome);
+  assert.deepEqual((await runDoctor({ home: longHome, providerModelVerifier: () => true, platform: "darwin" })).checks.agentCli, {
+    reachable: false,
+    reason: `the agent socket ${join(longHome, "agent.sock")} is longer than a unix socket path may be; move the harness home to a shorter path`,
+  });
 
   process.stdout.write("ok — doctor reports readiness shape without secret material and names the sandbox state, skipped workspace skills, notices, and unacknowledged entries\n");
 } finally {

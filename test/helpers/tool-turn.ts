@@ -1,15 +1,10 @@
 import type { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/compat";
-import { runPromptSession, type InteractiveGateway, type InteractiveSessionOptions } from "../../src/cli/interactive";
-
-const unusedGateway: InteractiveGateway = {
-  async queryDatabase() { throw new Error("not used"); },
-  async createNote() { throw new Error("not used"); },
-};
+import { runPromptSession, type InteractiveSessionOptions } from "../../src/cli/interactive";
 
 export async function toolResultFromTurn(
   faux: ReturnType<typeof registerFauxProvider>,
-  session: Omit<InteractiveSessionOptions, "gateway" | "model">,
+  session: Omit<InteractiveSessionOptions, "model">,
   tool: string,
   args: Parameters<typeof fauxToolCall>[1],
 ): Promise<string> {
@@ -32,7 +27,6 @@ export async function toolResultFromTurn(
   try {
     const exitCode = await runPromptSession({
       ...session,
-      gateway: unusedGateway,
       model: faux.getModel(),
       message: `Call ${tool}`,
     });

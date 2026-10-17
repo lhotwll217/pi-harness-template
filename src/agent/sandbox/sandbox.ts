@@ -1,7 +1,8 @@
 import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getDefaultWritePaths } from "@anthropic-ai/sandbox-runtime";
-import { harnessPaths } from "@pi-template/contracts";
+import { AGENT_CALLER_VARIABLE, harnessPaths } from "@pi-template/contracts";
 
 export interface SandboxFilesystemPolicy {
   allowedReadRoots: string[];
@@ -18,6 +19,8 @@ export interface SandboxProcessPolicy {
 export interface SandboxNetworkPolicy {
   mode: "deny" | "allowlist";
   allowedDomains: string[];
+  /** Unix sockets bash may connect to (macOS). The runtime sets the agent socket; sandbox.json never records it. */
+  allowedUnixSockets?: string[];
 }
 
 export interface SandboxPolicy {
@@ -75,9 +78,31 @@ const COMMAND_ENVIRONMENT = new Set([
   "GIT_SSH_COMMAND",
 ]);
 
+export const AGENT_CLI_VARIABLES: readonly string[] = Object.freeze(["PI_TEMPLATE_HOME", AGENT_CALLER_VARIABLE]);
+
 /** The variables a bash command sees, sandbox on or off, so the daemon's credentials stay out. */
-export const commandEnvironment = (source: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv =>
-  Object.fromEntries(Object.entries(source ?? {}).filter(([name]) => COMMAND_ENVIRONMENT.has(name) || name.startsWith("LC_")));
+export const commandEnvironment = (source: NodeJS.ProcessEnv | undefined, also: readonly string[] = []): NodeJS.ProcessEnv =>
+  Object.fromEntries(Object.entries(source ?? {}).filter(([name]) =>
+    COMMAND_ENVIRONMENT.has(name) || name.startsWith("LC_") || also.includes(name)));
+
+export const checkoutRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+
+export function agentCommandEnvironment(source: NodeJS.ProcessEnv | undefined, home: string): NodeJS.ProcessEnv {
+  const path = [checkoutRoot, dirname(process.execPath), ...(source?.PATH ?? "").split(delimiter)].filter(Boolean);
+  return {
+    ...commandEnvironment(source),
+    PATH: [...new Set(path)].join(delimiter),
+    PI_TEMPLATE_HOME: home,
+    [AGENT_CALLER_VARIABLE]: "1",
+  };
+}
+
+/** The whole environment of an agent CLI call outside allow mode: nothing the agent types reaches it. */
+export function agentCliEnvironment(home: string, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const { PATH, HOME, TMPDIR } = agentCommandEnvironment(source, home);
+  const environment: NodeJS.ProcessEnv = { PATH, HOME, TMPDIR, PI_TEMPLATE_HOME: home, [AGENT_CALLER_VARIABLE]: "1" };
+  return Object.fromEntries(Object.entries(environment).filter(([, value]) => value !== undefined));
+}
 
 export const sandboxPolicyPath = (home: string): string => harnessPaths(home).sandboxPolicy;
 

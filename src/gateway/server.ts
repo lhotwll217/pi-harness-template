@@ -1,8 +1,11 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { chmodSync, lstatSync, rmSync, statSync, type Stats } from "node:fs";
+import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
+  DAEMON_PROBE_TIMEOUT_MS,
   DEFAULT_DAEMON_PORT,
   DatabaseQueryAction,
+  ScheduledPayloadKind,
   type DaemonHealth,
   type DaemonReady,
   type DocsCatalogEntry,
@@ -25,12 +28,15 @@ export interface GatewayNotes {
   delete(id: string): MaybePromise<boolean>;
 }
 
+/** Throws to refuse; called on the stored schedule in the same step as the write, so no change slips between. */
+export type ScheduleAuthorization = (current: ScheduleDefinition) => void;
+
 export interface GatewaySchedules {
   list(): MaybePromise<ScheduleDefinition[]>;
   create(input: ScheduleCreateInput): MaybePromise<ScheduleDefinition>;
-  update(id: string, input: ScheduleCreateInput): MaybePromise<ScheduleDefinition>;
+  update(id: string, input: ScheduleCreateInput, authorize?: ScheduleAuthorization): MaybePromise<ScheduleDefinition>;
   delete(id: string): MaybePromise<boolean>;
-  run(id: string): Promise<ScheduleRun>;
+  run(id: string, authorize?: ScheduleAuthorization): Promise<ScheduleRun>;
   runById(id: string): MaybePromise<ScheduleRun | undefined>;
 }
 
@@ -65,13 +71,31 @@ export interface GatewayOptions {
   events: GatewayEvents;
   diagnostics: GatewayDiagnostics;
   port?: number;
+  agentSocket?: string;
 }
 
 export interface RunningGateway {
   host: "127.0.0.1";
   port: number;
+  agentSocketProblem?: string;
   close(): Promise<void>;
 }
+
+export type Caller = "owner" | "agent";
+
+const AGENT_COMMAND_SCHEDULE_REFUSAL = {
+  error: "agent callers cannot create, change, or run a command schedule",
+  hint: "the owner runs pi-template schedule add -- <argv>",
+} as const;
+
+const isCommandPayload = (body: unknown): boolean =>
+  (body as { payload?: { kind?: unknown } } | undefined)?.payload?.kind === ScheduledPayloadKind.Command;
+
+class CommandScheduleRefused extends Error {}
+
+const agentAuthorization = (caller: Caller): ScheduleAuthorization | undefined => caller === "agent"
+  ? (current) => { if (isCommandPayload(current)) throw new CommandScheduleRefused(); }
+  : undefined;
 
 const SETUP_REQUIRED = {
   error: {
@@ -122,22 +146,21 @@ function isLookupError(value: DocsDocument | DocsLookupError): value is DocsLook
   return "code" in value;
 }
 
-/** Loopback transport only: behavior is supplied through injected module interfaces. */
+/** Loopback and agent-socket transports: behavior is supplied through injected module interfaces. */
 export async function startGateway(options: GatewayOptions): Promise<RunningGateway> {
   const streams = new Set<ServerResponse>();
   const unsubscribe = options.events.subscribe((event) => {
     const frame = `data: ${JSON.stringify(event)}\n\n`;
     for (const stream of streams) stream.write(frame);
   });
-
-  const server: Server = createServer(async (request, response) => {
+  const handle = async (caller: Caller, request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const respond = (status: number, body: unknown): void => {
       response.writeHead(status, { "content-type": "application/json" });
       response.end(JSON.stringify(body));
     };
 
     try {
-      if (!hasValidAuthorization(request.headers.authorization, options.authToken)) {
+      if (caller === "owner" && !hasValidAuthorization(request.headers.authorization, options.authToken)) {
         response.setHeader("www-authenticate", "Bearer");
         return respond(401, { error: "unauthorized" });
       }
@@ -197,18 +220,19 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
 
       if (route === "GET /schedules") return respond(200, await options.schedules.list());
       if (route === "POST /schedules") {
-        return respond(201, await options.schedules.create(await readBody(request) as ScheduleCreateInput));
+        const body = await readBody(request);
+        if (caller === "agent" && isCommandPayload(body)) return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
+        return respond(201, await options.schedules.create(body as ScheduleCreateInput));
       }
       const runMatch = /^\/schedules\/([^/]+)\/run$/.exec(url.pathname);
       if (request.method === "POST" && runMatch) {
-        return respond(202, await options.schedules.run(decodeURIComponent(runMatch[1])));
+        return respond(202, await options.schedules.run(decodeURIComponent(runMatch[1]), agentAuthorization(caller)));
       }
       const scheduleId = routeId(url.pathname, "schedules");
       if (request.method === "PUT" && scheduleId !== undefined) {
-        return respond(200, await options.schedules.update(
-          scheduleId,
-          await readBody(request) as ScheduleCreateInput,
-        ));
+        const body = await readBody(request);
+        if (caller === "agent" && isCommandPayload(body)) return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
+        return respond(200, await options.schedules.update(scheduleId, body as ScheduleCreateInput, agentAuthorization(caller)));
       }
       if (request.method === "DELETE" && scheduleId !== undefined) {
         const deleted = await options.schedules.delete(scheduleId);
@@ -240,10 +264,12 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
 
       return respond(404, { error: "unknown route" });
     } catch (error) {
+      if (error instanceof CommandScheduleRefused) return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
       return respond(400, { error: error instanceof Error ? error.message : String(error) });
     }
-  });
+  };
 
+  const server: Server = createServer((request, response) => void handle("owner", request, response));
   let port: number;
   try {
     port = await new Promise<number>((resolve, reject) => {
@@ -257,17 +283,72 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
     unsubscribe();
     throw error;
   }
+  const agent = options.agentSocket
+    ? await listenAgentSocket(options.agentSocket, (request, response) => void handle("agent", request, response))
+    : undefined;
 
   return {
     host: "127.0.0.1",
     port,
+    ...(agent?.problem ? { agentSocketProblem: agent.problem } : {}),
     async close() {
       unsubscribe();
       for (const stream of streams) stream.end();
       streams.clear();
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => error ? reject(error) : resolve());
-      });
+      await Promise.all([server, ...(agent?.server ? [agent.server] : [])].map((listener) =>
+        new Promise<void>((resolve, reject) => listener.close((error) => error ? reject(error) : resolve()))));
+      agent?.remove();
     },
   };
+}
+
+const inode = (path: string): bigint | undefined => {
+  try {
+    return statSync(path, { bigint: true }).ino;
+  } catch {
+    return undefined;
+  }
+};
+
+const removeSocketIfStillOurs = (path: string, own: bigint | undefined): void => {
+  if (own !== undefined && inode(path) === own) rmSync(path, { force: true });
+};
+
+/** Whether a daemon holds the socket: it answers, or it accepts and then hangs. */
+function answers(path: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = httpRequest({ socketPath: path, path: "/health", agent: false, timeout: DAEMON_PROBE_TIMEOUT_MS });
+    probe.once("response", (response) => { response.resume(); resolve(true); });
+    probe.once("timeout", () => { probe.destroy(); resolve(true); });
+    probe.once("error", () => resolve(false));
+    probe.end();
+  });
+}
+
+/** Never throws: a socket that cannot listen leaves the daemon running, and doctor names the problem. */
+async function listenAgentSocket(
+  path: string,
+  listener: (request: IncomingMessage, response: ServerResponse) => void,
+): Promise<{ server?: Server; problem?: string; remove(): void }> {
+  const refused = (problem: string) => ({ problem, remove() {} });
+  let existing: Stats | undefined;
+  try {
+    existing = lstatSync(path);
+  } catch {}
+  if (existing && !existing.isSocket()) return refused(`${path} exists and is not a socket; the owner removes it and restarts the daemon`);
+  if (existing && await answers(path)) return refused(`another daemon already listens on ${path}`);
+  const server = createServer(listener);
+  try {
+    rmSync(path, { force: true });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(path, () => resolve());
+    });
+    chmodSync(path, 0o600);
+  } catch (error) {
+    server.close();
+    return refused(`the agent socket ${path} cannot listen: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const own = inode(path);
+  return { server, remove: () => removeSocketIfStillOurs(path, own) };
 }

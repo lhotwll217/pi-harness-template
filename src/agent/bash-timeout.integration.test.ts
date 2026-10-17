@@ -59,14 +59,6 @@ function scheduledRun(home: string, cwd: string, runId: string, signal: AbortSig
   const run = createScheduledPromptRunner({
     home,
     readiness: () => true,
-    resources: {
-      query: {
-        async listTables() { return []; },
-        async describeTable() { throw new Error("not used"); },
-        async runQuery() { throw new Error("not used"); },
-      },
-      notes: { async createNote() { throw new Error("not used"); } },
-    },
   });
   const prompt = "Run the commands.";
   const payload = { kind: ScheduledPayloadKind.Prompt, prompt, toolsAllow: [AgentToolId.Bash] } as const;

@@ -103,9 +103,7 @@ async function sessionSkills(home: string): Promise<string[]> {
   const session = await createAgentResources({
     home,
     cwd: home,
-    query: { listTables: () => [], describeTable: () => ({ description: "", columns: [] }), runQuery: () => ({ rows: [], truncated: false }) },
-    notes: { createNote: () => ({ id: "n", body: "", createdAt: "", updatedAt: "" }) },
-  } as Parameters<typeof createAgentResources>[0]);
+  });
   return session.loader.getSkills().skills.map(({ name }) => name);
 }
 
@@ -154,8 +152,6 @@ try {
     const session = await createAgentResources({
       home: process.env.CHAIN_HOME,
       cwd: process.env.CHAIN_HOME,
-      query: { listTables: () => [], describeTable: () => ({ description: "", columns: [] }), runQuery: () => ({ rows: [], truncated: false }) },
-      notes: { createNote: () => ({ id: "n", body: "", createdAt: "", updatedAt: "" }) },
     });
     process.stdout.write(JSON.stringify({
       seconds: (Date.now() - started) / 1000,

@@ -5,7 +5,7 @@ read_when:
   - Designing persistence or session lifecycle behavior
   - Deciding what may write durable harness state
   - Tracing resume, fork, recovery, or provenance requirements
-  - Working on `pi-template db`, the query_database tool, or schema documentation
+  - Working on `pi-template db` or schema documentation
 ---
 
 # State and sessions
@@ -36,9 +36,9 @@ demonstratively stores beyond harness bookkeeping is an open decision.
 ## Read-only query surface
 
 State also owns a read-only query surface with progressive disclosure,
-converging on Owner Operator's pattern. Two consumers share it: the
-`pi-template db` CLI noun ([Command-line interface](cli.md)) and the
-`query_database` agent tool.
+converging on Owner Operator's pattern. Its one consumer is the `pi-template db`
+CLI noun ([Command-line interface](cli.md)), which the owner runs in a terminal
+and the agent runs in bash ([Security](security.md#the-agent-uses-its-own-cli)).
 
 1. **List tables** — names, row counts, and one-line descriptions.
 2. **Describe one table** — columns with types, constraints, and descriptions.
@@ -104,12 +104,11 @@ schema and its schema-docs module.
 
 `notes` is a deliberately trivial record family (id, body, timestamps) that
 exists to demonstrate the full write-to-read pattern without resembling a
-product feature. It has exactly two writers, and they share one State method:
+product feature. Its one writer is the `pi-template notes` CLI, traversing the
+Gateway to one State method. The owner runs it in a terminal; the agent runs the
+same commands in bash, over the daemon's agent socket.
 
-- the `pi-template notes` CLI commands, traversing the Gateway, and
-- a `save_note` agent tool in the owned Pi runtime.
-
-Two surfaces, one durable owner. The example shows a State transaction, the
+Two callers, one interface, one durable owner. The example shows a State transaction, the
 post-commit event, schema-docs entries, and visibility through the read-only
 query surface end to end. A product copies this pattern for its real record
 families and deletes `notes`.

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import {
+  AgentToolId,
   ScheduleKind,
   ScheduledPayloadKind,
   isOnboardingComplete,
@@ -60,7 +61,11 @@ function positiveInteger(value: string, description: string): number {
   return parsed;
 }
 
-export type ScheduleAddOptions = Partial<Record<"name" | "at" | "every" | "cron" | "tz" | "prompt" | "timeout", string>>;
+export type ScheduleAddOptions = Partial<Record<"name" | "at" | "every" | "cron" | "tz" | "prompt" | "timeout", string>> & {
+  tool?: string[];
+};
+
+const TOOL_IDS: readonly string[] = Object.values(AgentToolId);
 
 export function parseScheduleAdd(options: ScheduleAddOptions, commandArgv: readonly string[]): ScheduleAddRequest {
   const values = new Map(Object.entries(options)
@@ -85,8 +90,16 @@ export function parseScheduleAdd(options: ScheduleAddOptions, commandArgv: reado
   if ((prompt === undefined) === (commandArgv.length === 0)) {
     throw new CliUsageError("schedule add needs one payload: --prompt <text> or -- <argv...>");
   }
+  const tools = [...new Set(options.tool ?? [])];
+  const unknownTool = tools.find((tool) => !TOOL_IDS.includes(tool));
+  if (unknownTool !== undefined) throw new CliUsageError(`unknown --tool ${unknownTool}; one of ${TOOL_IDS.join(", ")}`);
+  if (tools.length && prompt === undefined) throw new CliUsageError("--tool applies only to a --prompt schedule");
   const payload: ScheduledPayload = prompt !== undefined
-    ? { kind: ScheduledPayloadKind.Prompt, prompt: required(prompt, "--prompt") }
+    ? {
+        kind: ScheduledPayloadKind.Prompt,
+        prompt: required(prompt, "--prompt"),
+        ...(tools.length ? { toolsAllow: tools as AgentToolId[] } : {}),
+      }
     : {
         kind: ScheduledPayloadKind.Command,
         argv: [...commandArgv] as [string, ...string[]],

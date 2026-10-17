@@ -17,7 +17,7 @@ export function requireOnboarded(): void {
 
 async function openInteractive(): Promise<void> {
   const { runInteractiveSession } = await import("./interactive");
-  await withGateway(async (client) => await runInteractiveSession({ gateway: client }));
+  await withGateway(async () => await runInteractiveSession({}));
 }
 
 export async function runEntry(): Promise<number> {

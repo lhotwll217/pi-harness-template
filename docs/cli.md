@@ -9,13 +9,13 @@ read_when:
 
 # Command-line interface
 
-> **Status:** Implemented (`src/cli/commands`). The agent still reaches state
-> through its typed tools; package 19 in [Porting](porting.md) moves it onto
-> this CLI.
+> **Status:** Implemented (`src/cli/commands`), including the harness agent's
+> own use of it from `bash`.
 
 The `pi-template` CLI is the harness's public interface for people, scripts,
-and agents alike. Every command traverses the Gateway, starting the daemon
-when none is running ([Architecture](architecture.md)).
+and agents alike, the harness's own agent included. Every command traverses the
+Gateway. The owner's starts the daemon when none is running
+([Architecture](architecture.md)); the agent's never does.
 
 ## One command registry
 
@@ -72,6 +72,34 @@ exactly as the CLI prints and serves them. `src/agent/identity-prompt.e2e.test.t
 builds a real session and fails when any printed `--help` page is missing from
 its prompt word for word. Embedding the whole tree rather than root help alone
 follows Owner Operator `52fa55f`; Stitcher `0a261ec` embeds root help only.
+
+## Agent callers
+
+The harness agent runs this CLI in `bash` with `PI_TEMPLATE_AGENT=1` and
+`PI_TEMPLATE_HOME` naming its session's home; outside `allow` mode the harness
+runs it from plain words with argv, never through a shell, and refuses any
+other command that names it; in `ask` the owner still approves other shell
+commands ([Security](security.md#the-agent-uses-its-own-cli) owns the
+environment, the permission rules, and the agent's authority). As an agent
+caller the CLI:
+
+- reaches the daemon over the agent socket `<home>/agent.sock`, never reads
+  `daemon.json`, and writes nothing under the home;
+- never starts a daemon: with none running it exits 1 with
+  `{"error":"the pi-template daemon is not running","hint":"the owner starts it with \`pi-template status\`; the agent never starts it"}`,
+  and with one that does not answer within a second it exits 1 with a hint to
+  tell the owner;
+- refuses the owner's commands, `onboard`, `daemon`, `prompt`, and bare
+  `pi-template`, with exit 2 and `{"error":"<command> is the owner's command",...}`,
+  judging the command commander resolves rather than the first word, and refuses
+  a leading `--` the same way;
+- returns `schedule run`'s started run at once instead of waiting for it, since
+  one run happens at a time and a scheduled agent that waited would wait on
+  itself.
+
+`src/cli/commands/registry.test.ts` fails when a top-level command is neither
+the agent's nor the owner's (`AGENT_CLI_COMMANDS` and `OWNER_CLI_COMMANDS` in
+`packages/contracts/src/agent-cli.ts`).
 
 ## Reading the database
 

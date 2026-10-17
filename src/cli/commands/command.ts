@@ -1,5 +1,6 @@
 import { once } from "node:events";
 import type { Command } from "commander";
+import { isAgentCaller } from "@pi-template/contracts";
 import type { ConfirmedGatewayClient } from "../ensure-daemon";
 import { CliUsageError } from "../args";
 
@@ -77,8 +78,9 @@ export async function emit(payload: unknown): Promise<void> {
 }
 
 export async function withGateway<T>(use: (client: ConfirmedGatewayClient) => Promise<T>): Promise<T> {
-  const { ensureDaemon } = await import("../ensure-daemon");
-  const client = await ensureDaemon();
+  const client = isAgentCaller()
+    ? await (await import("../agent-caller")).connectAgentGateway()
+    : await (await import("../ensure-daemon")).ensureDaemon();
   try {
     return await use(client);
   } finally {
@@ -88,8 +90,11 @@ export async function withGateway<T>(use: (client: ConfirmedGatewayClient) => Pr
 
 async function reportFailure(error: unknown): Promise<void> {
   const { GatewayRequestError } = await import("../../gateway/client");
+  const { CliFailure } = await import("../agent-caller");
   const report = error instanceof GatewayRequestError
     ? { status: error.status, ...(error.body && typeof error.body === "object" ? error.body : { error: error.message }) }
+    : error instanceof CliFailure
+    ? { error: error.message, hint: error.hint }
     : { error: error instanceof Error ? error.message : String(error) };
   process.stderr.write(`${JSON.stringify(report)}\n`);
 }

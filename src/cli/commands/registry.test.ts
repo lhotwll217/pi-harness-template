@@ -4,8 +4,8 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { harnessPaths } from "@pi-template/contracts";
-import { helpPages, rootHelp } from "./registry";
+import { AGENT_CLI_COMMANDS, OWNER_CLI_COMMANDS, harnessPaths } from "@pi-template/contracts";
+import { harnessProgram, helpPages, rootHelp } from "./registry";
 
 const executable = join(resolve(dirname(fileURLToPath(import.meta.url)), "../../.."), "pi-template");
 const home = mkdtempSync(join(tmpdir(), "pi-template-cli-help-"));
@@ -35,6 +35,10 @@ try {
     "pi-template status", "pi-template doctor", "pi-template onboard", "pi-template prompt", "pi-template daemon",
   ]);
   assert.equal(pages[0]!.help, rootHelp());
+  assert.deepEqual(
+    harnessProgram().commands.map((command) => command.name()).sort(),
+    [...AGENT_CLI_COMMANDS, ...OWNER_CLI_COMMANDS].sort(),
+  );
   for (const path of ["pi-template db", "pi-template db query", "pi-template schedule add"]) {
     const printed = piTemplate(...path.split(" ").slice(1), "--help");
     assert.equal(printed.stdout, pages.find(({ command }) => command === path)!.help, `${path} page is what the terminal prints`);

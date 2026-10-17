@@ -8,6 +8,7 @@ import {
   type SandboxRuntimeConfig,
 } from "@anthropic-ai/sandbox-runtime";
 import {
+  AGENT_CLI_VARIABLES,
   SANDBOXED_COMMAND_TERMINATION_GRACE_MS,
   commandEnvironment,
   failedSandboxChecks,
@@ -74,6 +75,7 @@ function runtimeConfig(policy: SandboxPolicy, extraDeniedReads: string[] = []): 
       allowedDomains: policy.network.mode === "deny" ? [] : policy.network.allowedDomains,
       deniedDomains: policy.network.mode === "deny" ? ["*"] : [],
       strictAllowlist: true,
+      ...(policy.network.allowedUnixSockets?.length ? { allowUnixSockets: policy.network.allowedUnixSockets } : {}),
     },
     filesystem: {
       denyRead: [...new Set([...policy.filesystem.deniedReadRoots, ...extraDeniedReads])],
@@ -131,9 +133,7 @@ async function spawnSandboxed(
       cwd: request.cwd,
       detached: true,
       env: {
-        ...commandEnvironment(process.env),
-        ...commandEnvironment(request.env),
-        ...commandEnvironment(env),
+        ...(request.env ? commandEnvironment(request.env, AGENT_CLI_VARIABLES) : commandEnvironment(process.env)),
         ...sandboxProxyEnvironment,
       },
       stdio: ["ignore", "pipe", "pipe"],

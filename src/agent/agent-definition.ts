@@ -1,27 +1,10 @@
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AgentToolId } from "@pi-template/contracts";
 import { helpTree } from "../cli/commands/registry";
 import { schemaReference } from "../state/schema-docs";
-import type { DatabaseQueryInterface } from "./tools/query-database";
-import { createQueryDatabaseTool } from "./tools/query-database";
-import type { NoteWriter } from "./tools/save-note";
-import { createSaveNoteTool } from "./tools/save-note";
-
-export interface AgentToolDependencies {
-  query: DatabaseQueryInterface;
-  notes: NoteWriter;
-}
 
 export type AgentDefinitionEntry =
-  | {
-      id: `tool:${AgentToolId}`;
-      kind: "tool";
-      name: AgentToolId;
-      description: string;
-      create(dependencies: AgentToolDependencies): ReturnType<typeof createQueryDatabaseTool> | ReturnType<typeof createSaveNoteTool>;
-    }
   | {
       id: `extension:${string}`;
       kind: "extension";
@@ -96,20 +79,6 @@ export const AGENT_DEFINITION: readonly AgentDefinitionEntry[] = Object.freeze([
     name: "identity",
     description: "Define the Pi Harness Template agent and its bundled capability policy.",
     path: identityPromptPath,
-  },
-  {
-    id: `tool:${AgentToolId.QueryDatabase}`,
-    kind: "tool",
-    name: AgentToolId.QueryDatabase,
-    description: "Read-only progressive disclosure over durable harness state.",
-    create: ({ query }: AgentToolDependencies) => createQueryDatabaseTool(query),
-  },
-  {
-    id: `tool:${AgentToolId.SaveNote}`,
-    kind: "tool",
-    name: AgentToolId.SaveNote,
-    description: "Persist the notes worked example through the State writer.",
-    create: ({ notes }: AgentToolDependencies) => createSaveNoteTool(notes),
   },
   {
     id: "skill:writing-for-agents",

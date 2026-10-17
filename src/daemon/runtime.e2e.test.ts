@@ -12,11 +12,8 @@ import {
   type DaemonInfo,
   type NoteCreateInput,
 } from "@pi-template/contracts";
-import {
-  createSaveNoteTool,
-  runOnboarding,
-} from "../agent";
-import { connectGateway, GatewayRequestError } from "../gateway/client";
+import { runOnboarding } from "../agent";
+import { agentTransport, connectGateway, gatewayClient, GatewayRequestError } from "../gateway/client";
 import { State } from "../state";
 import { passingOnboardingDependencies, testOnboardingAnswers } from "../../test/helpers/onboarding";
 import { startDaemon } from "./lifecycle";
@@ -43,10 +40,6 @@ const waitFor = async (predicate: () => boolean, message: string): Promise<void>
     if (Date.now() >= deadline) throw new Error(`timed out waiting for ${message}`);
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
-};
-const executeTool = async (tool: { execute: (...args: any[]) => Promise<any> }, input: object) => {
-  const result = await tool.execute("call-1", input, undefined, undefined, undefined);
-  return JSON.parse(result.content[0].text);
 };
 
 async function runTest(): Promise<void> {
@@ -82,6 +75,8 @@ try {
   assert.equal(info.fingerprint, daemon.fingerprint);
   assert.ok(info.authToken.length >= 32);
   assert.equal(statSync(paths.daemonInfo).mode & 0o777, 0o600);
+  assert.equal(statSync(paths.agentSocket).isSocket(), true);
+  assert.equal(statSync(paths.agentSocket).mode & 0o777, 0o600);
   await assert.rejects(
     startDaemon({
       port: daemon.port,
@@ -161,9 +156,9 @@ try {
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error("notes invalidation timed out")), 2_000)),
   ]);
 
-  const saveNote = createSaveNoteTool(daemon.toolDependencies.notes);
-  await executeTool(saveNote, { body: "from the save_note tool" });
-  assert.equal(state.createNoteCalls, 2, "notes route and save_note call the same State.createNote method");
+  const agent = gatewayClient(agentTransport(paths.agentSocket));
+  await agent.createNote({ body: "from the agent socket" });
+  assert.equal(state.createNoteCalls, 2, "the owner's route and the agent's socket call the same State.createNote method");
   const disposableNote = await client.createNote({ body: "remove me" });
   await client.deleteNote(disposableNote.id);
   assert.equal((await client.listNotes()).some(({ id }) => id === disposableNote.id), false);
@@ -179,7 +174,7 @@ try {
     sql: "SELECT body FROM notes ORDER BY created_at, id",
   }) as { rows: Array<{ body: string }> };
   assert.deepEqual(queried.rows.map(({ body }) => body).sort(), [
-    "from the Gateway route", "from the save_note tool",
+    "from the Gateway route", "from the agent socket",
   ]);
 
   const schedule = await client.createSchedule({
@@ -221,6 +216,7 @@ try {
   if (daemon) {
     await daemon.close();
     assert.equal(existsSync(harnessPaths().daemonInfo), false);
+    assert.equal(existsSync(harnessPaths().agentSocket), false);
     assert.equal(await connectGateway(), null);
   }
   if (previousHome === undefined) delete process.env.PI_TEMPLATE_HOME;

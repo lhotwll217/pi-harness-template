@@ -11,7 +11,7 @@ import {
 } from "@pi-template/contracts";
 import { createScheduledPromptRunner } from "../agent/prompt-runner";
 import { createAgentResources } from "../agent/runtime";
-import { formatDoctorReport, runDoctor } from "../agent/doctor";
+import { formatDoctorReport, runDoctor, setupReady } from "../agent/doctor";
 import { createSandboxAdapter } from "../agent/sandbox";
 import { passingOnboardingDependencies } from "../../test/helpers/onboarding";
 import { toolResultFromTurn } from "../../test/helpers/tool-turn";
@@ -22,9 +22,6 @@ import { onboard } from "./onboard";
 const spelledRoot = mkdtempSync(join(tmpdir(), "pi-template-home-write-root-"));
 const realRoot = realpathSync(spelledRoot);
 const faux = registerFauxProvider();
-const unused = async (): Promise<never> => { throw new Error("not used"); };
-const gateway = { queryDatabase: unused, createNote: unused };
-const resources = { query: { listTables: unused, describeTable: unused, runQuery: unused }, notes: { createNote: unused } };
 const refusal = (root: string, home: string) =>
   `sandbox write root ${root} contains the harness home ${home}, so sandboxed bash could rewrite the files that set its own limits. ` +
   "Record write roots outside the home: `pi-template onboard --sandbox-write <dir>`, or turn the sandbox off with `--sandbox-off`";
@@ -101,7 +98,7 @@ try {
   const sessionRefusal = refusal(spelledRoot, linkHome);
   await assert.rejects(toolResultFromTurn(faux, session, "bash", { command: `rm ${linkHome}` }), { message: sessionRefusal });
   assert.equal(realpathSync(linkHome), realpathSync(realHome), "the home link is unchanged");
-  await assert.rejects(createInteractiveSessionRuntime({ ...session, gateway, model }), { message: sessionRefusal });
+  await assert.rejects(createInteractiveSessionRuntime({ ...session, model }), { message: sessionRefusal });
   const prompt = { kind: ScheduledPayloadKind.Prompt, prompt: "Repoint the home", toolsAllow: [] } as const;
   const scheduled: ScheduledPromptRunRequest = {
     payload: prompt,
@@ -122,20 +119,20 @@ try {
     runId: "run-1",
     signal: new AbortController().signal,
   };
-  await assert.rejects(createScheduledPromptRunner({ home: linkHome, resources })(scheduled), { message: sessionRefusal });
-  await assert.rejects(createAgentResources({ ...session, ...resources }), { message: sessionRefusal });
+  await assert.rejects(createScheduledPromptRunner({ home: linkHome })(scheduled), { message: sessionRefusal });
+  await assert.rejects(createAgentResources(session), { message: sessionRefusal });
   const report = await runDoctor({ home: linkHome, providerModelVerifier: () => true });
   assert.deepEqual(report.checks.sandbox, { enabled: true, verified: false, reason: sessionRefusal });
   assert.equal(formatDoctorReport(report).includes(`Sandbox: on, not verified (${sessionRefusal})\n`), true);
   assert.equal(report.ok, false);
 
   writeFileSync(paths.sandboxPolicy, JSON.stringify({ ...recorded, filesystem: {} }));
-  await assert.rejects(createScheduledPromptRunner({ home: linkHome, resources })(scheduled), {
+  await assert.rejects(createScheduledPromptRunner({ home: linkHome })(scheduled), {
     message: `sandbox policy is invalid under ${linkHome}`,
   }, "an unreadable policy stops a session even without bash");
 
   writeFileSync(paths.sandboxPolicy, JSON.stringify({ ...recorded, enabled: false, filesystem: { ...recorded.filesystem, allowedWriteRoots: [spelledRoot] } }));
-  assert.equal((await runDoctor({ home: linkHome, providerModelVerifier: () => true })).ok, true, "an off sandbox has no write roots to refuse");
+  assert.equal(setupReady(await runDoctor({ home: linkHome, providerModelVerifier: () => true })), true, "an off sandbox has no write roots to refuse");
 
   process.stdout.write("ok — a sandbox write root that contains the harness home, or a link on its path, is refused at onboarding, at every session start, and by doctor; one beside the home works\n");
 } finally {

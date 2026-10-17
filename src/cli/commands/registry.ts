@@ -42,6 +42,8 @@ export function harnessProgram(): Command {
     "Every command prints JSON on stdout; failures print one JSON line on stderr and exit 1, or 2 for a",
     "usage mistake. `pi-template prompt` prints the agent's answer, and `pi-template daemon` runs in the",
     "foreground.",
+    "The agent runs db, docs, notes, schedule, status, and doctor from bash against the running daemon and",
+    "never starts it; onboard, prompt, daemon, and bare `pi-template` are the owner's.",
     "`pi-template <command> --help` shows a command's verbs; `pi-template <command> <verb> --help` its",
     "flags, rules, and examples.",
   ].join("\n"));

@@ -3,6 +3,7 @@ import { isAbsolute } from "node:path";
 import { spawn } from "node:child_process";
 import {
   AgentToolId,
+  withoutRetiredAgentTools,
   ScheduleKind,
   ScheduleRunTrigger,
   ScheduledPayloadKind,
@@ -445,13 +446,14 @@ export class Scheduler implements SchedulerService {
     } else if (input.payload.kind === ScheduledPayloadKind.Prompt) {
       if (!input.payload.prompt.trim()) throw new Error("scheduled prompt is required");
       const knownTools = new Set<string>(Object.values(AgentToolId));
-      if (input.payload.toolsAllow?.some((tool) => !knownTools.has(tool))) {
+      const toolsAllow = withoutRetiredAgentTools(input.payload.toolsAllow ?? []);
+      if (toolsAllow.some((tool) => !knownTools.has(tool))) {
         throw new Error("scheduled prompt contains an unknown tool id");
       }
       return {
         ...input,
         name,
-        payload: { ...input.payload, toolsAllow: input.payload.toolsAllow ?? [] },
+        payload: { ...input.payload, toolsAllow: toolsAllow as AgentToolId[] },
       };
     } else {
       throw new Error("invalid scheduled payload kind");
