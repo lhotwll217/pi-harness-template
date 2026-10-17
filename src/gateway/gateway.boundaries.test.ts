@@ -39,7 +39,7 @@ for (const file of runtime) {
 }
 
 const server = readFileSync(join(here, "server.ts"), "utf8");
-for (const seam of ["notes", "schedules", "query", "docs", "events", "diagnostics"] as const) {
+for (const seam of ["notes", "schedules", "query", "docs", "chats", "workspace", "events", "diagnostics"] as const) {
   assert.match(server, new RegExp(`options\\.${seam}\\.`), `route table delegates through injected ${seam} interface`);
 }
 for (const implementation of ["State", "Scheduler", "loadDocsCatalog", "queryDocs", "createScheduledPromptRunner"]) {

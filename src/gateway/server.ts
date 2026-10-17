@@ -5,7 +5,13 @@ import {
   DAEMON_PROBE_TIMEOUT_MS,
   DEFAULT_DAEMON_PORT,
   DatabaseQueryAction,
+  GatewayRouteError,
   ScheduledPayloadKind,
+  isChatId,
+  type Chat,
+  type ChatCancelResult,
+  type ChatStreamEvent,
+  type ChatSummary,
   type DaemonHealth,
   type DaemonReady,
   type DocsCatalogEntry,
@@ -18,6 +24,10 @@ import {
   type ScheduleCreateInput,
   type ScheduleDefinition,
   type ScheduleRun,
+  type WorkspaceFile,
+  type WorkspaceFileWrite,
+  type WorkspaceFileWriteResult,
+  type WorkspaceTree,
 } from "@pi-template/contracts";
 
 type MaybePromise<T> = T | Promise<T>;
@@ -52,6 +62,22 @@ export interface GatewayDocs {
   query(question: string): MaybePromise<DocsQueryResult>;
 }
 
+/** Refusals are thrown as GatewayRouteError; `send` throws them before the first event, so each gets its own status. */
+export interface GatewayChats {
+  list(): MaybePromise<ChatSummary[]>;
+  get(id: string): MaybePromise<Chat>;
+  send(id: string, text: string): Promise<AsyncIterable<ChatStreamEvent>>;
+  cancel(id: string, turnId?: string): MaybePromise<ChatCancelResult>;
+  rename(id: string, title: string): MaybePromise<ChatSummary>;
+  delete(id: string): MaybePromise<void>;
+}
+
+export interface GatewayWorkspaceFiles {
+  tree(): MaybePromise<WorkspaceTree>;
+  read(path: string): MaybePromise<WorkspaceFile>;
+  write(path: string, input: WorkspaceFileWrite): MaybePromise<WorkspaceFileWriteResult>;
+}
+
 export interface GatewayEvents {
   subscribe(listener: (event: GatewayEvent) => void): () => void;
 }
@@ -68,6 +94,8 @@ export interface GatewayOptions {
   schedules: GatewaySchedules;
   query: GatewayQueryService;
   docs: GatewayDocs;
+  chats: GatewayChats;
+  workspace: GatewayWorkspaceFiles;
   events: GatewayEvents;
   diagnostics: GatewayDiagnostics;
   port?: number;
@@ -136,6 +164,11 @@ function listenPort(override: number | undefined): number {
   return configured;
 }
 
+function chatId(id: string): string {
+  if (!isChatId(id)) throw new GatewayRouteError(400, "invalid_request", `${JSON.stringify(id)} is not a chat id; mint one with crypto.randomUUID()`);
+  return id;
+}
+
 function isLookupError(value: DocsDocument | DocsLookupError): value is DocsLookupError {
   return "code" in value;
 }
@@ -156,11 +189,22 @@ export interface CallerPolicy {
 
 const OPEN: CallerPolicy = { agent: "allow", setupGated: false };
 const GATED: CallerPolicy = { agent: "allow", setupGated: true };
+// The daemon writes chat transcripts and workspace files outside the sandbox and the agent's
+// path policy, as it runs command schedules; the agent has its own file tools.
+const OWNER_CHATS: CallerPolicy = {
+  agent: { error: "agent callers cannot use chat routes", code: "owner_only" },
+  setupGated: true,
+};
+const OWNER_FILES: CallerPolicy = {
+  agent: { error: "agent callers cannot use workspace file routes; use your file tools", code: "owner_only" },
+  setupGated: true,
+};
 
 interface RouteContext {
   caller: Caller;
   request: IncomingMessage;
   response: ServerResponse;
+  url: URL;
   params: string[];
   respond(status: number, body: unknown): void;
 }
@@ -275,6 +319,44 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       }
       respond(400, { error: "invalid database query request" });
     }),
+
+    route("GET", "/chats", OWNER_CHATS, async ({ respond }) => respond(200, await options.chats.list())),
+    route("GET", "/chats/:id", OWNER_CHATS, async ({ params: [id], respond }) => respond(200, await options.chats.get(chatId(id!)))),
+    route("POST", "/chats/:id/messages", OWNER_CHATS, async ({ params: [id], request, response }) => {
+      const body = await readBody(request) as { text?: unknown };
+      if (typeof body.text !== "string" || !body.text.trim()) {
+        throw new GatewayRouteError(400, "invalid_request", "text must be a non-empty string");
+      }
+      const events = await options.chats.send(chatId(id!), body.text);
+      response.writeHead(200, { "content-type": "application/x-ndjson", "cache-control": "no-cache" });
+      // A client that leaves stops only the writing; cancel stops the turn.
+      for await (const event of events) {
+        if (!response.destroyed) response.write(`${JSON.stringify(event)}\n`);
+      }
+      response.end();
+    }),
+    route("POST", "/chats/:id/cancel", OWNER_CHATS, async ({ params: [id], request, respond }) => {
+      const body = await readBody(request) as { turnId?: unknown };
+      if (body.turnId !== undefined && typeof body.turnId !== "string") {
+        throw new GatewayRouteError(400, "invalid_request", "turnId must be a string");
+      }
+      respond(200, await options.chats.cancel(chatId(id!), body.turnId));
+    }),
+    route("PATCH", "/chats/:id", OWNER_CHATS, async ({ params: [id], request, respond }) => {
+      const body = await readBody(request) as { title?: unknown };
+      if (typeof body.title !== "string") throw new GatewayRouteError(400, "invalid_request", "title must be a string");
+      respond(200, await options.chats.rename(chatId(id!), body.title));
+    }),
+    route("DELETE", "/chats/:id", OWNER_CHATS, async ({ params: [id], respond }) => {
+      await options.chats.delete(chatId(id!));
+      respond(200, { ok: true });
+    }),
+
+    route("GET", "/workspace/tree", OWNER_FILES, async ({ respond }) => respond(200, await options.workspace.tree())),
+    route("GET", "/workspace/file", OWNER_FILES, async ({ url, respond }) =>
+      respond(200, await options.workspace.read(url.searchParams.get("path") ?? ""))),
+    route("PUT", "/workspace/file", OWNER_FILES, async ({ url, request, respond }) =>
+      respond(200, await options.workspace.write(url.searchParams.get("path") ?? "", await readBody(request) as WorkspaceFileWrite))),
   ];
 
   const handle = async (caller: Caller, request: IncomingMessage, response: ServerResponse): Promise<void> => {
@@ -289,7 +371,8 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
         return respond(401, { error: "unauthorized" });
       }
 
-      const { pathname } = new URL(request.url ?? "/", "http://127.0.0.1");
+      const url = new URL(request.url ?? "/", "http://127.0.0.1");
+      const { pathname } = url;
       const atPath = routes.flatMap((candidate) => {
         const params = routeParams(candidate, pathname);
         return params ? [{ route: candidate, params }] : [];
@@ -301,9 +384,11 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       if (!matched) return respond(404, { error: "unknown route" });
       const { agent } = matched.route.policy;
       if (caller === "agent" && agent !== "allow") return respond(403, agent);
-      return await matched.route.handle({ caller, request, response, params: matched.params, respond });
+      return await matched.route.handle({ caller, request, response, url, params: matched.params, respond });
     } catch (error) {
+      if (response.headersSent) return void response.end();
       if (error instanceof CommandScheduleRefused) return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
+      if (error instanceof GatewayRouteError) return respond(error.status, { error: error.message, code: error.code, ...error.details });
       return respond(400, { error: error instanceof Error ? error.message : String(error) });
     }
   };

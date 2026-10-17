@@ -124,6 +124,19 @@ try {
         readingPlan: question ? ["scheduler"] : [],
       }),
     },
+    chats: {
+      list: () => { throw new Error("unused"); },
+      get: () => { throw new Error("unused"); },
+      send: () => { throw new Error("unused"); },
+      cancel: () => { throw new Error("unused"); },
+      rename: () => { throw new Error("unused"); },
+      delete: () => { throw new Error("unused"); },
+    },
+    workspace: {
+      tree: () => { throw new Error("unused"); },
+      read: () => { throw new Error("unused"); },
+      write: () => { throw new Error("unused"); },
+    },
     events: { subscribe: () => () => undefined },
     diagnostics: { doctor: () => ({ ok: false, checks: { sandbox: "not verified" } }) },
   });
