@@ -37,13 +37,14 @@ extension's config while keeping owner-authored rules:
 | Mode | Reads | The agent's CLI (`pi-template <command>` in `bash`) | `edit`, `write`, and writes a command names | Other `bash` |
 |---|---|---|---|---|
 | `allow` (default) | allow | allow | allow | allow |
-| `ask` | allow | allow | ask | deny |
+| `ask` | allow | allow | ask | ask |
 | `read-only` | allow | allow | deny | deny |
 
 A fresh home defaults to `allow`, so the agent can act from its first turn. A
 `settings.json` that records no mode also means `allow`; one that does not parse
 or records an unknown mode means `read-only`, so a damaged choice never widens
-access. Outside `allow` the agent keeps `bash` for its own CLI only
+access. In `read-only` the agent keeps `bash` for its own CLI only, and in
+`ask` for its CLI and the commands the owner approves
 ([below](#the-agent-uses-its-own-cli)). A write a command names, such as the
 redirect in `pi-template notes list > notes.json`, is judged by `path_write`,
 which also judges the file tools: `ask` asks and `read-only` denies. The
@@ -62,8 +63,8 @@ surfaces, and a stored schedule that allowed either now allows `bash`
 list below plus `PI_TEMPLATE_HOME`, naming the session's home, and
 `PI_TEMPLATE_AGENT=1`. Its `PATH` starts with the checkout, so `pi-template` is
 the bare word the rules match, then the daemon's Node. `PI_TEMPLATE_PORT` and the
-daemon's own variables stay out. Outside `allow` a CLI call sees only `PATH`,
-`HOME`, `TMPDIR`, `PI_TEMPLATE_HOME`, and `PI_TEMPLATE_AGENT=1`.
+daemon's own variables stay out. Outside `allow` a plain CLI call sees only
+`PATH`, `HOME`, `TMPDIR`, `PI_TEMPLATE_HOME`, and `PI_TEMPLATE_AGENT=1`.
 
 **Rules.** Every mode gets one generated `bash` allow rule per agent command,
 `pi-template db *`, `docs *`, `notes *`, `schedule *`, `status *`, and
@@ -73,29 +74,43 @@ can rewrite the permission mode, out of the agent's reach in `read-only`. The
 last matching rule wins, so an owner rule written after the generated ones,
 such as `"pi-template db *": "deny"`, blocks the agent in every mode.
 
-**Outside `allow`, no shell.** The permission extension strips a leading
-`VAR=` before it matches, so `PI_TEMPLATE_AGENT=0 pi-template schedule run <id>`
-or `NODE_OPTIONS=… pi-template notes list` passes a generated rule. In `ask`
-and `read-only` the `bash` tool therefore never hands the agent's text to a
-shell. It splits the command itself
-([`agentCliArgv`](../src/agent/agent-cli-command.ts)): plain words and `'…'` or
-`"…"` quotes only, the first word `pi-template`. It then runs the checkout's
-launcher with those arguments and the fixed environment above, through the
-sandbox when it is on. A variable, assignment, redirect, pipe, chain,
-substitution, glob, or any other first word is refused with a message naming
-the mode. The permission rules stay the first layer: an owner deny still wins.
-In `allow` the agent's `bash` is a shell, trusted as the owner's.
+**Outside `allow`, the CLI never runs through a shell.** The permission
+extension strips a leading `VAR=` before it matches, so
+`PI_TEMPLATE_AGENT=0 pi-template schedule run <id>` or
+`NODE_OPTIONS=… pi-template notes list` passes a generated rule, and an owner's
+"for this session" approval of `ls` also passes
+`ls; PI_TEMPLATE_AGENT=0 pi-template schedule add …`. The `bash` tool in `ask`
+and `read-only` therefore decides by the command text, not by the permission
+decision ([`agentCliArgv` and `namesAgentCli`](../src/agent/agent-cli-command.ts)):
+
+1. A command that is exactly one `pi-template` call in plain words and `'…'` or
+   `"…"` quotes runs the checkout's launcher with those arguments and the fixed
+   environment above, through the sandbox when it is on.
+2. Any other command with a word ending in `pi-template`, quotes and
+   backslashes removed, is refused with a message naming the mode: after a
+   `VAR=`, `env`, `command`, or a path, or inside a chain, subshell, or
+   substitution. The check is deliberately broad, so `cat notes/pi-template`
+   is refused too.
+3. Anything else runs in a shell in `ask`, with the `allow` environment, once
+   the `*` rule has asked the owner; a headless run, with no one to ask, is
+   denied. `read-only` refuses it.
+
+The permission rules stay the first layer: an owner deny still wins. In
+`allow` the agent's `bash` is a shell, trusted as the owner's.
 
 **Chains.** The permission extension splits a command on `;`, `&&`, `||`, `|`,
 `&`, and newlines, and descends into `$(…)`, backticks, and subshells; the most
 restrictive part decides. In `pi-template db query "SELECT 1"; rm -rf workspace`
-the `rm` is judged by `*`: denied in `read-only` and `ask`, and run in `allow`,
-as any command is there. The CLI rule never covers it.
+the `rm` is judged by `*`: denied in `read-only`, asked in `ask`, and run in
+`allow`, as any command is there. The CLI rule never covers it, and in `ask` the
+harness refuses the chain even when the owner approves it, since it names the
+CLI.
 
 **Spelling.** Rules match a command as typed, a leading `VAR=` stripped. A
 different spelling, such as `pi-template "db" query`, a doubled space, or
-`command pi-template`, misses both an owner deny and the generated allow: in
-`ask` and `read-only` it falls to `*`, and in `allow` it runs. An owner who
+`command pi-template`, misses both an owner deny and the generated allow, so it
+falls to `*`: denied in `read-only`, asked in `ask` (where the harness still
+refuses all but a plain call), and run in `allow`. An owner who
 denies a CLI command in `allow` mode therefore relies on the agent spelling it
 plainly; this is a limit of the permission extension, not normalized here.
 
@@ -114,9 +129,12 @@ The owner's loopback TCP listener, with the token in
 schedules, in `read-only` too: read-only protects files and the host, not
 product actions (Stitcher ADR 0001).
 
-**What holds where.** Outside `allow`, `bash` runs nothing but the CLI as an
-agent caller, sandbox on or off, so agent authority is all it has. In `allow`
-with the sandbox on, `bash` cannot read `daemon.json` and can reach no network
+**What holds where.** In `read-only`, `bash` runs nothing but the CLI as an
+agent caller, sandbox on or off, so agent authority is all it has. In `ask` it
+also runs each command the owner approves, which holds only what `allow` holds
+below. A command that assembles the CLI's name at run time names no word the
+harness refuses, but no generated rule matches it either, so the owner is
+asked. In `allow` with the sandbox on, `bash` cannot read `daemon.json` and can reach no network
 but the agent socket, so the same holds. In `allow` with the sandbox off,
 `bash` is trusted with the owner's account: it can read `daemon.json` through a
 glob or clear `PI_TEMPLATE_AGENT`, which is all that makes the CLI an agent

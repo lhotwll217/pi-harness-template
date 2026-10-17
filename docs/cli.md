@@ -77,9 +77,11 @@ follows Owner Operator `52fa55f`; Stitcher `0a261ec` embeds root help only.
 
 The harness agent runs this CLI in `bash` with `PI_TEMPLATE_AGENT=1` and
 `PI_TEMPLATE_HOME` naming its session's home; outside `allow` mode the harness
-runs it from plain words with argv, never through a shell
-([Security](security.md#the-agent-uses-its-own-cli) owns the environment, the
-permission rules, and the agent's authority). As an agent caller the CLI:
+runs it from plain words with argv, never through a shell, and refuses any
+other command that names it; in `ask` the owner still approves other shell
+commands ([Security](security.md#the-agent-uses-its-own-cli) owns the
+environment, the permission rules, and the agent's authority). As an agent
+caller the CLI:
 
 - reaches the daemon over the agent socket `<home>/agent.sock`, never reads
   `daemon.json`, and writes nothing under the home;
