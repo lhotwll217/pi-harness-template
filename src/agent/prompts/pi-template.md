@@ -32,8 +32,8 @@ describe` serves:
 
 - Run `pi-template` as a bare word, alone in its bash call: the owner's permission rules allow
   each command by its name, and anything chained to it is judged as a separate command.
-- The CLI reaches the running daemon and never starts it. When it reports that the daemon is
-  not running, tell the owner to start it; do not try to start it yourself.
+- The CLI reaches the running daemon; the owner starts it. When the CLI reports that the daemon
+  is not running, tell the owner.
 
 ## Discovery and answer policy
 
