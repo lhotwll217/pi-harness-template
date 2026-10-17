@@ -34,19 +34,20 @@ The owner picks one mode, and the harness
 [reconciles it](../packages/contracts/src/permissions.ts) into the permission
 extension's config while keeping owner-authored rules:
 
-| Mode | Reads | The agent's CLI (`pi-template <command>` in `bash`) | `edit`, `write`, other `bash` |
-|---|---|---|---|
-| `allow` (default) | allow | allow | allow |
-| `ask` | allow | allow | ask |
-| `read-only` | allow | allow | deny |
+| Mode | Reads | The agent's CLI (`pi-template <command>` in `bash`) | `edit`, `write`, and writes a command names | Other `bash` |
+|---|---|---|---|---|
+| `allow` (default) | allow | allow | allow | allow |
+| `ask` | allow | allow | ask | deny |
+| `read-only` | allow | allow | deny | deny |
 
 A fresh home defaults to `allow`, so the agent can act from its first turn. A
 `settings.json` that records no mode also means `allow`; one that does not parse
 or records an unknown mode means `read-only`, so a damaged choice never widens
-access. Under `read-only` the agent keeps `bash` for its own CLI: every other
-command is denied, and so is every write a command names, a redirect such as
-`pi-template notes list > notes.json` included (`path_write`). The harness owns
-the `*` key of `path_write`; leaving `read-only` removes it.
+access. Outside `allow` the agent keeps `bash` for its own CLI only
+([below](#the-agent-uses-its-own-cli)). A write a command names, such as the
+redirect in `pi-template notes list > notes.json`, is judged by `path_write`,
+which also judges the file tools: `ask` asks and `read-only` denies. The
+harness owns the `*` key of `path_write`; `allow` removes it.
 
 ## The agent uses its own CLI
 
@@ -61,7 +62,8 @@ surfaces, and a stored schedule that allowed either now allows `bash`
 list below plus `PI_TEMPLATE_HOME`, naming the session's home, and
 `PI_TEMPLATE_AGENT=1`. Its `PATH` starts with the checkout, so `pi-template` is
 the bare word the rules match, then the daemon's Node. `PI_TEMPLATE_PORT` and the
-daemon's own variables stay out.
+daemon's own variables stay out. Outside `allow` a CLI call sees only `PATH`,
+`HOME`, `TMPDIR`, `PI_TEMPLATE_HOME`, and `PI_TEMPLATE_AGENT=1`.
 
 **Rules.** Every mode gets one generated `bash` allow rule per agent command,
 `pi-template db *`, `docs *`, `notes *`, `schedule *`, `status *`, and
@@ -71,14 +73,26 @@ can rewrite the permission mode, out of the agent's reach in `read-only`. The
 last matching rule wins, so an owner rule written after the generated ones,
 such as `"pi-template db *": "deny"`, blocks the agent in every mode.
 
+**Outside `allow`, no shell.** The permission extension strips a leading
+`VAR=` before it matches, so `PI_TEMPLATE_AGENT=0 pi-template schedule run <id>`
+or `NODE_OPTIONS=… pi-template notes list` passes a generated rule. In `ask`
+and `read-only` the `bash` tool therefore never hands the agent's text to a
+shell. It splits the command itself
+([`agentCliArgv`](../src/agent/agent-cli-command.ts)): plain words and `'…'` or
+`"…"` quotes only, the first word `pi-template`. It then runs the checkout's
+launcher with those arguments and the fixed environment above, through the
+sandbox when it is on. A variable, assignment, redirect, pipe, chain,
+substitution, glob, or any other first word is refused with a message naming
+the mode. The permission rules stay the first layer: an owner deny still wins.
+In `allow` the agent's `bash` is a shell, trusted as the owner's.
+
 **Chains.** The permission extension splits a command on `;`, `&&`, `||`, `|`,
 `&`, and newlines, and descends into `$(…)`, backticks, and subshells; the most
 restrictive part decides. In `pi-template db query "SELECT 1"; rm -rf workspace`
-the `rm` is judged by `*`: denied in `read-only`, refused headless in `ask`
-(nobody can approve it), and run in `allow`, as any command is there. The CLI
-rule never covers it.
+the `rm` is judged by `*`: denied in `read-only` and `ask`, and run in `allow`,
+as any command is there. The CLI rule never covers it.
 
-**Spelling.** Rules match a command as typed, a leading `VAR=` aside. A
+**Spelling.** Rules match a command as typed, a leading `VAR=` stripped. A
 different spelling, such as `pi-template "db" query`, a doubled space, or
 `command pi-template`, misses both an owner deny and the generated allow: in
 `ask` and `read-only` it falls to `*`, and in `allow` it runs. An owner who
@@ -93,17 +107,22 @@ the client sends. A socket rather than loopback TCP, because sandbox-runtime
 once. An agent caller may use every route except creating a command
 schedule, changing a schedule to or from one, and running one: the daemon runs
 command schedules on the host, outside the sandbox, so each of those returns
-403 and changes nothing. The owner's loopback TCP listener, with the token in
+403 and changes nothing. The check reads the stored schedule in the same step
+as the write or the run, so an owner's change in between cannot slip past it.
+The owner's loopback TCP listener, with the token in
 `daemon.json`, keeps full authority. The agent may still delete notes and
 schedules, in `read-only` too: read-only protects files and the host, not
 product actions (Stitcher ADR 0001).
 
-**What holds where.** With the sandbox on, `bash` cannot read `daemon.json` and
-can reach no network but the agent socket, so agent authority is all it has.
-With the sandbox off, `bash` is trusted with the owner's account and can read
-`daemon.json` through a glob, so the authority check is policy there, not a
-boundary. The agent's CLI never starts a daemon, a client-side choice: starting
-one would not raise its authority.
+**What holds where.** Outside `allow`, `bash` runs nothing but the CLI as an
+agent caller, sandbox on or off, so agent authority is all it has. In `allow`
+with the sandbox on, `bash` cannot read `daemon.json` and can reach no network
+but the agent socket, so the same holds. In `allow` with the sandbox off,
+`bash` is trusted with the owner's account: it can read `daemon.json` through a
+glob or clear `PI_TEMPLATE_AGENT`, which is all that makes the CLI an agent
+caller, so the authority check is policy there, not a boundary. The agent's CLI
+never starts a daemon, a client-side choice: starting one would not raise its
+authority.
 
 **Reachability.** `pi-template doctor` reports whether the agent can reach the
 CLI and counts it toward ready (onboarding's own readiness check leaves it out,
@@ -111,9 +130,10 @@ since setup may finish before any daemon runs). It checks, without running a
 command, that the launcher and Node exist, that the daemon answers on the agent
 socket, and that the sandbox can admit the socket. sandbox-runtime admits one
 unix socket by path only on macOS, so with the sandbox on elsewhere the agent
-cannot reach the CLI, and doctor says so. A unix socket path holds at most 103
-bytes on macOS (107 on Linux); a home whose `agent.sock` path is longer leaves
-the daemon without the socket, and doctor names the path.
+cannot reach the CLI, and doctor says so. A unix socket path holds at most 104
+bytes on macOS (107 on Linux). A longer `agent.sock` path, a file there that is
+not a socket, or another daemon already answering there leaves the daemon
+running without the socket, and doctor names which.
 
 ## Interactive and headless authority
 

@@ -72,7 +72,11 @@ state through `pi-template` in `bash`, so `--tool bash` is what lets it read or
 change state ([Security](security.md#the-agent-uses-its-own-cli)). A schedule
 stored when `query_database` or `save_note` existed allows `bash` in their place:
 state migration 2 rewrites stored schedules, and the scheduler maps either id
-from a client that still sends it. Run snapshots keep the tools they ran with.
+from a client that still sends it. That widens such a schedule: in `allow`
+mode its `bash` is a full shell on the owner's account (on the host when the
+sandbox is off), not just the CLI the retired tools stood for; in `ask` and
+`read-only` it runs only the agent's CLI. Run snapshots keep the tools they ran
+with.
 Only the owner creates, changes, or runs a command schedule.
 
 ## Determinism

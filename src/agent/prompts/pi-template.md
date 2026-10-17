@@ -30,8 +30,9 @@ describe` serves:
 
 ## Using the CLI
 
-- Run `pi-template` as a bare word, alone in its bash call: the owner's permission rules allow
-  each command by its name, and anything chained to it is judged as a separate command.
+- Run `pi-template` as a bare word, alone in its bash call, each argument a plain word or quoted
+  in `'...'` or `"..."`. Outside allow mode the harness runs only that form and refuses
+  variables, redirects, pipes, globs, and chained commands.
 - The CLI reaches the running daemon; the owner starts it. When the CLI reports that the daemon
   is not running, tell the owner.
 

@@ -76,14 +76,17 @@ follows Owner Operator `52fa55f`; Stitcher `0a261ec` embeds root help only.
 ## Agent callers
 
 The harness agent runs this CLI in `bash` with `PI_TEMPLATE_AGENT=1` and
-`PI_TEMPLATE_HOME` naming its session's home
+`PI_TEMPLATE_HOME` naming its session's home; outside `allow` mode the harness
+runs it from plain words with argv, never through a shell
 ([Security](security.md#the-agent-uses-its-own-cli) owns the environment, the
 permission rules, and the agent's authority). As an agent caller the CLI:
 
 - reaches the daemon over the agent socket `<home>/agent.sock`, never reads
   `daemon.json`, and writes nothing under the home;
 - never starts a daemon: with none running it exits 1 with
-  `{"error":"the pi-template daemon is not running","hint":"the owner starts it with \`pi-template status\`; the agent never starts it"}`;
+  `{"error":"the pi-template daemon is not running","hint":"the owner starts it with \`pi-template status\`; the agent never starts it"}`,
+  and with one that does not answer within a second it exits 1 with a hint to
+  tell the owner;
 - refuses the owner's commands, `onboard`, `daemon`, `prompt`, and bare
   `pi-template`, with exit 2 and `{"error":"<command> is the owner's command",...}`;
 - returns `schedule run`'s started run at once instead of waiting for it, since
