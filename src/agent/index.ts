@@ -5,3 +5,4 @@ export * from "./prompt-runner";
 export * from "./agent-definition";
 export * from "./runtime";
 export * from "./sandbox";
+export * from "./chat-service";

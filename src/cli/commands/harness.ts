@@ -68,17 +68,29 @@ export function addHarnessCommands(program: Command): void {
 
   verb(program, "prompt <message...>", "one headless turn with the agent: its answer as text, or with --json Pi's event stream", {
     useWhen: "a script or another agent wants one answer from the harness agent.",
-    rules: ["Prints the agent's answer, not a JSON payload; --json streams Pi's JSON event log instead."],
-    examples: ['pi-template prompt "what can you do?"', 'pi-template prompt --json "what can you do?"'],
+    rules: [
+      "Prints the agent's answer, not a JSON payload; --json streams Pi's JSON event log instead.",
+      "--chat <id> sends the turn to that Gateway chat, creating it on first use, and the daemon runs it; --json then streams the harness's chat events, not Pi's event log. Ctrl-C cancels the turn and keeps the partial reply; a cancelled or failed turn exits 1.",
+    ],
+    examples: [
+      'pi-template prompt "what can you do?"',
+      'pi-template prompt --json "what can you do?"',
+      'pi-template prompt --chat "$(uuidgen)" "say hi"',
+    ],
   }, async ({ args: [message], options }) => {
     const { requireOnboarded } = await import("../entry");
     requireOnboarded();
+    const text = (message as string[]).join(" ");
+    if (typeof options.chat === "string") {
+      const { runChatPrompt } = await import("../chat-prompt");
+      return await withGateway(async (client) => await runChatPrompt(client, { chatId: options.chat as string, message: text, json: options.json === true }));
+    }
     const { runPromptSession } = await import("../interactive");
-    return await withGateway(async () => await runPromptSession({
-      message: (message as string[]).join(" "),
-      json: options.json === true,
-    }));
-  }).option("--json", "stream Pi's JSON event log instead of the answer text").allowUnknownOption();
+    return await withGateway(async () => await runPromptSession({ message: text, json: options.json === true }));
+  })
+    .option("--json", "stream Pi's JSON event log instead of the answer text")
+    .option("--chat <id>", "send the turn to this Gateway chat")
+    .allowUnknownOption();
 
   verb(program, "daemon", "run the daemon in the foreground (other commands start it automatically)", {
     useWhen: "debugging the daemon or running it under a service manager; every other command starts it when needed.",

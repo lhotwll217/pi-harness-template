@@ -1,5 +1,4 @@
 import { mkdirSync } from "node:fs";
-import { join } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
 import {
   SessionManager,
@@ -20,7 +19,7 @@ export interface InteractiveHarnessRuntimeOptions {
 export async function createInteractiveHarnessRuntime(options: InteractiveHarnessRuntimeOptions) {
   const paths = harnessPaths(options.home);
   const cwd = options.cwd ?? process.cwd();
-  const transcriptDir = join(paths.home, "transcripts");
+  const transcriptDir = paths.transcripts;
   mkdirSync(transcriptDir, { recursive: true });
   let loadedResourceIds: string[] = [];
   let toolNames: string[] = [];

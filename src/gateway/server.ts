@@ -5,7 +5,15 @@ import {
   DAEMON_PROBE_TIMEOUT_MS,
   DEFAULT_DAEMON_PORT,
   DatabaseQueryAction,
+  GatewayRouteError,
+  MAX_REQUEST_BODY_CHARS,
+  MAX_WORKSPACE_FILE_CHARS,
   ScheduledPayloadKind,
+  isChatId,
+  type Chat,
+  type ChatCancelResult,
+  type ChatStreamEvent,
+  type ChatSummary,
   type DaemonHealth,
   type DaemonReady,
   type DocsCatalogEntry,
@@ -18,6 +26,11 @@ import {
   type ScheduleCreateInput,
   type ScheduleDefinition,
   type ScheduleRun,
+  type WorkspaceFile,
+  type WorkspaceFileWrite,
+  type WorkspaceFileWriteResult,
+  type WorkspaceTree,
+  withoutAbsolutePaths,
 } from "@pi-template/contracts";
 
 type MaybePromise<T> = T | Promise<T>;
@@ -52,6 +65,22 @@ export interface GatewayDocs {
   query(question: string): MaybePromise<DocsQueryResult>;
 }
 
+/** Refusals are thrown as GatewayRouteError; `send` throws them before the first event, so each gets its own status. */
+export interface GatewayChats {
+  list(): MaybePromise<ChatSummary[]>;
+  get(id: string): MaybePromise<Chat>;
+  send(id: string, text: string): Promise<AsyncIterable<ChatStreamEvent>>;
+  cancel(id: string, turnId?: string): MaybePromise<ChatCancelResult>;
+  rename(id: string, title: string): MaybePromise<ChatSummary>;
+  delete(id: string): MaybePromise<void>;
+}
+
+export interface GatewayWorkspaceFiles {
+  tree(): MaybePromise<WorkspaceTree>;
+  read(path: string): MaybePromise<WorkspaceFile>;
+  write(path: string, input: WorkspaceFileWrite): MaybePromise<WorkspaceFileWriteResult>;
+}
+
 export interface GatewayEvents {
   subscribe(listener: (event: GatewayEvent) => void): () => void;
 }
@@ -68,6 +97,8 @@ export interface GatewayOptions {
   schedules: GatewaySchedules;
   query: GatewayQueryService;
   docs: GatewayDocs;
+  chats: GatewayChats;
+  workspace: GatewayWorkspaceFiles;
   events: GatewayEvents;
   diagnostics: GatewayDiagnostics;
   port?: number;
@@ -104,15 +135,26 @@ const SETUP_REQUIRED = {
   },
 } as const;
 
-async function readBody(request: IncomingMessage): Promise<unknown> {
+// JSON writes a control character as a six-character \u escape (RFC 8259 section 7), so a file
+// at the size limit still fits; the rest holds the keys and the base revision.
+const MAX_WORKSPACE_WRITE_BODY_CHARS = 6 * MAX_WORKSPACE_FILE_CHARS + 1_024;
+
+async function readBody(request: IncomingMessage, limit = MAX_REQUEST_BODY_CHARS): Promise<unknown> {
   return await new Promise((resolve, reject) => {
     let raw = "";
+    let overflowed = false;
     request.setEncoding("utf8");
     request.on("data", (chunk: string) => {
+      if (overflowed) return;
       raw += chunk;
-      if (raw.length > 1_000_000) reject(new Error("request body too large"));
+      if (raw.length > limit) {
+        overflowed = true;
+        raw = "";
+        reject(new GatewayRouteError(413, "too_large", `the request body is longer than ${limit} characters`));
+      }
     });
     request.on("end", () => {
+      if (overflowed) return;
       try { resolve(raw ? JSON.parse(raw) : {}); } catch { reject(new Error("invalid JSON")); }
     });
     request.on("error", reject);
@@ -136,14 +178,65 @@ function listenPort(override: number | undefined): number {
   return configured;
 }
 
-function routeId(pathname: string, family: string): string | undefined {
-  const match = new RegExp(`^/${family}/([^/]+)$`).exec(pathname);
-  if (!match) return undefined;
-  try { return decodeURIComponent(match[1]); } catch { return undefined; }
+function chatId(id: string): string {
+  if (!isChatId(id)) throw new GatewayRouteError(400, "invalid_request", `${JSON.stringify(id)} is not a chat id; mint one with crypto.randomUUID()`);
+  return id;
 }
 
 function isLookupError(value: DocsDocument | DocsLookupError): value is DocsLookupError {
   return "code" in value;
+}
+
+/** A caller on the agent socket is allowed, or refused with this 403 body. */
+export type AgentPolicy = "allow" | { error: string; hint?: string; code?: string };
+
+/**
+ * Who may call a route. The owner (loopback TCP with the bearer token) may call every route;
+ * `agent` decides for callers on the agent socket; a setup-gated route answers 428 until
+ * onboarding completes. A route's handler still decides on the request body, as the command
+ * schedule refusal does.
+ */
+export interface CallerPolicy {
+  agent: AgentPolicy;
+  setupGated: boolean;
+}
+
+const OPEN: CallerPolicy = { agent: "allow", setupGated: false };
+const GATED: CallerPolicy = { agent: "allow", setupGated: true };
+const OWNER_CHATS: CallerPolicy = {
+  agent: { error: "agent callers cannot use chat routes", code: "owner_only" },
+  setupGated: true,
+};
+const OWNER_FILES: CallerPolicy = {
+  agent: { error: "agent callers cannot use workspace file routes; use your file tools", code: "owner_only" },
+  setupGated: true,
+};
+
+interface RouteContext {
+  caller: Caller;
+  request: IncomingMessage;
+  response: ServerResponse;
+  url: URL;
+  params: string[];
+  respond(status: number, body: unknown): void;
+}
+
+interface Route {
+  method: string;
+  path: RegExp;
+  policy: CallerPolicy;
+  handle(context: RouteContext): Promise<void> | void;
+}
+
+function route(method: string, pattern: string, policy: CallerPolicy, handle: Route["handle"]): Route {
+  const source = pattern.split("/").map((segment) => segment.startsWith(":") ? "([^/]+)" : segment).join("/");
+  return { method, path: new RegExp(`^${source}$`), policy, handle };
+}
+
+function routeParams(route: Route, pathname: string): string[] | undefined {
+  const match = route.path.exec(pathname);
+  if (!match) return undefined;
+  try { return match.slice(1).map(decodeURIComponent); } catch { return undefined; }
 }
 
 /** Loopback and agent-socket transports: behavior is supplied through injected module interfaces. */
@@ -153,6 +246,130 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
     const frame = `data: ${JSON.stringify(event)}\n\n`;
     for (const stream of streams) stream.write(frame);
   });
+
+  const routes: Route[] = [
+    route("GET", "/health", OPEN, ({ respond }) => respond(200, options.health())),
+    route("GET", "/ready", OPEN, ({ respond }) => {
+      const readiness = options.ready();
+      respond(readiness.ready ? 200 : 503, readiness);
+    }),
+    route("GET", "/events", OPEN, ({ request, response }) => {
+      response.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+      });
+      response.write(":ready\n\n");
+      streams.add(response);
+      request.on("close", () => streams.delete(response));
+    }),
+    route("GET", "/doctor", OPEN, async ({ respond }) => respond(200, await options.diagnostics.doctor())),
+
+    route("GET", "/docs", OPEN, async ({ respond }) => respond(200, await options.docs.list())),
+    route("POST", "/docs/query", OPEN, async ({ request, respond }) => {
+      const body = await readBody(request) as { question?: unknown };
+      if (typeof body.question !== "string" || !body.question.trim()) {
+        return respond(400, { error: "question must be a non-empty string" });
+      }
+      respond(200, await options.docs.query(body.question));
+    }),
+    route("GET", "/docs/:id", OPEN, async ({ params: [id], respond }) => {
+      const document = await options.docs.read(id!);
+      respond(isLookupError(document) ? 404 : 200, document);
+    }),
+
+    route("GET", "/notes", GATED, async ({ respond }) => respond(200, await options.notes.list())),
+    route("POST", "/notes", GATED, async ({ request, respond }) => {
+      const body = await readBody(request) as { body?: unknown };
+      if (typeof body.body !== "string" || !body.body.trim()) {
+        return respond(400, { error: "body must be a non-empty string" });
+      }
+      respond(201, await options.notes.create({ body: body.body }));
+    }),
+    route("DELETE", "/notes/:id", GATED, async ({ params: [id], respond }) => {
+      const deleted = await options.notes.delete(id!);
+      deleted ? respond(200, { ok: true }) : respond(404, { error: "no such note" });
+    }),
+
+    route("GET", "/schedules", GATED, async ({ respond }) => respond(200, await options.schedules.list())),
+    route("POST", "/schedules", GATED, async ({ caller, request, respond }) => {
+      const body = await readBody(request);
+      if (caller === "agent" && isCommandPayload(body)) return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
+      respond(201, await options.schedules.create(body as ScheduleCreateInput));
+    }),
+    route("POST", "/schedules/:id/run", GATED, async ({ caller, params: [id], respond }) =>
+      respond(202, await options.schedules.run(id!, agentAuthorization(caller)))),
+    route("PUT", "/schedules/:id", GATED, async ({ caller, params: [id], request, respond }) => {
+      const body = await readBody(request);
+      if (caller === "agent" && isCommandPayload(body)) return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
+      respond(200, await options.schedules.update(id!, body as ScheduleCreateInput, agentAuthorization(caller)));
+    }),
+    route("DELETE", "/schedules/:id", GATED, async ({ params: [id], respond }) => {
+      const deleted = await options.schedules.delete(id!);
+      deleted ? respond(200, { ok: true }) : respond(404, { error: "no such schedule" });
+    }),
+    route("GET", "/schedule-runs/:id", GATED, async ({ params: [id], respond }) => {
+      const run = await options.schedules.runById(id!);
+      run ? respond(200, run) : respond(404, { error: "no such schedule run" });
+    }),
+
+    route("POST", "/query-database", GATED, async ({ request, respond }) => {
+      const query = await readBody(request) as Record<string, unknown>;
+      try {
+        if (query.action === DatabaseQueryAction.ListTables) return respond(200, options.query.listTables());
+        if (query.action === DatabaseQueryAction.DescribeTable && typeof query.table === "string") {
+          return respond(200, options.query.describeTable(query.table));
+        }
+        if (query.action === DatabaseQueryAction.Query && typeof query.sql === "string") {
+          return respond(200, await options.query.runQuery(query.sql));
+        }
+      } catch (error) {
+        if (!(error instanceof Error)) throw error;
+        const { hint, closest } = error as { hint?: string; closest?: string[] };
+        return respond(400, { error: error.message, hint, closest });
+      }
+      respond(400, { error: "invalid database query request" });
+    }),
+
+    route("GET", "/chats", OWNER_CHATS, async ({ respond }) => respond(200, await options.chats.list())),
+    route("GET", "/chats/:id", OWNER_CHATS, async ({ params: [id], respond }) => respond(200, await options.chats.get(chatId(id!)))),
+    route("POST", "/chats/:id/messages", OWNER_CHATS, async ({ params: [id], request, response }) => {
+      const body = await readBody(request) as { text?: unknown };
+      if (typeof body.text !== "string" || !body.text.trim()) {
+        throw new GatewayRouteError(400, "invalid_request", "text must be a non-empty string");
+      }
+      const events = await options.chats.send(chatId(id!), body.text);
+      response.writeHead(200, { "content-type": "application/x-ndjson", "cache-control": "no-cache" });
+      for await (const event of events) {
+        if (!response.destroyed) response.write(`${JSON.stringify(event)}\n`);
+      }
+      response.end();
+    }),
+    route("POST", "/chats/:id/cancel", OWNER_CHATS, async ({ params: [id], request, respond }) => {
+      const body = await readBody(request) as { turnId?: unknown };
+      if (body.turnId !== undefined && typeof body.turnId !== "string") {
+        throw new GatewayRouteError(400, "invalid_request", "turnId must be a string");
+      }
+      respond(200, await options.chats.cancel(chatId(id!), body.turnId));
+    }),
+    route("PATCH", "/chats/:id", OWNER_CHATS, async ({ params: [id], request, respond }) => {
+      const body = await readBody(request) as { title?: unknown };
+      if (typeof body.title !== "string") throw new GatewayRouteError(400, "invalid_request", "title must be a string");
+      respond(200, await options.chats.rename(chatId(id!), body.title));
+    }),
+    route("DELETE", "/chats/:id", OWNER_CHATS, async ({ params: [id], respond }) => {
+      await options.chats.delete(chatId(id!));
+      respond(200, { ok: true });
+    }),
+
+    route("GET", "/workspace/tree", OWNER_FILES, async ({ respond }) => respond(200, await options.workspace.tree())),
+    route("GET", "/workspace/file", OWNER_FILES, async ({ url, respond }) =>
+      respond(200, await options.workspace.read(url.searchParams.get("path") ?? ""))),
+    route("PUT", "/workspace/file", OWNER_FILES, async ({ url, request, respond }) =>
+      respond(200, await options.workspace.write(url.searchParams.get("path") ?? "",
+        await readBody(request, MAX_WORKSPACE_WRITE_BODY_CHARS) as WorkspaceFileWrite))),
+  ];
+
   const handle = async (caller: Caller, request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const respond = (status: number, body: unknown): void => {
       response.writeHead(status, { "content-type": "application/json" });
@@ -166,110 +383,38 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       }
 
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
-      const route = `${request.method} ${url.pathname}`;
-      if (route === "GET /health") return respond(200, options.health());
-      if (route === "GET /ready") {
-        const readiness = options.ready();
-        return respond(readiness.ready ? 200 : 503, readiness);
+      const { pathname } = url;
+      const atPath = routes.flatMap((candidate) => {
+        const params = routeParams(candidate, pathname);
+        return params ? [{ route: candidate, params }] : [];
+      });
+      if (atPath.some(({ route }) => route.policy.setupGated) && options.ready().setupRequired) {
+        return respond(428, SETUP_REQUIRED);
       }
-      if (route === "GET /events") {
-        response.writeHead(200, {
-          "content-type": "text/event-stream",
-          "cache-control": "no-cache",
-          connection: "keep-alive",
-        });
-        response.write(":ready\n\n");
-        streams.add(response);
-        request.on("close", () => streams.delete(response));
-        return;
-      }
-      if (route === "GET /doctor") return respond(200, await options.diagnostics.doctor());
-
-      if (route === "GET /docs") return respond(200, await options.docs.list());
-      if (route === "POST /docs/query") {
-        const body = await readBody(request) as { question?: unknown };
-        if (typeof body.question !== "string" || !body.question.trim()) {
-          return respond(400, { error: "question must be a non-empty string" });
-        }
-        return respond(200, await options.docs.query(body.question));
-      }
-      const docsId = routeId(url.pathname, "docs");
-      if (request.method === "GET" && docsId !== undefined) {
-        const document = await options.docs.read(docsId);
-        return isLookupError(document) ? respond(404, document) : respond(200, document);
-      }
-
-      const gatedRoute = url.pathname === "/notes" || url.pathname.startsWith("/notes/") ||
-        url.pathname === "/schedules" || url.pathname.startsWith("/schedules/") ||
-        url.pathname.startsWith("/schedule-runs/") || url.pathname === "/query-database";
-      if (gatedRoute && options.ready().setupRequired) return respond(428, SETUP_REQUIRED);
-
-      if (route === "GET /notes") return respond(200, await options.notes.list());
-      if (route === "POST /notes") {
-        const body = await readBody(request) as { body?: unknown };
-        if (typeof body.body !== "string" || !body.body.trim()) {
-          return respond(400, { error: "body must be a non-empty string" });
-        }
-        return respond(201, await options.notes.create({ body: body.body }));
-      }
-      const noteId = routeId(url.pathname, "notes");
-      if (request.method === "DELETE" && noteId !== undefined) {
-        const deleted = await options.notes.delete(noteId);
-        return deleted ? respond(200, { ok: true }) : respond(404, { error: "no such note" });
-      }
-
-      if (route === "GET /schedules") return respond(200, await options.schedules.list());
-      if (route === "POST /schedules") {
-        const body = await readBody(request);
-        if (caller === "agent" && isCommandPayload(body)) return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
-        return respond(201, await options.schedules.create(body as ScheduleCreateInput));
-      }
-      const runMatch = /^\/schedules\/([^/]+)\/run$/.exec(url.pathname);
-      if (request.method === "POST" && runMatch) {
-        return respond(202, await options.schedules.run(decodeURIComponent(runMatch[1]), agentAuthorization(caller)));
-      }
-      const scheduleId = routeId(url.pathname, "schedules");
-      if (request.method === "PUT" && scheduleId !== undefined) {
-        const body = await readBody(request);
-        if (caller === "agent" && isCommandPayload(body)) return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
-        return respond(200, await options.schedules.update(scheduleId, body as ScheduleCreateInput, agentAuthorization(caller)));
-      }
-      if (request.method === "DELETE" && scheduleId !== undefined) {
-        const deleted = await options.schedules.delete(scheduleId);
-        return deleted ? respond(200, { ok: true }) : respond(404, { error: "no such schedule" });
-      }
-      const runId = routeId(url.pathname, "schedule-runs");
-      if (request.method === "GET" && runId !== undefined) {
-        const run = await options.schedules.runById(runId);
-        return run ? respond(200, run) : respond(404, { error: "no such schedule run" });
-      }
-
-      if (route === "POST /query-database") {
-        const query = await readBody(request) as Record<string, unknown>;
-        try {
-          if (query.action === DatabaseQueryAction.ListTables) return respond(200, options.query.listTables());
-          if (query.action === DatabaseQueryAction.DescribeTable && typeof query.table === "string") {
-            return respond(200, options.query.describeTable(query.table));
-          }
-          if (query.action === DatabaseQueryAction.Query && typeof query.sql === "string") {
-            return respond(200, await options.query.runQuery(query.sql));
-          }
-        } catch (error) {
-          if (!(error instanceof Error)) throw error;
-          const { hint, closest } = error as { hint?: string; closest?: string[] };
-          return respond(400, { error: error.message, hint, closest });
-        }
-        return respond(400, { error: "invalid database query request" });
-      }
-
-      return respond(404, { error: "unknown route" });
+      const matched = atPath.find(({ route }) => route.method === request.method);
+      if (!matched) return respond(404, { error: "unknown route" });
+      const { agent } = matched.route.policy;
+      if (caller === "agent" && agent !== "allow") return respond(403, agent);
+      return await matched.route.handle({ caller, request, response, url, params: matched.params, respond });
     } catch (error) {
+      if (response.headersSent) return void response.end();
       if (error instanceof CommandScheduleRefused) return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
-      return respond(400, { error: error instanceof Error ? error.message : String(error) });
+      if (error instanceof GatewayRouteError) return respond(error.status, { error: error.message, code: error.code, ...error.details });
+      return respond(400, { error: withoutAbsolutePaths(error instanceof Error ? error.message : String(error)) });
     }
   };
 
-  const server: Server = createServer((request, response) => void handle("owner", request, response));
+  let closing = false;
+  const listeners: Server[] = [];
+  /** A keep-alive connection whose response ends after close() began would hold close() open until it times out. */
+  const serve = (caller: Caller) => (request: IncomingMessage, response: ServerResponse): void => {
+    response.once("close", () => {
+      if (closing) setImmediate(() => { for (const listener of listeners) listener.closeIdleConnections(); });
+    });
+    void handle(caller, request, response);
+  };
+  const server: Server = createServer(serve("owner"));
+  listeners.push(server);
   let port: number;
   try {
     port = await new Promise<number>((resolve, reject) => {
@@ -284,18 +429,20 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
     throw error;
   }
   const agent = options.agentSocket
-    ? await listenAgentSocket(options.agentSocket, (request, response) => void handle("agent", request, response))
+    ? await listenAgentSocket(options.agentSocket, serve("agent"))
     : undefined;
+  if (agent?.server) listeners.push(agent.server);
 
   return {
     host: "127.0.0.1",
     port,
     ...(agent?.problem ? { agentSocketProblem: agent.problem } : {}),
     async close() {
+      closing = true;
       unsubscribe();
       for (const stream of streams) stream.end();
       streams.clear();
-      await Promise.all([server, ...(agent?.server ? [agent.server] : [])].map((listener) =>
+      await Promise.all(listeners.map((listener) =>
         new Promise<void>((resolve, reject) => listener.close((error) => error ? reject(error) : resolve()))));
       agent?.remove();
     },

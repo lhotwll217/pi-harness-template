@@ -36,7 +36,8 @@ effects, so printing help never loads the daemon.
 
 `doctor` prints its report and exits 1 when a check fails. Three entries are
 not JSON commands: `prompt` prints the agent's answer, or with `--json` Pi's
-event stream; `daemon` runs in the foreground; bare `pi-template` follows the
+event stream (with `--chat <id>`, the harness's
+[chat events](state-and-sessions.md#chats)); `daemon` runs in the foreground; bare `pi-template` follows the
 [entry behavior](onboarding.md#entry-behavior). JSON by default and JSON
 usage errors follow Stitcher `914a47b` and `75db0d9`.
 

@@ -1,5 +1,4 @@
 import { mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   ONBOARDING_VERSION,
@@ -127,7 +126,7 @@ export function createScheduledPromptRunner(options: ScheduledPromptRunnerOption
   const home = harnessPaths(options.home).home;
   const readiness = options.readiness ?? (() => isOnboardingComplete(readMarker(home)));
   const sessions = options.sessions ?? realSessionFactory();
-  const transcriptDir = join(home, "transcripts");
+  const transcriptDir = harnessPaths(home).transcripts;
 
   return async (request: ScheduledPromptRunRequest): Promise<ScheduleExecutionResult> => {
     if (!readiness()) throw new Error("onboarding is incomplete; scheduled model work is denied");

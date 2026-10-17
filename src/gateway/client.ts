@@ -3,6 +3,10 @@ import { request as httpRequest } from "node:http";
 import { Readable } from "node:stream";
 import {
   harnessPaths,
+  type Chat,
+  type ChatCancelResult,
+  type ChatStreamEvent,
+  type ChatSummary,
   type DaemonHealth,
   type DaemonInfo,
   type DaemonReady,
@@ -18,6 +22,10 @@ import {
   type ScheduleCreateInput,
   type ScheduleDefinition,
   type ScheduleRun,
+  type WorkspaceFile,
+  type WorkspaceFileWrite,
+  type WorkspaceFileWriteResult,
+  type WorkspaceTree,
 } from "@pi-template/contracts";
 
 export interface GatewayClient extends GatewayApi {
@@ -25,6 +33,16 @@ export interface GatewayClient extends GatewayApi {
   readDocs(id: string): Promise<DocsDocument>;
   queryDocs(question: string): Promise<DocsQueryResult>;
   doctor(): Promise<unknown>;
+  listChats(): Promise<ChatSummary[]>;
+  getChat(id: string): Promise<Chat>;
+  /** The reply as it streams; a refusal rejects before the first event. */
+  sendChat(id: string, text: string): Promise<AsyncIterable<ChatStreamEvent>>;
+  cancelChat(id: string, turnId?: string): Promise<ChatCancelResult>;
+  renameChat(id: string, title: string): Promise<ChatSummary>;
+  deleteChat(id: string): Promise<void>;
+  workspaceTree(): Promise<WorkspaceTree>;
+  readWorkspaceFile(path: string): Promise<WorkspaceFile>;
+  writeWorkspaceFile(path: string, input: WorkspaceFileWrite): Promise<WorkspaceFileWriteResult>;
 }
 
 export class GatewayRequestError extends Error {
@@ -105,6 +123,22 @@ async function gatewayJson<T>(
   return await response.json() as T;
 }
 
+async function* ndjsonLines<T>(body: ReadableStream<Uint8Array>): AsyncIterable<T> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, { stream: true });
+    for (let newline = buffer.indexOf("\n"); newline !== -1; newline = buffer.indexOf("\n")) {
+      const line = buffer.slice(0, newline);
+      buffer = buffer.slice(newline + 1);
+      if (line) yield JSON.parse(line) as T;
+    }
+  }
+}
+
 export interface GatewayProbeOptions {
   signal?: AbortSignal;
 }
@@ -145,7 +179,7 @@ export function ownerGatewayClient(info: DaemonInfo): GatewayClient {
 
 export function gatewayClient(transport: GatewayTransport): GatewayClient {
   const json = <T>(path: string, init?: RequestInit): Promise<T> => gatewayJson<T>(transport, path, { init });
-  const send = <T>(method: "POST" | "PUT", path: string, body: unknown): Promise<T> => json<T>(path, {
+  const send = <T>(method: "POST" | "PUT" | "PATCH", path: string, body: unknown): Promise<T> => json<T>(path, {
     method,
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -174,6 +208,30 @@ export function gatewayClient(transport: GatewayTransport): GatewayClient {
     readDocs: (id: string) => json<DocsDocument>(`/docs/${encodeURIComponent(id)}`),
     queryDocs: (question: string) => send<DocsQueryResult>("POST", "/docs/query", { question }),
     doctor: () => json<unknown>("/doctor"),
+    listChats: () => json<ChatSummary[]>("/chats"),
+    getChat: (id: string) => json<Chat>(`/chats/${encodeURIComponent(id)}`),
+    async sendChat(id: string, text: string) {
+      const path = `/chats/${encodeURIComponent(id)}/messages`;
+      const response = await transport(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!response.ok || !response.body) {
+        let body: unknown;
+        try { body = await response.json(); } catch { body = undefined; }
+        throw new GatewayRequestError(response.status, body, path);
+      }
+      return ndjsonLines<ChatStreamEvent>(response.body);
+    },
+    cancelChat: (id: string, turnId?: string) =>
+      send<ChatCancelResult>("POST", `/chats/${encodeURIComponent(id)}/cancel`, turnId === undefined ? {} : { turnId }),
+    renameChat: (id: string, title: string) => send<ChatSummary>("PATCH", `/chats/${encodeURIComponent(id)}`, { title }),
+    deleteChat: (id: string) => remove(`/chats/${encodeURIComponent(id)}`),
+    workspaceTree: () => json<WorkspaceTree>("/workspace/tree"),
+    readWorkspaceFile: (path: string) => json<WorkspaceFile>(`/workspace/file?${new URLSearchParams({ path })}`),
+    writeWorkspaceFile: (path: string, input: WorkspaceFileWrite) =>
+      send<WorkspaceFileWriteResult>("PUT", `/workspace/file?${new URLSearchParams({ path })}`, input),
     subscribe(listener) {
       const controller = new AbortController();
       const stop = (): void => {

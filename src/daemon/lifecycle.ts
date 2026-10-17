@@ -12,14 +12,16 @@ import {
   type DaemonHealth,
   type DaemonInfo,
   type DaemonReady,
+  type DomainEvent,
   type GatewayEvent,
   type OnboardingMarker,
 } from "@pi-template/contracts";
-import { createScheduledPromptRunner, runDoctor } from "../agent";
+import { createChatService, createScheduledPromptRunner, runDoctor } from "../agent";
 import { createDocsCatalog } from "../docs-catalog/docs-catalog";
 import { startGateway, type RunningGateway } from "../gateway/server";
 import { Scheduler, type SchedulerOptions } from "../scheduler";
 import { State, describeTable, listTables, runQuery } from "../state";
+import { createWorkspaceFiles } from "../workspace/files";
 import { runtimeFingerprint } from "./fingerprint";
 
 export interface DaemonOptions {
@@ -45,10 +47,14 @@ function onboardingMarker(path: string): OnboardingMarker | undefined {
   try { return JSON.parse(readFileSync(path, "utf8")) as OnboardingMarker; } catch { return undefined; }
 }
 
-function gatewayEvent(kind: DomainEventKind): GatewayEvent {
-  if (kind === DomainEventKind.NoteChanged) return { kind: GatewayEventKind.NotesChanged };
-  if (kind === DomainEventKind.ScheduleChanged) return { kind: GatewayEventKind.ScheduleChanged };
-  return { kind: GatewayEventKind.ScheduleRunChanged };
+export function gatewayEvent(event: DomainEvent): GatewayEvent {
+  switch (event.kind) {
+    case DomainEventKind.NoteChanged: return { kind: GatewayEventKind.NotesChanged };
+    case DomainEventKind.ScheduleChanged: return { kind: GatewayEventKind.ScheduleChanged };
+    case DomainEventKind.ScheduleRunChanged: return { kind: GatewayEventKind.ScheduleRunChanged };
+    case DomainEventKind.ChatChanged: return { kind: GatewayEventKind.ChatChanged, chatId: event.chatId };
+    case DomainEventKind.WorkspaceChanged: return { kind: GatewayEventKind.WorkspaceChanged };
+  }
 }
 
 const defaultRepositoryRoot = (): string => resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -117,6 +123,9 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
     throw error;
   }
   modules.scheduler = true;
+  const publish = (event: DomainEvent): void => state.bus.publish(event);
+  const chats = createChatService({ home: paths.home, publish });
+  const workspace = createWorkspaceFiles({ root: paths.workspace, onWrite: () => publish({ kind: DomainEventKind.WorkspaceChanged }) });
   let schedulerStarted = false;
   const startSchedulerWhenAllowed = (): void => {
     if (closed || schedulerStarted || !isOnboardingComplete(onboardingMarker(paths.onboardingMarker))) return;
@@ -190,8 +199,10 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
       },
       query,
       docs,
+      chats,
+      workspace,
       events: {
-        subscribe: (listener) => state.bus.subscribe((event) => listener(gatewayEvent(event.kind))),
+        subscribe: (listener) => state.bus.subscribe((event) => listener(gatewayEvent(event))),
       },
       diagnostics: { doctor: () => runDoctor({ home: paths.home, agentSocketProblem: gateway?.agentSocketProblem }) },
     });
@@ -246,6 +257,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
       let schedulerError: unknown;
       try {
         try {
+          await chats.stop();
           await scheduler.stop();
         } catch (error) {
           schedulerError = error;

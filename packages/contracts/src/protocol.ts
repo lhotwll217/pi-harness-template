@@ -5,6 +5,7 @@ import type { ScheduleCreateInput, ScheduleDefinition, ScheduleRun } from "./sch
 // Distinct from Owner Operator's 47711 so both daemons can coexist on one machine.
 export const DEFAULT_DAEMON_PORT = 47811;
 export const DAEMON_PROBE_TIMEOUT_MS = 1_000;
+export const MAX_REQUEST_BODY_CHARS = 1_000_000;
 
 export interface DaemonInfo {
   port: number;
@@ -47,6 +48,21 @@ export type DatabaseQueryRequest =
   | { action: DatabaseQueryAction.Query; sql: string };
 
 export type DatabaseQueryResponse = unknown;
+
+/** Two or more segments, so a slash command such as `/login` is not a path. */
+const ABSOLUTE_PATH = /(^|[\s'"`(=[,])(\/[^\s'"`()[\],;/]+(?:\/[^\s'"`()[\],;/]*)+)/g;
+
+/** `text` with each absolute path cut to its last segment, so a Gateway answer never names the host's filesystem layout. */
+export const withoutAbsolutePaths = (text: string): string =>
+  text.replace(ABSOLUTE_PATH, (_match, lead: string, path: string) => lead + (path.split("/").filter(Boolean).at(-1) ?? path));
+
+/** A refusal a Gateway seam throws; the server answers `status` with `{ error, code, ...details }`. */
+export class GatewayRouteError extends Error {
+  constructor(readonly status: number, readonly code: string, message: string, readonly details?: Record<string, unknown>) {
+    super(message);
+    this.name = "GatewayRouteError";
+  }
+}
 
 export interface GatewayApi {
   health(): Promise<DaemonHealth>;
