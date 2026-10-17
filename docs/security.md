@@ -34,17 +34,86 @@ The owner picks one mode, and the harness
 [reconciles it](../packages/contracts/src/permissions.ts) into the permission
 extension's config while keeping owner-authored rules:
 
-| Mode | Reads | Bounded harness state (`save_note`) | `edit`, `write`, `bash` |
+| Mode | Reads | The agent's CLI (`pi-template <command>` in `bash`) | `edit`, `write`, other `bash` |
 |---|---|---|---|
 | `allow` (default) | allow | allow | allow |
 | `ask` | allow | allow | ask |
-| `read-only` | allow | deny | deny |
+| `read-only` | allow | allow | deny |
 
 A fresh home defaults to `allow`, so the agent can act from its first turn. A
 `settings.json` that records no mode also means `allow`; one that does not parse
 or records an unknown mode means `read-only`, so a damaged choice never widens
-access. `read-only` stays supported: permission system 39 withholds a tool its
-policy denies outright, so under `read-only` the agent has no `bash` at all.
+access. Under `read-only` the agent keeps `bash` for its own CLI: every other
+command is denied, and so is every write a command names, a redirect such as
+`pi-template notes list > notes.json` included (`path_write`). The harness owns
+the `*` key of `path_write`; leaving `read-only` removes it.
+
+## The agent uses its own CLI
+
+The agent reaches harness state the way the owner does: it runs `pi-template`
+in `bash` ([Command-line interface](cli.md#agent-callers)). It has no data tool;
+typed tools stay for results an App renders (Stitcher ADR 0001). Reconciling
+the permission config removes the retired `query_database` and `save_note`
+surfaces, and a stored schedule that allowed either now allows `bash`
+([Scheduler](scheduler.md#permissions)).
+
+**Environment.** The agent's `bash`, sandbox on or off, sees the short variable
+list below plus `PI_TEMPLATE_HOME`, naming the session's home, and
+`PI_TEMPLATE_AGENT=1`. Its `PATH` starts with the checkout, so `pi-template` is
+the bare word the rules match, then the daemon's Node. `PI_TEMPLATE_PORT` and the
+daemon's own variables stay out.
+
+**Rules.** Every mode gets one generated `bash` allow rule per agent command,
+`pi-template db *`, `docs *`, `notes *`, `schedule *`, `status *`, and
+`doctor *`, inserted directly after `*` unless the owner already wrote that
+key. One rule per command rather than `pi-template *` keeps `onboard`, which
+can rewrite the permission mode, out of the agent's reach in `read-only`. The
+last matching rule wins, so an owner rule written after the generated ones,
+such as `"pi-template db *": "deny"`, blocks the agent in every mode.
+
+**Chains.** The permission extension splits a command on `;`, `&&`, `||`, `|`,
+`&`, and newlines, and descends into `$(…)`, backticks, and subshells; the most
+restrictive part decides. In `pi-template db query "SELECT 1"; rm -rf workspace`
+the `rm` is judged by `*`: denied in `read-only`, refused headless in `ask`
+(nobody can approve it), and run in `allow`, as any command is there. The CLI
+rule never covers it.
+
+**Spelling.** Rules match a command as typed, a leading `VAR=` aside. A
+different spelling, such as `pi-template "db" query`, a doubled space, or
+`command pi-template`, misses both an owner deny and the generated allow: in
+`ask` and `read-only` it falls to `*`, and in `allow` it runs. An owner who
+denies a CLI command in `allow` mode therefore relies on the agent spelling it
+plainly; this is a limit of the permission extension, not normalized here.
+
+**Authority.** The daemon serves the agent on a second Gateway listener, the
+unix socket `agent.sock` in the harness home (mode `0600`), and grants every
+request there agent authority, decided by the listener and never by anything
+the client sends. A socket rather than loopback TCP, because sandbox-runtime
+0.0.65 admits one unix socket by path but opens loopback only as every port at
+once. An agent caller may use every route except creating a command
+schedule, changing a schedule to or from one, and running one: the daemon runs
+command schedules on the host, outside the sandbox, so each of those returns
+403 and changes nothing. The owner's loopback TCP listener, with the token in
+`daemon.json`, keeps full authority. The agent may still delete notes and
+schedules, in `read-only` too: read-only protects files and the host, not
+product actions (Stitcher ADR 0001).
+
+**What holds where.** With the sandbox on, `bash` cannot read `daemon.json` and
+can reach no network but the agent socket, so agent authority is all it has.
+With the sandbox off, `bash` is trusted with the owner's account and can read
+`daemon.json` through a glob, so the authority check is policy there, not a
+boundary. The agent's CLI never starts a daemon, a client-side choice: starting
+one would not raise its authority.
+
+**Reachability.** `pi-template doctor` reports whether the agent can reach the
+CLI and counts it toward ready (onboarding's own readiness check leaves it out,
+since setup may finish before any daemon runs). It checks, without running a
+command, that the launcher and Node exist, that the daemon answers on the agent
+socket, and that the sandbox can admit the socket. sandbox-runtime admits one
+unix socket by path only on macOS, so with the sandbox on elsewhere the agent
+cannot reach the CLI, and doctor says so. A unix socket path holds at most 103
+bytes on macOS (107 on Linux); a home whose `agent.sock` path is longer leaves
+the daemon without the socket, and doctor names the path.
 
 ## Interactive and headless authority
 
@@ -75,8 +144,8 @@ Two lists become deny rules on the permission extension's `path` surface,
   files, whose command schedules the daemon runs on the host outside the
   sandbox; all under the harness home
   ([`harnessControlPaths`](../packages/contracts/src/harness-home.ts)). The
-  agent reads the state database through its `query_database` tool, which
-  names no path.
+  agent reaches the state database through `pi-template` over the daemon's
+  agent socket, which names no path.
 
 A rule denies reading and writing the path and everything beneath it, matched as
 written and as symlink-resolved, with the reason `Pi Template protected paths`.
@@ -143,26 +212,28 @@ onboarding skips the probe. Either way bash takes Pi's timeout bounds, and a
 timeout or abort stops the command's whole process group: on, with SIGTERM and
 SIGKILL one second later; the tool returns then even if a descendant that left
 the group still holds its output. Either way a command sees only a short list of
-environment variables (`PATH`, `HOME`, locale, certificate paths and the like),
-so the daemon's own credentials stay out of transcripts.
+environment variables (`PATH`, `HOME`, locale, certificate paths and the like)
+and the two that [point its CLI at the home](#the-agent-uses-its-own-cli), so
+the daemon's own credentials stay out of transcripts.
 
 The sandbox covers bash only; the file tools run in the harness process under
 the [protected-path rules](#protected-paths) alone. On, a bash command writes
 only under its write roots and cannot read or write an owner protected path,
 which onboarding records in `sandbox.json`'s read denials. Whatever
-`sandbox.json` records, the runtime adds `<harness home>/pi` to the sandbox's
-read denials and every control file, the state database included, to its write
-denials, without saving either to the file. It names them under the path the
+`sandbox.json` records, the runtime adds `<harness home>/pi` and `daemon.json`
+to the sandbox's read denials, every control file, the state database included,
+to its write denials, and the agent socket as the one unix socket bash may
+connect to, without saving any of them to the file. It names them under the path the
 macOS kernel matches: the home's real path in on-disk case and Unicode form,
 without the `/System/Volumes/Data` firmlink prefix that `realpath` keeps. So a
 control file not yet written is covered when the home is reached through a
 symlink such as macOS `/var` or spelled through the firmlink. These denials back up the
 [write-root rule](#write-roots-stay-outside-the-harness-home); neither is
-removed. Reads outside `pi/` and the protected paths
-are allowed by design, so bash can still read `daemon.json`, which
-`pi-template` needs to reach the daemon. Off, a command
+removed. Reads outside `pi/`, `daemon.json`, and the protected paths
+are allowed by design. Off, a command
 reaches everything the owner can except a literal protected path, so a glob or
-`python3 -c` with a path it builds itself reads the model credentials.
+`python3 -c` with a path it builds itself reads the model credentials and the
+Gateway token.
 `pi-template doctor` reads `sandbox.json` itself and reports `sandbox.enabled`,
 so a hand edit shows at once.
 

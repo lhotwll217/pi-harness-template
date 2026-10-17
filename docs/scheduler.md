@@ -66,6 +66,15 @@ and any operation that needs interactive approval is denied unless onboarding
 established a separate reviewed headless rule. The task directory may supply
 trusted task policy subject to the global security contract.
 
+A prompt schedule gets no tools unless it names them: `pi-template schedule add
+--tool <id>`, repeatable, from Pi's built-in tools. Its agent reaches harness
+state through `pi-template` in `bash`, so `--tool bash` is what lets it read or
+change state ([Security](security.md#the-agent-uses-its-own-cli)). A schedule
+stored when `query_database` or `save_note` existed allows `bash` in their place:
+state migration 2 rewrites stored schedules, and the scheduler maps either id
+from a client that still sends it. Run snapshots keep the tools they ran with.
+Only the owner creates, changes, or runs a command schedule.
+
 ## Determinism
 
 Calendar evaluation and wakeups receive an injected clock. Queue and executor

@@ -42,8 +42,10 @@ specified in the named document inside the pinned
 - **Workflow knowledge** the model should load on demand → a **skill**
   (`docs/skills.md`; Pi implements the
   [Agent Skills standard](https://agentskills.io/specification)).
-- **A new callable capability** with typed input and output → a **tool**
-  (a `kind: "tool"` definition entry, or `pi.registerTool()` inside an extension).
+- **A new callable capability** → a `pi-template` command, which the agent
+  runs in `bash` like the owner ([Security](security.md#the-agent-uses-its-own-cli)).
+  A typed **tool** (`pi.registerTool()` inside an extension) earns its place
+  only when an App renders its result (Stitcher ADR 0001).
 - **Lifecycle or interactive behavior** — intercepting tool calls, custom
   commands, user prompts, custom rendering → an **extension**
   (`docs/extensions.md`).
@@ -58,7 +60,7 @@ When intent is unclear, ask **who owns the trigger**:
 
 - Pi owns it (a turn starts, a tool is called, a command is entered) →
   extension.
-- The model requests a standalone operation → tool.
+- The model requests a standalone operation → a `pi-template` command, or a tool when an App renders its result.
 - The agent follows a composable workflow → skill.
 - The harness owns durable behavior → application module behind a contract.
 - A particular client displays it → that surface's adapter.

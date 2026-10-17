@@ -23,7 +23,7 @@ references on the owning pages.
 On a fresh machine: clone → onboard (all ten stages) → daemon up → schedule a
 prompt → the run executes in a fresh Pi session and lands as a durable run
 record in SQLite → interrogate the harness through `pi-template docs
-list/read/query` and the `query_database` tool, over the Gateway. Declared done
+list/read/query` and `pi-template db`, over the Gateway. Declared done
 per the [testing MVP gate](testing.md#mvp-gate).
 
 ## Fixed identity
@@ -43,7 +43,7 @@ Gateway-first: modules land behind their real authenticated transport.
 | 3 | Docs catalog + routes + drift checks | `scripts/docs-list.mjs`, new catalog + `docs` routes | [Documentation interface](docs-interface.md), [Self-documentation](self-documentation.md) | Landed (routes with WP7) |
 | 4 | State | `src/state` machinery; new `notes` example; migrations | [State and sessions](state-and-sessions.md) | Landed |
 | 5 | Scheduler | `src/scheduler` | [Scheduler](scheduler.md) | Landed |
-| 6 | Agent | `src/agent` (runtime, onboarding, doctor, `query_database`, new `save_note`), sandbox adapter | [Onboarding](onboarding.md), [Security](security.md) | Landed |
+| 6 | Agent | `src/agent` (runtime, onboarding, doctor, `query_database`, new `save_note`; both retired by 19), sandbox adapter | [Onboarding](onboarding.md), [Security](security.md) | Landed |
 | 7 | CLI + composition | `src/cli`, `src/daemon` completion | [Architecture](architecture.md) | Landed |
 | 8 | Acceptance e2e + live smoke | new | [Testing](testing.md) | Landed; live smoke passed on the owner's machine |
 | 9 | Onboarding entry + built-in login | drift correction toward OO's `oo.ts` entry; pi-ai OAuth registry | [Onboarding](onboarding.md#entry-behavior) | Landed |
@@ -73,8 +73,7 @@ improvements back under [#15](https://github.com/lhotwll217/pi-harness-template/
 | 22 | Generic web chat app | Stitcher `apps/web`, without pronunciation, assessment, and vocabulary parts | Web app page, created with the package | Planned ([#24](https://github.com/lhotwll217/pi-harness-template/issues/24)) |
 
 14 is first. 15, 17, and 20 need 14. 16 needs 15; 18 needs 17; 19 needs 16 and
-18; 21 needs 19; 22 needs 21. Package 19 replaces `query_database` in the MVP
-acceptance with `pi-template db`.
+18; 21 needs 19; 22 needs 21.
 
 ## Pruning rules
 

@@ -85,9 +85,10 @@ pi-template schedule add ...    # durable schedules; see docs/scheduler.md
 pi-template db tables           # read-only SQL over durable state: tables, describe, query
 ```
 
-Every command prints JSON. The same operations back every consumer, and a
-read-only `query_database` tool gives an agent the same progressive access to
-durable state as `pi-template db` without opening the database file.
+Every command prints JSON. The same operations back every consumer, the
+harness's own agent included: it runs these commands in `bash` against the
+running daemon and never opens the database file
+([Security](docs/security.md#the-agent-uses-its-own-cli)).
 
 ## Architecture
 
