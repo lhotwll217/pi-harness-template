@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync, type Dirent } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   createBashToolDefinition,
@@ -69,8 +69,47 @@ export interface SkippedSkillLink {
   reason: string;
 }
 
-/** Pi follows linked directories without a cycle check, so a link back to workspace/skills or
- * above, or a second link to one folder, is skipped rather than handed to Pi. */
+const contains = (folder: string, path: string): boolean => {
+  const fromFolder = relative(folder, path);
+  return fromFolder !== ".." && !fromFolder.startsWith(`..${sep}`) && !isAbsolute(fromFolder);
+};
+
+/** Links inside a skill folder that lead back to a folder holding them. Pi walks linked folders
+ * without a cycle check, so it would never finish such a folder; this walk mirrors Pi's (stop at
+ * SKILL.md, skip dot folders and node_modules) and visits each real folder once. */
+function loopingLinks(entryPath: string, realRoot: string): Array<{ path: string; target: string; loopsTo: string }> {
+  const found: Array<{ path: string; target: string; loopsTo: string }> = [];
+  const visited = new Set<string>();
+  const walk = (dir: string, chain: string[]): void => {
+    const real = realpathSync(dir);
+    visited.add(real);
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    const isFile = (path: string) => { try { return statSync(path).isFile(); } catch { return false; } };
+    if (entries.some(({ name }) => name === "SKILL.md") && isFile(join(dir, "SKILL.md"))) return;
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+      const path = join(dir, entry.name);
+      let child: string;
+      try {
+        if (!statSync(path).isDirectory()) continue;
+        child = realpathSync(path);
+      } catch {
+        continue;
+      }
+      const loopsTo = [...chain, real].find((folder) => contains(child, folder));
+      if (loopsTo && entry.isSymbolicLink()) found.push({ path, target: readlinkSync(path), loopsTo: child });
+      else if (!visited.has(child)) walk(path, [...chain, real]);
+    }
+  };
+  walk(entryPath, [realRoot]);
+  return found;
+}
+
 function workspaceSkillEntries(home: string): { paths: string[]; skipped: SkippedSkillLink[] } {
   const paths = ensureHarnessWorkspace(home);
   const policy = loadHarnessSettings(home).skillPolicy;
@@ -82,21 +121,37 @@ function workspaceSkillEntries(home: string): { paths: string[]; skipped: Skippe
   const candidates = names
     .map((name) => ({ name, path: resolve(root, name) }))
     .filter(({ path }) => path.startsWith(root + sep) && existsSync(path))
+    .map((entry) => {
+      const stats = statSync(entry.path);
+      return { ...entry, directory: stats.isDirectory(), file: stats.isFile() };
+    })
+    .filter(({ name, directory, file }) => directory || (file && name.endsWith(".md")))
     .map((entry) => ({ ...entry, link: lstatSync(entry.path).isSymbolicLink(), real: realpathSync(entry.path) }));
   const realRoot = realpathSync(root);
+  const shown = (folder: string) => contains(realRoot, folder) ? relative(realRoot, folder) || "workspace/skills" : folder;
   const seen = new Map<string, string>();
   const selected: string[] = [];
   const skipped: SkippedSkillLink[] = [];
   for (const entry of [...candidates.filter(({ link }) => !link), ...candidates.filter(({ link }) => link)]) {
-    const fromEntryToRoot = relative(entry.real, realRoot);
-    if (fromEntryToRoot !== ".." && !fromEntryToRoot.startsWith(`..${sep}`) && !isAbsolute(fromEntryToRoot)) {
+    if (contains(entry.real, realRoot)) {
       skipped.push({ name: entry.name, target: readlinkSync(entry.path), reason: "loops back to workspace/skills" });
-    } else if (seen.has(entry.real)) {
-      skipped.push({ name: entry.name, target: readlinkSync(entry.path), reason: `repeats ${seen.get(entry.real)}` });
-    } else {
-      seen.set(entry.real, entry.name);
-      selected.push(entry.path);
+      continue;
     }
+    if (seen.has(entry.real)) {
+      skipped.push({ name: entry.name, target: readlinkSync(entry.path), reason: `repeats ${seen.get(entry.real)}` });
+      continue;
+    }
+    const loops = entry.directory ? loopingLinks(entry.path, realRoot) : [];
+    if (loops.length) {
+      skipped.push(...loops.map(({ path, target, loopsTo }) => ({
+        name: relative(root, path),
+        target,
+        reason: `loops back to ${shown(loopsTo)}, so ${entry.name} is not loaded`,
+      })));
+      continue;
+    }
+    seen.set(entry.real, entry.name);
+    selected.push(entry.path);
   }
   return { paths: selected, skipped: skipped.sort((left, right) => left.name.localeCompare(right.name)) };
 }

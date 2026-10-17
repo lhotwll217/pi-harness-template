@@ -58,24 +58,37 @@ sets of skills:
   upstream skill, with an `UPSTREAM.md` naming the source repository and the
   commit it was copied from. The first is `writing-for-agents`, from
   [lhotwll217/skills](https://github.com/lhotwll217/skills).
-- **Workspace skills**, each a folder with a `SKILL.md` (or a link to one) in
-  `workspace/skills/`. Onboarding's skill policy chooses which load:
-  `all-workspace` (the default) loads every one, `bundled` loads none, and
-  `allowlist` loads only the named folders. Non-interactive onboarding takes
+- **Workspace skills** in `workspace/skills/`: each folder with a `SKILL.md`
+  (Pi also finds one in a subfolder of a folder without one), and each
+  top-level `.md` file whose frontmatter has a `description` (and a `name`;
+  without one, Pi names it `skills`, after its folder). A link to either
+  counts. Onboarding's skill policy chooses which load: `all-workspace` (the
+  default) loads every one, `bundled` loads none, and `allowlist` loads only the
+  named entries. Non-interactive onboarding takes
   `--workspace-skills all|bundled|allowlist` and a repeated `--skill <name>`;
   `--skill` alone means `allowlist`.
 
-The harness hands Pi each entry of `workspace/skills/` separately, and leaves
-out what Pi cannot load or would load twice. `pi-template doctor` prints the
-skill policy beside the loaded workspace skills and lists each entry left out:
+The harness hands Pi each folder and `.md` file in `workspace/skills/`
+separately; other files, such as a `LICENSE` or `package.json`, stay out.
+Because Pi reads each entry as its own root, a `.gitignore` (or `.ignore`,
+`.fdignore`) at the root of `workspace/skills/` no longer applies; one inside a
+skill folder still does. When two skills share a name, the first one loaded
+wins: vendored skills, then real folders and files, then links, each group in
+name order (in allowlist order under `allowlist`).
+
+The harness leaves out what Pi cannot load, would load twice, or would never
+finish walking. `pi-template doctor` prints the skill policy beside the loaded
+workspace skills and lists each entry left out:
 
 - `resources.brokenSkillLinksNotLoaded`: a link whose target is gone. Pi skips
   it without a diagnostic.
 - `resources.skippedSkillLinks`: a link back to `workspace/skills/` or a folder
-  above it, or a second link to a folder already loaded. Pi follows linked
-  folders without a cycle check, so a looping link would stall every session.
+  above it, a second link to a folder already loaded, or a link inside a skill
+  folder back to a folder that holds it, which keeps that whole entry out. Pi
+  follows linked folders without a cycle check, so a looping link would stall
+  every session, doctor, and the daemon that runs them.
 - `resources.skillNameCollisionsNotLoaded`: a skill whose name another skill
-  already took. A vendored skill wins a name collision with a workspace skill.
+  already took.
 
 Doctor also notes, under `resources.notices`, a `workspace/MEMORY.md` that no
 longer loads and a `bundled` policy that keeps every workspace skill out, with

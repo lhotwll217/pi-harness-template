@@ -93,6 +93,14 @@ try {
 
   symlinkSync(".", join(paths.workspaceSkills, "a"));
   symlinkSync(".", join(paths.workspaceSkills, "b"));
+  mkdirSync(join(paths.workspaceSkills, "bundle"));
+  symlinkSync("..", join(paths.workspaceSkills, "bundle", "x"));
+  symlinkSync("..", join(paths.workspaceSkills, "bundle", "y"));
+  mkdirSync(join(paths.workspaceSkills, "nested", "inner"), { recursive: true });
+  symlinkSync("..", join(paths.workspaceSkills, "nested", "inner", "up"));
+  writeFileSync(join(paths.workspaceSkills, "LICENSE"), "MIT\n");
+  writeFileSync(join(paths.workspaceSkills, "package.json"), "{}\n");
+  writeFileSync(join(paths.workspaceSkills, "loose.md"), "---\nname: loose\ndescription: A top-level Markdown skill.\n---\n");
   const loopProbe = `
     const { runDoctor, createAgentResources } = await import(${JSON.stringify(fileURLToPath(new URL("./index.ts", import.meta.url)))});
     const doctor = await runDoctor({ home: process.env.LOOP_HOME, providerModelVerifier: () => true });
@@ -105,6 +113,7 @@ try {
     process.stdout.write(JSON.stringify({
       skipped: doctor.checks.resources.skippedSkillLinks,
       sessionSkills: session.loader.getSkills().skills.map(({ name }) => name),
+      diagnostics: session.loader.getSkills().diagnostics.filter(({ type }) => type !== "collision").map(({ message }) => message),
     }));
   `;
   const looped = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", loopProbe], {
@@ -113,18 +122,23 @@ try {
     timeout: 30_000,
     killSignal: "SIGKILL",
   });
-  assert.equal(looped.signal, null, "doctor and a session finish within 30 s with two loop links in workspace/skills");
+  assert.equal(looped.signal, null, "doctor and a session finish within 30 s with loop links in and under workspace/skills");
   assert.equal(looped.status, 0, looped.stderr);
   assert.deepEqual(JSON.parse(looped.stdout), {
     skipped: [
       { name: "a", target: ".", reason: "loops back to workspace/skills" },
       { name: "b", target: ".", reason: "loops back to workspace/skills" },
+      { name: "bundle/x", target: "..", reason: "loops back to workspace/skills, so bundle is not loaded" },
+      { name: "bundle/y", target: "..", reason: "loops back to workspace/skills, so bundle is not loaded" },
+      { name: "nested/inner/up", target: "..", reason: "loops back to nested, so nested is not loaded" },
       { name: "relinked", target: join(home, "linked-source"), reason: "repeats linked" },
     ],
-    sessionSkills: ["writing-for-agents", "dropped", "linked"],
+    sessionSkills: ["writing-for-agents", "dropped", "loose", "linked"],
+    diagnostics: [],
   });
-  unlinkSync(join(paths.workspaceSkills, "a"));
-  unlinkSync(join(paths.workspaceSkills, "b"));
+  for (const entry of ["a", "b", "bundle", "nested", "LICENSE", "package.json", "loose.md"]) {
+    rmSync(join(paths.workspaceSkills, entry), { recursive: true });
+  }
 
   writeFileSync(join(paths.workspace, "MEMORY.md"), "# Memory\n");
   saveHarnessSettings(home, { skillPolicy: { mode: "bundled", allowlist: [] } });
