@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { harnessPaths, savePermissionMode } from "@pi-template/contracts";
 import { enforcedSandboxPolicy } from "../agent/runtime";
@@ -128,6 +128,29 @@ try {
     assert.equal(existsSync(linkedPaths.daemonInfo), false);
     assert.match(await linkedBash("f=daemon; echo '{}' > ../$f.json"), /Operation not permitted/);
     assert.equal(existsSync(linkedPaths.daemonInfo), false, "a missing daemon.json under a symlinked home stays unwritten");
+
+    // The kernel reports paths without the /System/Volumes/Data firmlink prefix.
+    const firmlinkHome = `/System/Volumes/Data${root}/firmlink-home`;
+    if (!existsSync(dirname(firmlinkHome))) {
+      process.stdout.write("SKIP — no /System/Volumes/Data firmlink on this system\n");
+    } else {
+      assert.equal((await onboard([
+        "--non-interactive", "--auth-file", join(standaloneDir, "auth.json"), "--acknowledge-resources", "--service", "declined", "--sandbox",
+      ], passingOnboardingDependencies(firmlinkHome))).complete, true);
+      const firmlinkPaths = harnessPaths(firmlinkHome);
+      new State(firmlinkPaths.stateDb).close();
+      const firmlinkSandbox = readFileSync(firmlinkPaths.sandboxPolicy, "utf8");
+      const firmlinkState = readFileSync(firmlinkPaths.stateDb);
+      const firmlinkBash = (command: string) => bashBehindRefusal({ ...homeInWriteRoots, filesystem: {
+        allowedReadRoots: [root], allowedWriteRoots: [root], deniedReadRoots: [],
+      } }, firmlinkHome, command);
+      assert.equal(await firmlinkBash("f=note; echo kept > ../$f.md && cat ../note.md"), "kept\nexit 0");
+      assert.match(await firmlinkBash("f=sandbox; echo '{}' > ../$f.json"), /Operation not permitted/);
+      assert.equal(readFileSync(firmlinkPaths.sandboxPolicy, "utf8"), firmlinkSandbox, "sandbox.json under a firmlink-spelled home is unchanged");
+      assert.match(await firmlinkBash("echo x >> ../stat?.db"), /Operation not permitted/);
+      assert.deepEqual(readFileSync(firmlinkPaths.stateDb), firmlinkState, "state.db under a firmlink-spelled home is unchanged");
+      assert.equal(await firmlinkBash("cat ../p?/auth.json"), "cat: ../p?/auth.json: No such file or directory\nexit 1");
+    }
   }
   savePermissionMode(home, "read-only");
   assert.equal(await toolResultFromTurn(faux, session, "read", { path: paths.daemonInfo }), denied("path_read", "read", paths.daemonInfo));

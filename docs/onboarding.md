@@ -62,8 +62,10 @@ Non-interactive onboarding without `--permission` takes the recorded mode, or
 
 With the sandbox on, onboarding refuses, before anything is written, a write
 root that contains the harness home, whether given with `--sandbox-write`, taken
-from the working directory, or kept from the recorded `sandbox.json`; the
-message names the root and the home. Both modes honor `--sandbox-read` and
+from the working directory, or kept from the recorded `sandbox.json`, and a
+write root with glob characters, a leading `~`, or a relative spelling; the
+message names the root and the home. Interactive onboarding checks before it
+asks for authentication. Both modes honor `--sandbox-read` and
 `--sandbox-write`. The rule and its reason are in
 [security](security.md#write-roots-stay-outside-the-harness-home).
 

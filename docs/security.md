@@ -149,9 +149,11 @@ only under its write roots and cannot read or write an owner protected path,
 which onboarding records in `sandbox.json`'s read denials. Whatever
 `sandbox.json` records, the runtime adds `<harness home>/pi` to the sandbox's
 read denials and every control file, the state database included, to its write
-denials, without saving either to the file. It names them under the home's real
-path, so a control file not yet written is covered when the home is reached
-through a symlink such as macOS `/var`. These denials back up the
+denials, without saving either to the file. It names them under the path the
+macOS kernel matches: the home's real path in on-disk case and Unicode form,
+without the `/System/Volumes/Data` firmlink prefix that `realpath` keeps. So a
+control file not yet written is covered when the home is reached through a
+symlink such as macOS `/var` or spelled through the firmlink. These denials back up the
 [write-root rule](#write-roots-stay-outside-the-harness-home); neither is
 removed. Reads outside `pi/` and the protected paths
 are allowed by design, so bash can still read `daemon.json`, which
@@ -163,24 +165,43 @@ so a hand edit shows at once.
 
 ### Write roots stay outside the harness home
 
-With the sandbox on, no write root may contain the harness home. A root
-contains the home when it is the home or an ancestor of it, compared both as
-spelled and by real path (so `/tmp` and `/private/tmp` are one place), or of any
-symlink on the path the home is spelled through, wherever that link lives.
+With the sandbox on, no write root may contain the harness home. Containment
+is decided by file identity (device and inode), not by comparing path strings:
+a root contains the home when it is the same directory as the home or as any
+directory above it, walking up the home as spelled, its real path, and the real
+path of every directory on its spelling, so a symlink on that spelling counts
+wherever the link lives. Letter case, Unicode form, `/tmp` against
+`/private/tmp`, and the `/System/Volumes/Data` firmlink therefore cannot hide
+the home. A root that does not exist yet contains the home only when the home
+does not exist yet either, beneath the same existing directory and the same
+names, compared case- and Unicode-insensitively. The sandbox library also lets
+bash write its built-in paths (`/tmp/claude`, `/private/tmp/claude`,
+`~/.npm/_logs`, `~/.claude/debug`, from `getDefaultWritePaths()`), so a home
+inside one of those is refused the same way. A root the library would rewrite
+before use is refused outright: one with glob characters (`*`, `?`, `[`, `]`;
+the library drops a trailing `/**`), one starting with `~` (the library expands
+it to `$HOME`), and a relative one (the library resolves it against the
+daemon's working directory).
 Onboarding refuses such a root before writing anything, naming the root and
-the home. Every sandboxed session (interactive, `pi-template prompt`, and
+the home; interactive onboarding checks the roots its review would propose
+before it asks for authentication. Every sandboxed session (interactive, `pi-template prompt`, and
 scheduled) refuses to start over a `sandbox.json` that records one, legacy and
 hand-edited files included, with the same message and the recovery
-`pi-template onboard --sandbox-write <dir>`; `pi-template doctor` reports not
-ready. A write root inside the home, such as its `workspace/`, is allowed.
+`pi-template onboard --sandbox-write <dir>` (or, for a built-in path, moving
+the home); `pi-template doctor` reports not ready. The check runs at every
+session start, so a link an agent creates that makes a recorded root contain
+the home stops later sessions rather than opening the home. A write root inside the home, such as its `workspace/`, is allowed.
 
-Denying each dangerous path under such a root did not hold. Three audits each
+Denying each dangerous path under such a root did not hold. Four audits each
 escaped the sandbox through a write root that contained the home: a glob that
 the path rules could not match edited `sandbox.json`; a schedule written into
 `state.db` ran on the host; and with the home reached through a symlink inside
 the write root, bash replaced the link with one to a home whose `sandbox.json`
 was off, so the next session ran bash unsandboxed and the daemon would run that
-home's schedules. Removing the shared precondition closes the class rather
+home's schedules; and a string comparison of roots let a `/**` glob, a
+different letter case or Unicode form, a firmlink spelling, or a home under
+`/tmp/claude` through, after which bash replaced `logs/daemon.log` with a
+symlink the daemon then appended to on the host. Removing the shared precondition closes the class rather
 than the next path in it.
 
 The rule covers the harness home only. A write root that contains another

@@ -22,6 +22,8 @@ import {
   AGENT_DEFINITION,
   definitionIds,
   agentDefinitionSummary,
+  homeInWriteRootsProblem,
+  OnboardingStageError,
   readSandboxPolicy,
   readStandaloneCredentials,
   recordedAnswers,
@@ -29,6 +31,7 @@ import {
   type OnboardingAnswers,
   type OnboardingDependencies,
   type OnboardingResult,
+  type SandboxPolicy,
 } from "../agent";
 import { CliUsageError } from "./args";
 
@@ -442,12 +445,7 @@ function protectedPaths(raw: string): string[] {
   return raw.split(",").map((path) => path.trim()).filter(Boolean).map((path) => resolve(path));
 }
 
-function reviewDefaults(
-  auth: InteractiveAuthSelection,
-  protectedPathValues: string[],
-  recorded: OnboardingAnswers,
-  sandbox: SandboxFlags,
-): ReviewedSetup {
+function reviewedSandboxPolicy(recorded: OnboardingAnswers, sandbox: SandboxFlags): SandboxPolicy {
   const root = resolve(process.cwd());
   const policy = recorded.sandbox?.policy ?? {
     enabled: false,
@@ -455,6 +453,23 @@ function reviewDefaults(
     process: { allowSubprocesses: true },
     network: { mode: "deny", allowedDomains: [] },
   };
+  return {
+    ...policy,
+    enabled: sandbox.enabled ?? policy.enabled,
+    filesystem: {
+      ...policy.filesystem,
+      allowedReadRoots: sandbox.readRoots ?? policy.filesystem.allowedReadRoots,
+      allowedWriteRoots: sandbox.writeRoots ?? policy.filesystem.allowedWriteRoots,
+    },
+  };
+}
+
+function reviewDefaults(
+  auth: InteractiveAuthSelection,
+  protectedPathValues: string[],
+  recorded: OnboardingAnswers,
+  sandbox: SandboxFlags,
+): ReviewedSetup {
   return {
     auth: auth.answer,
     model: { provider: auth.provider, model: auth.model },
@@ -465,15 +480,7 @@ function reviewDefaults(
     },
     capabilities: recorded.capabilities ?? { permissionMode: DEFAULT_PERMISSION_MODE },
     protectedPaths: { paths: protectedPathValues, repos: recorded.protectedPaths?.repos ?? [] },
-    sandbox: { policy: {
-      ...policy,
-      enabled: sandbox.enabled ?? policy.enabled,
-      filesystem: {
-        ...policy.filesystem,
-        allowedReadRoots: sandbox.readRoots ?? policy.filesystem.allowedReadRoots,
-        allowedWriteRoots: sandbox.writeRoots ?? policy.filesystem.allowedWriteRoots,
-      },
-    } },
+    sandbox: { policy: reviewedSandboxPolicy(recorded, sandbox) },
     service: recorded.service ?? { choice: "declined" },
   };
 }
@@ -665,6 +672,8 @@ export async function onboard(
     flushPendingQuestion: () => rl!.write("\n"),
   };
   try {
+    const writeRootProblem = homeInWriteRootsProblem(home, reviewedSandboxPolicy(recorded, sandboxFlags(flags)));
+    if (writeRootProblem) throw new OnboardingStageError("sandbox", writeRootProblem);
     const destinationAuthPath = resolve(harnessPaths(machineDependencies.home).piAuth);
     const standaloneSource = piImportSource(standalonePiAuthPath ?? join(getAgentDir(), "auth.json"));
     const source = standaloneSource.authPath === destinationAuthPath ? undefined : standaloneSource;

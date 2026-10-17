@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import {
   createBashToolDefinition,
@@ -33,6 +33,7 @@ import {
   commandEnvironment,
   createSandboxAdapter,
   homeInWriteRootsProblem,
+  kernelPath,
   readSandboxPolicy,
   type SandboxAdapter,
   type SandboxPolicy,
@@ -176,8 +177,8 @@ function assertHeadlessApprovalPolicy(home: string): void {
 
 export function enforcedSandboxPolicy(home: string, policy: SandboxPolicy): SandboxPolicy {
   // The sandbox resolves symlinks only in paths that exist; a control file not yet written
-  // must still be denied under the home's real path, the one the kernel matches.
-  const paths = harnessPaths(realpathSync(home));
+  // must still be denied under the path the kernel matches.
+  const paths = harnessPaths(kernelPath(home));
   return {
     ...policy,
     filesystem: {
