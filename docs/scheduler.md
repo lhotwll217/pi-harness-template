@@ -69,7 +69,11 @@ trusted task policy subject to the global security contract.
 A prompt schedule gets no tools unless it names them: `pi-template schedule add
 --tool <id>`, repeatable, from Pi's built-in tools. Its agent reaches harness
 state through `pi-template` in `bash`, so `--tool bash` is what lets it read or
-change state ([Security](security.md#the-agent-uses-its-own-cli)). A schedule
+change state ([Security](security.md#the-agent-uses-its-own-cli)). Pi lists
+skills in the system prompt only when the turn has a tool that can read a
+skill file, so a scheduled prompt sees its skills only with `--tool read` or
+`--tool bash` (`@earendil-works/pi-coding-agent` 1.3.0,
+`dist/core/system-prompt.js`). A schedule
 stored when `query_database` or `save_note` existed allows `bash` in their place:
 state migration 2 rewrites stored schedules, and the scheduler maps either id
 from a client that still sends it. That widens such a schedule: in `allow`
