@@ -67,12 +67,19 @@ try {
   assert.deepEqual(pathRules[protectedDir], { action: "deny", reason: "Pi Template protected paths" });
   assert.deepEqual(pathRules[`${protectedDir}/*`], { action: "deny", reason: "Pi Template protected paths" });
 
-  // ask: changes prompt, the CLI stays allowed, and leaving read-only lifts its write denial.
+  // ask: changes and every write a command names prompt; bash runs only the CLI, as in read-only.
   const ask = savePermissionMode(home, "ask");
   assert.equal((ask.permission.edit as PiPermissionPatternMap)["*"], "ask");
-  assert.deepEqual(ask.permission.bash, { "*": "ask", ...cliRules });
-  assert.equal(ask.permission.path_write, undefined);
+  assert.deepEqual(ask.permission.bash, { "*": "deny", ...cliRules });
+  assert.deepEqual(ask.permission.path_write, { "*": "ask" });
+  assert.deepEqual((parse(readFileSync(paths.piPermissionConfig, "utf8")) as { permission: { path_write: object } }).permission.path_write, { "*": "ask" });
+
+  // allow lifts the harness's write rule.
+  const allowAgain = savePermissionMode(home, "allow");
+  assert.deepEqual(allowAgain.permission.bash, { "*": "allow", ...cliRules });
+  assert.equal(allowAgain.permission.path_write, undefined);
   assert.equal("path_write" in (parse(readFileSync(paths.piPermissionConfig, "utf8")) as { permission: object }).permission, false);
+  savePermissionMode(home, "ask");
 
   // Owner-authored JSONC rules and comments survive reconciliation.
   const config = readFileSync(paths.piPermissionConfig, "utf8");

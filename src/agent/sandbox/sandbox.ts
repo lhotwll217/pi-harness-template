@@ -97,6 +97,13 @@ export function agentCommandEnvironment(source: NodeJS.ProcessEnv | undefined, h
   };
 }
 
+/** The whole environment of an agent CLI call outside allow mode: nothing the agent types reaches it. */
+export function agentCliEnvironment(home: string, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const { PATH, HOME, TMPDIR } = agentCommandEnvironment(source, home);
+  const environment: NodeJS.ProcessEnv = { PATH, HOME, TMPDIR, PI_TEMPLATE_HOME: home, [AGENT_CALLER_VARIABLE]: "1" };
+  return Object.fromEntries(Object.entries(environment).filter(([, value]) => value !== undefined));
+}
+
 export const sandboxPolicyPath = (home: string): string => harnessPaths(home).sandboxPolicy;
 
 /**

@@ -133,9 +133,7 @@ async function spawnSandboxed(
       cwd: request.cwd,
       detached: true,
       env: {
-        ...commandEnvironment(process.env),
-        ...commandEnvironment(env),
-        ...commandEnvironment(request.env, AGENT_CLI_VARIABLES),
+        ...(request.env ? commandEnvironment(request.env, AGENT_CLI_VARIABLES) : commandEnvironment(process.env)),
         ...sandboxProxyEnvironment,
       },
       stdio: ["ignore", "pipe", "pipe"],

@@ -23,6 +23,7 @@ import { connectGateway } from "../gateway";
 import { runPromptSession } from "../cli/interactive";
 import { seedFauxProviderHome } from "../../test/helpers/faux-provider";
 import { acknowledgeAgentDefinition } from "../../test/helpers/onboarding";
+import { toolResultFromTurn } from "../../test/helpers/tool-turn";
 import { createScheduledPromptRunner } from "./prompt-runner";
 import { checkoutRoot, createSandboxAdapter } from "./sandbox";
 
@@ -104,6 +105,8 @@ const NO_DAEMON = '{"error":"the pi-template daemon is not running",' +
   '"hint":"the owner starts it with `pi-template status`; the agent never starts it"}';
 const COMMAND_SCHEDULE_REFUSAL = '{"status":403,"error":"agent callers cannot create, change, or run a command schedule",' +
   '"hint":"the owner runs pi-template schedule add -- <argv>"}';
+const refusal = (mode: string, reason: string) => `Refused in ${mode} mode: the agent's bash runs only pi-template <command> [arguments] ` +
+  `as plain words, and ${reason}. Quote arguments with '...' or "..."; variables, redirects, pipes, globs, and chained commands are refused.`;
 const sandboxPolicy = (enabled: boolean) => JSON.stringify({
   enabled,
   filesystem: { allowedReadRoots: [cwd], allowedWriteRoots: [cwd], deniedReadRoots: [] },
@@ -204,6 +207,30 @@ try {
   assert.match(readOnly.results[2]!, /^\[pi-permission-system\] Denied by policy: 'path_write'/);
   assert.equal(existsSync(join(cwd, "notes.json")), false);
 
+  const marker = join(cwd, "spoofed");
+  const spoofs = (scheduleId: string) => [
+    `PI_TEMPLATE_AGENT=0 pi-template schedule add --every 1d --name spoofed -- true`,
+    `PI_TEMPLATE_AGENT=0 pi-template schedule run ${scheduleId}`,
+    "NODE_OPTIONS='--import=data:text/javascript,import(`node:fs`).then((fs)=>fs.writeFileSync(`" + marker + "`,``))' pi-template notes list",
+  ];
+  const assertSpoofsRefused = async (mode: "read-only" | "ask", label: string): Promise<void> => {
+    savePermissionMode(home, mode);
+    const spoofed = await agentTurn([...spoofs(ownerCommand.id), "pi-template notes list"], ([, , , listed]) => countAnswer([listed!]));
+    assert.deepEqual(spoofed.results.slice(0, 3), Array(3).fill(refusal(mode, "its first word is not pi-template")), label);
+    assert.equal(spoofed.answer, "There are 4 notes saved.", label);
+    assert.equal(existsSync(marker), false, label);
+    assert.equal((await owner.listSchedules()).some(({ name }) => name === "spoofed"), false, label);
+    assert.deepEqual(daemon!.state.listRuns(ownerCommand.id), [], label);
+  };
+  await assertSpoofsRefused("read-only", "read-only, sandbox off");
+  await assertSpoofsRefused("ask", "headless ask, sandbox off");
+  const redirected = await agentTurn(["pi-template notes list > notes.json"], ([result]) => result!);
+  assert.equal(redirected.results[0], "[pi-permission-system] This 'path_write' call for tool 'bash' for path 'notes.json' (rule '*') requires approval, but no interactive UI is available.");
+  assert.equal(existsSync(join(cwd, "notes.json")), false);
+  const written = await toolResultFromTurn(faux, { home, cwd }, "write", { path: join(cwd, "written.txt"), content: "x" });
+  assert.equal(written, `[pi-permission-system] This 'path_write' call for tool 'write' for path '${join(cwd, "written.txt")}' (rule '*') requires approval, but no interactive UI is available.`);
+  assert.equal(existsSync(join(cwd, "written.txt")), false);
+
   savePermissionMode(home, "ask");
   let chained = "";
   faux.setResponses([
@@ -224,7 +251,7 @@ try {
     signal: new AbortController().signal,
   };
   assert.equal((await createScheduledPromptRunner({ home, readiness: () => true })(headless)).exitCode, 0);
-  assert.equal(chained, "[pi-permission-system] This 'bash' call (rule '*') requires approval, but no interactive UI is available.");
+  assert.equal(chained, "[pi-permission-system] Denied by policy: 'bash' (rule '*').");
   assert.equal(readFileSync(join(cwd, "workspace", "keep.txt"), "utf8"), "kept\n");
   savePermissionMode(home, "allow");
 
@@ -265,6 +292,9 @@ try {
     assert.equal(sandboxed.answer, "There are 4 notes saved.");
     assert.equal(sandboxed.results[1], `cat: ${paths.daemonInfo}: Operation not permitted\n\n\nCommand exited with code 1`);
     assert.match(sandboxed.results[2]!, /Command exited with code (7|56)$/);
+    await assertSpoofsRefused("read-only", "read-only, sandbox on");
+    await assertSpoofsRefused("ask", "headless ask, sandbox on");
+    savePermissionMode(home, "allow");
     writeFileSync(paths.sandboxPolicy, sandboxPolicy(false));
   }
 

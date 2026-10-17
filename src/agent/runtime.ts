@@ -32,8 +32,11 @@ import {
   unacknowledgedDefinitionIds,
   unacknowledgedDefinitionMessage,
 } from "./agent-definition";
+import { agentCliArgv, agentCliRefusal, shellWords } from "./agent-cli-command";
 import {
+  agentCliEnvironment,
   agentCommandEnvironment,
+  checkoutRoot,
   createSandboxAdapter,
   homeInWriteRootsProblem,
   kernelPath,
@@ -467,31 +470,42 @@ function resolveTimeoutMs(timeout: number | undefined): number | undefined {
   return timeoutMs;
 }
 
-function bashOperations(home: string, sandbox: SandboxAdapter): BashOperations {
+function bashExecutor(home: string, sandbox: SandboxAdapter): BashOperations["exec"] {
   const policy = readSandboxPolicy(home);
-  if (!policy?.enabled) {
-    const local = createLocalBashOperations();
-    return {
-      exec: async (command, cwd, execution) =>
-        await local.exec(command, cwd, { ...execution, env: agentCommandEnvironment(execution.env ?? process.env, home) }),
-    };
-  }
+  if (!policy?.enabled) return createLocalBashOperations().exec;
   const enforced = enforcedSandboxPolicy(home, policy);
+  return async (command, cwd, execution) => {
+    const timeoutMs = resolveTimeoutMs(execution.timeout);
+    const { exitCode, timedOut } = await sandbox.execute(enforced, {
+      command,
+      cwd,
+      env: execution.env,
+      signal: execution.signal,
+      timeoutMs,
+      onOutput: execution.onData,
+    });
+    // Pi's bash tool turns these messages into "Command aborted" and "Command timed out after N seconds".
+    if (execution.signal?.aborted) throw new Error("aborted");
+    if (timedOut) throw new Error(`timeout:${execution.timeout}`);
+    return { exitCode };
+  };
+}
+
+/** In allow mode bash is the owner's shell. Elsewhere it runs only the agent's CLI, with argv and a fixed environment. */
+function bashOperations(home: string, sandbox: SandboxAdapter): BashOperations {
+  const exec = bashExecutor(home, sandbox);
   return {
     exec: async (command, cwd, execution) => {
-      const timeoutMs = resolveTimeoutMs(execution.timeout);
-      const { exitCode, timedOut } = await sandbox.execute(enforced, {
-        command,
-        cwd,
-        env: agentCommandEnvironment(execution.env ?? process.env, home),
-        signal: execution.signal,
-        timeoutMs,
-        onOutput: execution.onData,
+      const mode = loadHarnessSettings(home).permissionMode;
+      if (mode === "allow") {
+        return await exec(command, cwd, { ...execution, env: agentCommandEnvironment(execution.env ?? process.env, home) });
+      }
+      const parsed = agentCliArgv(command);
+      if ("refused" in parsed) throw new Error(agentCliRefusal(mode, parsed.refused));
+      return await exec(shellWords([join(checkoutRoot, "pi-template"), ...parsed.argv]), cwd, {
+        ...execution,
+        env: agentCliEnvironment(home),
       });
-      // Pi's bash tool turns these messages into "Command aborted" and "Command timed out after N seconds".
-      if (execution.signal?.aborted) throw new Error("aborted");
-      if (timedOut) throw new Error(`timeout:${execution.timeout}`);
-      return { exitCode };
     },
   };
 }
