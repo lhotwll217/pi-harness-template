@@ -187,11 +187,15 @@ src/
   gateway/     authenticated loopback transport, routes, and client (implemented)
   daemon/      composition, lifecycle, and service management (implemented)
   cli/         the pi-template executable and interactive session (implemented)
+apps/
+  web/         the template's App, a Gateway consumer outside the core (web-app.md)
 ```
 
 ## Harness-core exclusions
 
 - Product UI, widgets, channel bridges, monitoring views, and business workflows.
+  The template's own [web app](web-app.md) lives in `apps/`, outside the core,
+  and reaches the harness only through the Gateway.
 - A second plugin runtime beside Pi extensions.
 - A requirement to expose all internal state or behavior publicly.
 - Publishing bundled extensions as independent packages. Private extraction may
