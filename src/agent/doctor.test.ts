@@ -93,6 +93,17 @@ try {
   assert.equal(damaged.ok, false);
   unlinkSync(paths.protectedPaths);
 
+  writeFileSync(paths.piAuth, `\uFEFF${JSON.stringify({ fake: { type: "api_key", key: secret } })}`);
+  const bom = await runDoctor({ home, providerModelVerifier: () => true });
+  assert.deepEqual(bom.checks.provider, { available: true, configuredCount: 1 });
+  assert.match(formatDoctorReport(bom), /^Providers: 1 configured$/m);
+  writeFileSync(paths.piAuth, "[]");
+  const damagedAuth = await runDoctor({ home, providerModelVerifier: () => true });
+  const authDamage = `${paths.piAuth} must hold a JSON object of provider credentials; fix or remove it`;
+  assert.deepEqual(damagedAuth.checks.provider, { available: false, configuredCount: 0, problem: authDamage });
+  assert.equal(formatDoctorReport(damagedAuth).includes(`Providers: unreadable (${authDamage})\n`), true);
+  assert.equal(damagedAuth.ok, false);
+
   writeFileSync(paths.piAuth, JSON.stringify({ anthropic: { type: "api_key", key: secret } }));
   writeFileSync(paths.piSettings, JSON.stringify({ defaultProvider: "anthropic", defaultModel: "claude-sonnet-5" }));
   assert.equal((await runDoctor({ home })).checks.model.available, true);

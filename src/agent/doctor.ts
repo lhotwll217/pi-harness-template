@@ -9,6 +9,7 @@ import {
   type OnboardingProgress,
 } from "@pi-template/contracts";
 import { agentDefinitionSummary } from "./agent-definition";
+import { readAuthFile } from "./auth-file";
 import { configuredWorkspaceSkillNames, protectedPathsProblem } from "./runtime";
 import { homeInWriteRootsProblem, readSandboxPolicy } from "./sandbox";
 
@@ -40,7 +41,7 @@ export interface DoctorReport {
       workspace: string;
       taskCwd: string;
     };
-    provider: { available: boolean; configuredCount: number };
+    provider: { available: boolean; configuredCount: number; problem?: string };
     model: { available: boolean; selected: string | null };
     resources: { reviewed: boolean; bundled: string[]; workspaceSkills: string[]; workspaceContext: boolean };
     permission: { configured: boolean; mode: string; configPath: string };
@@ -53,7 +54,13 @@ export interface DoctorReport {
 export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorReport> {
   const paths = ensureHarnessWorkspace(options.home);
   const settings = loadHarnessSettings(paths.home);
-  const auth = readObject(paths.piAuth);
+  let providerCheck: DoctorReport["checks"]["provider"];
+  try {
+    const configuredCount = Object.keys(readAuthFile(paths.piAuth)).length;
+    providerCheck = { available: configuredCount > 0, configuredCount };
+  } catch (error) {
+    providerCheck = { available: false, configuredCount: 0, problem: error instanceof Error ? error.message : String(error) };
+  }
   const piSettings = readObject(paths.piSettings);
   const provider = typeof piSettings.defaultProvider === "string" ? piSettings.defaultProvider : "";
   const model = typeof piSettings.defaultModel === "string" ? piSettings.defaultModel : "";
@@ -108,7 +115,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
       workspace: paths.workspace,
       taskCwd: resolve(options.taskCwd ?? process.cwd()),
     },
-    provider: { available: Object.keys(auth).length > 0, configuredCount: Object.keys(auth).length },
+    provider: providerCheck,
     model: { available: modelAvailable, selected },
     resources: {
       reviewed: progress.version === ONBOARDING_VERSION && !!progress.stages?.resources,
@@ -143,7 +150,7 @@ export function formatDoctorReport(report: DoctorReport): string {
     `Harness home: ${checks.roots.harnessHome}`,
     `Workspace: ${checks.roots.workspace}`,
     `Task cwd: ${checks.roots.taskCwd}`,
-    `Providers: ${checks.provider.configuredCount} configured`,
+    `Providers: ${checks.provider.problem ? `unreadable (${checks.provider.problem})` : `${checks.provider.configuredCount} configured`}`,
     `Model: ${checks.model.selected ?? "not configured"} (${checks.model.available ? "available" : "unavailable"})`,
     `Bundled resources: ${checks.resources.bundled.join(", ")}`,
     `Workspace skills: ${checks.resources.workspaceSkills.join(", ") || "none"}`,

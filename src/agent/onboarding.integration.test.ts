@@ -152,6 +152,23 @@ try {
     google: { type: "api_key", key: "google-secret" },
   });
 
+  // The default auth check (no injected verifier) reads auth.json the way Pi does.
+  const defaultVerifier = { ...dependencies(), authVerifier: undefined };
+  const bomCheckHome = join(root, "bom-auth-check");
+  writeFileSync(ensureHarnessWorkspace(bomCheckHome).piAuth, `\uFEFF${JSON.stringify(savedProviders)}`);
+  await assert.rejects(
+    runOnboarding({}, { ...defaultVerifier, home: bomCheckHome }),
+    (error) => error instanceof OnboardingStageError && error.message === "model: provider and model selection are required",
+  );
+  const damagedCheckHome = join(root, "damaged-auth-check");
+  writeFileSync(ensureHarnessWorkspace(damagedCheckHome).piAuth, "[]");
+  await assert.rejects(
+    runOnboarding({}, { ...defaultVerifier, home: damagedCheckHome }),
+    (error) => error instanceof OnboardingStageError && error.message ===
+      `auth: ${harnessPaths(damagedCheckHome).piAuth} must hold a JSON object of provider credentials; fix or remove it`,
+  );
+  assert.equal(readFileSync(harnessPaths(damagedCheckHome).piAuth, "utf8"), "[]");
+
   const legacyAzureSource = join(root, "standalone-legacy-azure-auth.json");
   writeFileSync(legacyAzureSource, JSON.stringify({
     "azure-openai-responses": { type: "api_key", key: "azure-secret" },
