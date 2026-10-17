@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { harnessPaths, savePermissionMode } from "@pi-template/contracts";
 import { passingOnboardingDependencies } from "../../test/helpers/onboarding";
-import { runPromptSession, type InteractiveGateway } from "./interactive";
+import { runPromptSession } from "./interactive";
 import { onboard } from "./onboard";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-template-first-turn-")));
@@ -14,10 +14,6 @@ const faux = registerFauxProvider();
 const secretName = "PI_TEMPLATE_FIRST_TURN_SECRET";
 process.env[secretName] = "daemon-only-secret";
 
-const gateway: InteractiveGateway = {
-  async queryDatabase() { throw new Error("not used"); },
-  async createNote() { throw new Error("not used"); },
-};
 
 async function bashTurn(command: string, cwd: string): Promise<string> {
   let toolResult = "";
@@ -32,7 +28,7 @@ async function bashTurn(command: string, cwd: string): Promise<string> {
     },
   ]);
   assert.equal(await withSilencedStdout(() =>
-    runPromptSession({ gateway, home, cwd, model: faux.getModel(), message: `Run ${command}` })), 0);
+    runPromptSession({ home, cwd, model: faux.getModel(), message: `Run ${command}` })), 0);
   return toolResult;
 }
 
@@ -82,10 +78,10 @@ try {
   assert.equal(await bashTurn("pwd", paths.workspace), `${paths.workspace}\n`);
 
   savePermissionMode(home, "read-only");
-  // Permission system 39 withholds a tool its policy denies outright.
-  assert.equal(await bashTurn("ls", paths.workspace), "Tool bash not found");
+  // Read-only keeps bash for the agent's own CLI and denies every other command.
+  assert.equal(await bashTurn("ls", paths.workspace), "[pi-permission-system] Denied by policy: 'bash' (rule '*').");
 
-  process.stdout.write("ok — a fresh home's agent runs bash on its first turn, with or without a sandbox policy, and read-only still denies it\n");
+  process.stdout.write("ok — a fresh home's agent runs bash on its first turn, with or without a sandbox policy, and read-only denies all but its CLI\n");
 } finally {
   faux.unregister();
   delete process.env[secretName];

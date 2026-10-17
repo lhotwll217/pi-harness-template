@@ -6,11 +6,10 @@ import {
   createAgentSessionRuntime,
 } from "@earendil-works/pi-coding-agent";
 import { ONBOARDING_VERSION, harnessPaths } from "@pi-template/contracts";
-import type { AgentToolDependencies } from "./agent-definition";
 import { createHarnessSession } from "./runtime";
 import type { SandboxAdapter } from "./sandbox";
 
-export interface InteractiveHarnessRuntimeOptions extends AgentToolDependencies {
+export interface InteractiveHarnessRuntimeOptions {
   home?: string;
   cwd?: string;
   model?: Model<any>;
@@ -39,8 +38,6 @@ export async function createInteractiveHarnessRuntime(options: InteractiveHarnes
       cwd: sessionCwd,
       sessionManager,
       sessionStartEvent,
-      query: options.query,
-      notes: options.notes,
       sandbox: options.sandbox,
       model: options.model,
     });

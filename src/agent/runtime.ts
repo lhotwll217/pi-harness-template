@@ -31,10 +31,9 @@ import {
   piTemplateIdentityPrompt,
   unacknowledgedDefinitionIds,
   unacknowledgedDefinitionMessage,
-  type AgentToolDependencies,
 } from "./agent-definition";
 import {
-  commandEnvironment,
+  agentCommandEnvironment,
   createSandboxAdapter,
   homeInWriteRootsProblem,
   kernelPath,
@@ -43,7 +42,7 @@ import {
   type SandboxPolicy,
 } from "./sandbox";
 
-export interface AgentResourceOptions extends AgentToolDependencies {
+export interface AgentResourceOptions {
   home?: string;
   cwd: string;
   systemPromptOverride?: () => string;
@@ -52,14 +51,12 @@ export interface AgentResourceOptions extends AgentToolDependencies {
 export interface LoadedAgentResources {
   loader: ResourceLoader;
   settingsManager: SettingsManager;
-  tools: ToolDefinition[];
   loadedIds: string[];
   approvedWorkspaceSkillPaths: string[];
 }
 
 export interface HarnessSessionServices {
   services: AgentSessionServices;
-  tools: ToolDefinition[];
   loadedIds: string[];
   approvedWorkspaceSkillPaths: string[];
 }
@@ -385,9 +382,6 @@ export async function createHarnessSessionServices(
   const approvedWorkspaceSkillPaths = workspaceSkillEntries(paths.home).paths;
   const extensions = AGENT_DEFINITION.filter((entry) => entry.kind === "extension").map((entry) => entry.path());
   const skills = AGENT_DEFINITION.filter((entry) => entry.kind === "skill").map((entry) => entry.path);
-  const tools = AGENT_DEFINITION
-    .filter((entry) => entry.kind === "tool")
-    .map((entry) => entry.create(options)) as ToolDefinition[];
   const approvedContext = recordedApprovals(paths.home).workspaceContext === true && existsSync(paths.workspaceInstructions)
     ? [{ path: paths.workspaceInstructions, content: readFileSync(paths.workspaceInstructions, "utf8") }]
     : [];
@@ -415,7 +409,6 @@ export async function createHarnessSessionServices(
   }
   return {
     services,
-    tools,
     loadedIds: definitionIds(AGENT_DEFINITION),
     approvedWorkspaceSkillPaths,
   };
@@ -426,7 +419,6 @@ export async function createAgentResources(options: AgentResourceOptions): Promi
   return {
     loader: prepared.services.resourceLoader,
     settingsManager: prepared.services.settingsManager,
-    tools: prepared.tools,
     loadedIds: prepared.loadedIds,
     approvedWorkspaceSkillPaths: prepared.approvedWorkspaceSkillPaths,
   };
@@ -457,9 +449,11 @@ export function enforcedSandboxPolicy(home: string, policy: SandboxPolicy): Sand
     ...policy,
     filesystem: {
       ...policy.filesystem,
-      deniedReadRoots: [...new Set([...policy.filesystem.deniedReadRoots, paths.piAgentDir])],
+      // daemon.json holds the owner's Gateway token; the agent reaches the daemon through its socket.
+      deniedReadRoots: [...new Set([...policy.filesystem.deniedReadRoots, paths.piAgentDir, paths.daemonInfo])],
       deniedWriteRoots: harnessControlPaths(paths),
     },
+    network: { ...policy.network, allowedUnixSockets: [paths.agentSocket] },
   };
 }
 
@@ -480,7 +474,7 @@ function bashOperations(home: string, sandbox: SandboxAdapter): BashOperations {
     const local = createLocalBashOperations();
     return {
       exec: async (command, cwd, execution) =>
-        await local.exec(command, cwd, { ...execution, env: commandEnvironment(execution.env ?? process.env) }),
+        await local.exec(command, cwd, { ...execution, env: agentCommandEnvironment(execution.env ?? process.env, home) }),
     };
   }
   const enforced = enforcedSandboxPolicy(home, policy);
@@ -490,7 +484,7 @@ function bashOperations(home: string, sandbox: SandboxAdapter): BashOperations {
       const { exitCode, timedOut } = await sandbox.execute(enforced, {
         command,
         cwd,
-        env: execution.env,
+        env: agentCommandEnvironment(execution.env ?? process.env, home),
         signal: execution.signal,
         timeoutMs,
         onOutput: execution.onData,
@@ -508,13 +502,12 @@ export async function createHarnessSession(options: HarnessSessionOptions) {
   assertSessionCanStart(paths.home);
   if (options.headless) assertHeadlessApprovalPolicy(paths.home);
   const resources = await createHarnessSessionServices(options);
-  const definedToolNames = resources.tools.map(({ name }) => name);
-  const configuredNames = [...loadHarnessSettings(paths.home).toolPosture, ...definedToolNames];
+  const configuredNames = loadHarnessSettings(paths.home).toolPosture;
   const enabledNames = options.toolsAllow
     ? options.toolsAllow.filter((name) => configuredNames.includes(name))
     : configuredNames;
   const sandbox = options.sandbox ?? createSandboxAdapter();
-  const customTools: Array<ToolDefinition<any, any, any>> = [...resources.tools];
+  const customTools: Array<ToolDefinition<any, any, any>> = [];
   if (enabledNames.includes("bash")) {
     customTools.push(createBashToolDefinition(options.cwd, { operations: bashOperations(paths.home, sandbox) }));
   }

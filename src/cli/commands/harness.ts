@@ -74,8 +74,7 @@ export function addHarnessCommands(program: Command): void {
     const { requireOnboarded } = await import("../entry");
     requireOnboarded();
     const { runPromptSession } = await import("../interactive");
-    return await withGateway(async (client) => await runPromptSession({
-      gateway: client,
+    return await withGateway(async () => await runPromptSession({
       message: (message as string[]).join(" "),
       json: options.json === true,
     }));

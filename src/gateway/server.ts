@@ -1,8 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { chmodSync, rmSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
   DEFAULT_DAEMON_PORT,
   DatabaseQueryAction,
+  ScheduledPayloadKind,
   type DaemonHealth,
   type DaemonReady,
   type DocsCatalogEntry,
@@ -65,13 +67,36 @@ export interface GatewayOptions {
   events: GatewayEvents;
   diagnostics: GatewayDiagnostics;
   port?: number;
+  /** Where to listen for agent callers; omitted, the Gateway serves the owner's TCP listener only. */
+  agentSocket?: string;
 }
 
 export interface RunningGateway {
   host: "127.0.0.1";
   port: number;
+  /** Why the agent socket is not listening; undefined when it is or none was asked for. */
+  agentSocketProblem?: string;
   close(): Promise<void>;
 }
+
+/**
+ * Who sent a request, decided by the listener it arrived on and never by anything the client
+ * sends: the loopback TCP listener with the bearer token from daemon.json serves the owner;
+ * the agent socket serves the agent's bash and needs no token.
+ *
+ * Caller policy, per route: an agent caller may use every route except creating, changing, or
+ * running a command schedule, because the daemon runs command schedules on the host outside
+ * the sandbox. A new route states here whether an agent caller may use it.
+ */
+export type Caller = "owner" | "agent";
+
+const AGENT_COMMAND_SCHEDULE_REFUSAL = {
+  error: "agent callers cannot create, change, or run a command schedule",
+  hint: "the owner runs pi-template schedule add -- <argv>",
+} as const;
+
+const isCommandPayload = (body: unknown): boolean =>
+  (body as { payload?: { kind?: unknown } } | undefined)?.payload?.kind === ScheduledPayloadKind.Command;
 
 const SETUP_REQUIRED = {
   error: {
@@ -122,22 +147,24 @@ function isLookupError(value: DocsDocument | DocsLookupError): value is DocsLook
   return "code" in value;
 }
 
-/** Loopback transport only: behavior is supplied through injected module interfaces. */
+/** Loopback and agent-socket transports: behavior is supplied through injected module interfaces. */
 export async function startGateway(options: GatewayOptions): Promise<RunningGateway> {
   const streams = new Set<ServerResponse>();
   const unsubscribe = options.events.subscribe((event) => {
     const frame = `data: ${JSON.stringify(event)}\n\n`;
     for (const stream of streams) stream.write(frame);
   });
+  const storedSchedule = async (id: string): Promise<ScheduleDefinition | undefined> =>
+    (await options.schedules.list()).find((schedule) => schedule.id === id);
 
-  const server: Server = createServer(async (request, response) => {
+  const handle = async (caller: Caller, request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const respond = (status: number, body: unknown): void => {
       response.writeHead(status, { "content-type": "application/json" });
       response.end(JSON.stringify(body));
     };
 
     try {
-      if (!hasValidAuthorization(request.headers.authorization, options.authToken)) {
+      if (caller === "owner" && !hasValidAuthorization(request.headers.authorization, options.authToken)) {
         response.setHeader("www-authenticate", "Bearer");
         return respond(401, { error: "unauthorized" });
       }
@@ -197,18 +224,25 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
 
       if (route === "GET /schedules") return respond(200, await options.schedules.list());
       if (route === "POST /schedules") {
-        return respond(201, await options.schedules.create(await readBody(request) as ScheduleCreateInput));
+        const body = await readBody(request);
+        if (caller === "agent" && isCommandPayload(body)) return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
+        return respond(201, await options.schedules.create(body as ScheduleCreateInput));
       }
       const runMatch = /^\/schedules\/([^/]+)\/run$/.exec(url.pathname);
       if (request.method === "POST" && runMatch) {
-        return respond(202, await options.schedules.run(decodeURIComponent(runMatch[1])));
+        const id = decodeURIComponent(runMatch[1]);
+        if (caller === "agent" && isCommandPayload(await storedSchedule(id))) {
+          return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
+        }
+        return respond(202, await options.schedules.run(id));
       }
       const scheduleId = routeId(url.pathname, "schedules");
       if (request.method === "PUT" && scheduleId !== undefined) {
-        return respond(200, await options.schedules.update(
-          scheduleId,
-          await readBody(request) as ScheduleCreateInput,
-        ));
+        const body = await readBody(request);
+        if (caller === "agent" && (isCommandPayload(body) || isCommandPayload(await storedSchedule(scheduleId)))) {
+          return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
+        }
+        return respond(200, await options.schedules.update(scheduleId, body as ScheduleCreateInput));
       }
       if (request.method === "DELETE" && scheduleId !== undefined) {
         const deleted = await options.schedules.delete(scheduleId);
@@ -242,8 +276,9 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
     } catch (error) {
       return respond(400, { error: error instanceof Error ? error.message : String(error) });
     }
-  });
+  };
 
+  const server: Server = createServer((request, response) => void handle("owner", request, response));
   let port: number;
   try {
     port = await new Promise<number>((resolve, reject) => {
@@ -257,17 +292,56 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
     unsubscribe();
     throw error;
   }
+  const agent = options.agentSocket
+    ? await listenAgentSocket(options.agentSocket, (request, response) => void handle("agent", request, response))
+    : undefined;
 
   return {
     host: "127.0.0.1",
     port,
+    ...(agent?.problem ? { agentSocketProblem: agent.problem } : {}),
     async close() {
       unsubscribe();
       for (const stream of streams) stream.end();
       streams.clear();
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => error ? reject(error) : resolve());
-      });
+      await Promise.all([server, ...(agent?.server ? [agent.server] : [])].map((listener) =>
+        new Promise<void>((resolve, reject) => listener.close((error) => error ? reject(error) : resolve()))));
+      agent?.remove();
     },
   };
+}
+
+const inode = (path: string): bigint | undefined => {
+  try {
+    return statSync(path, { bigint: true }).ino;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Listen on the agent socket, owner-only (0600). A file left by a daemon that died is removed
+ * first; the caller has already refused to start beside a live daemon. A socket that cannot
+ * listen, such as one whose path is too long for a unix socket, leaves the daemon running
+ * without it and is reported as the problem.
+ */
+async function listenAgentSocket(
+  path: string,
+  listener: (request: IncomingMessage, response: ServerResponse) => void,
+): Promise<{ server?: Server; problem?: string; remove(): void }> {
+  rmSync(path, { force: true });
+  const server = createServer(listener);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(path, () => resolve());
+    });
+    chmodSync(path, 0o600);
+  } catch (error) {
+    server.close();
+    return { problem: `the agent socket ${path} cannot listen: ${error instanceof Error ? error.message : String(error)}`, remove() {} };
+  }
+  const own = inode(path);
+  // A daemon that started after this one owns a socket at the same path; leave that one in place.
+  return { server, remove: () => { if (own !== undefined && inode(path) === own) rmSync(path, { force: true }); } };
 }

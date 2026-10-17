@@ -53,12 +53,6 @@ async function sessionSystemPrompt(): Promise<string> {
     cwd,
     ephemeral: true,
     toolsAllow: [],
-    query: {
-      listTables: () => [],
-      describeTable: () => ({ description: "", columns: [] }),
-      runQuery: () => ({ rows: [], truncated: false }),
-    },
-    notes: { createNote: () => ({ id: "n", body: "", createdAt: "", updatedAt: "" }) },
   });
   try {
     return created.session.systemPrompt;

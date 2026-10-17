@@ -1,6 +1,6 @@
 // Integration: permission reconciliation against a real temporary harness home — mode
-// defaults per surface class, protected-path deny rules, and preservation of
-// owner-authored JSONC (rules and comments) across reconciles.
+// defaults per surface class, the generated agent CLI rules, protected-path deny rules, and
+// preservation of owner-authored JSONC (rules and comments) across reconciles.
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,29 +16,63 @@ try {
   mkdirSync(protectedDir, { recursive: true });
   writeFileSync(paths.protectedPaths, JSON.stringify({ paths: [protectedDir], repos: [] }));
 
+  const cliRules = {
+    "pi-template db *": "allow",
+    "pi-template docs *": "allow",
+    "pi-template notes *": "allow",
+    "pi-template schedule *": "allow",
+    "pi-template status *": "allow",
+    "pi-template doctor *": "allow",
+  };
+  // A home onboarded before the data tools retired: their surfaces go, the owner's bash rule stays last.
+  mkdirSync(dirname(paths.piPermissionConfig), { recursive: true });
+  writeFileSync(paths.piPermissionConfig, `{
+  "permission": {
+    // owner note: older home
+    "query_database": { "*": "allow" },
+    "save_note": { "*": "allow" },
+    "bash": { "*": "allow", "pi-template db *": "deny" }
+  }
+}
+`);
   const allow = savePermissionMode(home);
   assert.equal(allow.permission["*"], "allow");
-  assert.equal((allow.permission.bash as PiPermissionPatternMap)["*"], "allow");
+  assert.equal(allow.permission.query_database, undefined);
+  assert.equal(allow.permission.save_note, undefined);
+  assert.deepEqual(Object.entries(allow.permission.bash as PiPermissionPatternMap), [
+    ["*", "allow"],
+    ...Object.entries(cliRules).filter(([rule]) => rule !== "pi-template db *"),
+    ["pi-template db *", "deny"],
+  ]);
   assert.equal((allow.permission.edit as PiPermissionPatternMap)["*"], "allow");
+  assert.equal(allow.permission.path_write, undefined);
+  const allowFile = parse(readFileSync(paths.piPermissionConfig, "utf8")) as { permission: Record<string, PiPermissionPatternMap> };
+  assert.deepEqual(Object.entries(allowFile.permission.bash), Object.entries(allow.permission.bash as PiPermissionPatternMap));
+  assert.equal("query_database" in allowFile.permission || "save_note" in allowFile.permission, false);
+  assert.ok(readFileSync(paths.piPermissionConfig, "utf8").includes("owner note: older home"));
+  writeFileSync(paths.piPermissionConfig, "{}\n");
 
   const readOnly = savePermissionMode(home, "read-only");
   assert.equal((readOnly.permission.read as PiPermissionPatternMap)["*"], "allow");
-  assert.equal((readOnly.permission.query_database as PiPermissionPatternMap)["*"], "allow");
   assert.equal((readOnly.permission.edit as PiPermissionPatternMap)["*"], "deny");
-  assert.equal((readOnly.permission.save_note as PiPermissionPatternMap)["*"], "deny");
   assert.equal(readOnly.permission["*"], "deny");
-  assert.equal((readOnly.permission.bash as PiPermissionPatternMap)["*"], "deny");
+  assert.deepEqual(readOnly.permission.bash, { "*": "deny", ...cliRules });
+  assert.deepEqual(readOnly.permission.path_write, { "*": "deny" });
+  const readOnlyFile = parse(readFileSync(paths.piPermissionConfig, "utf8")) as { permission: Record<string, PiPermissionPatternMap> };
+  assert.deepEqual(Object.entries(readOnlyFile.permission.bash), Object.entries({ "*": "deny", ...cliRules }));
+  assert.deepEqual(readOnlyFile.permission.path_write, { "*": "deny" });
 
   // Protected paths become generated deny rules for the tree and its contents.
   const pathRules = readOnly.permission.path as PiPermissionPatternMap;
   assert.deepEqual(pathRules[protectedDir], { action: "deny", reason: "Pi Template protected paths" });
   assert.deepEqual(pathRules[`${protectedDir}/*`], { action: "deny", reason: "Pi Template protected paths" });
 
-  // ask: changes prompt, bounded harness state changes stay allowed.
+  // ask: changes prompt, the CLI stays allowed, and leaving read-only lifts its write denial.
   const ask = savePermissionMode(home, "ask");
   assert.equal((ask.permission.edit as PiPermissionPatternMap)["*"], "ask");
-  assert.equal((ask.permission.save_note as PiPermissionPatternMap)["*"], "allow");
-  assert.equal((ask.permission.bash as PiPermissionPatternMap)["*"], "ask");
+  assert.deepEqual(ask.permission.bash, { "*": "ask", ...cliRules });
+  assert.equal(ask.permission.path_write, undefined);
+  assert.equal("path_write" in (parse(readFileSync(paths.piPermissionConfig, "utf8")) as { permission: object }).permission, false);
 
   // Owner-authored JSONC rules and comments survive reconciliation.
   const config = readFileSync(paths.piPermissionConfig, "utf8");

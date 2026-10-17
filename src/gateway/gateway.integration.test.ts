@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   DatabaseQueryAction,
   ScheduleKind,
@@ -11,6 +14,7 @@ import {
   type ScheduleDefinition,
   type ScheduleRun,
 } from "@pi-template/contracts";
+import { agentTransport, gatewayClient, GatewayRequestError } from "./client";
 import { startGateway } from "./server";
 
 const token = "test-gateway-token";
@@ -64,13 +68,22 @@ const run: ScheduleRun = {
   startedAt: null, finishedAt: null, exitCode: null, stdoutTail: null,
   stderrTail: null, error: null, transcriptId: null, attemptCount: 1,
 };
+const commandSchedule: ScheduleDefinition = {
+  ...schedule,
+  id: "schedule-command",
+  name: "nightly command",
+  payload: { kind: ScheduledPayloadKind.Command, argv: ["touch", "/tmp/owned"] },
+};
 const calls: string[] = [];
+const socketDir = mkdtempSync(join(tmpdir(), "pi-template-gateway-"));
+const agentSocket = join(socketDir, "agent.sock");
 
 let gateway: Awaited<ReturnType<typeof startGateway>>;
 try {
   gateway = await startGateway({
     authToken: token,
     port: 0,
+    agentSocket,
     health: () => ({ ...health, port: gateway?.port ?? 0 }),
     ready: readiness,
     notes: {
@@ -79,11 +92,11 @@ try {
       delete: (id) => { calls.push(`note:delete:${id}`); return true; },
     },
     schedules: {
-      list: () => [schedule],
+      list: () => [schedule, commandSchedule],
       create: (input) => { calls.push(`schedule:create:${input.name}`); return schedule; },
       update: (id, input) => { calls.push(`schedule:update:${id}:${input.name}`); return schedule; },
       delete: (id) => { calls.push(`schedule:delete:${id}`); return true; },
-      run: async (id) => ({ ...run, scheduleId: id }),
+      run: async (id) => { calls.push(`schedule:run:${id}`); return { ...run, scheduleId: id }; },
       runById: (id) => id === run.id ? run : undefined,
     },
     query: {
@@ -160,9 +173,48 @@ try {
   })).body.rows[0].sql, "SELECT 1");
   assert.deepEqual(calls, [
     "note:create:remember", "note:delete:note-1", "schedule:create:daily",
-    "schedule:update:schedule-1:daily", "schedule:delete:schedule-1",
+    "schedule:update:schedule-1:daily", "schedule:run:schedule-1", "schedule:delete:schedule-1",
   ]);
-  process.stdout.write("ok — injected Gateway routes authenticate, gate setup, and delegate\n");
+
+  // The agent socket: no token, the same routes, and no way to create, change, or run a command schedule.
+  assert.equal(statSync(agentSocket).mode & 0o777, 0o600);
+  const agent = gatewayClient(agentTransport(agentSocket));
+  calls.length = 0;
+  const refusal = { status: 403, body: {
+    error: "agent callers cannot create, change, or run a command schedule",
+    hint: "the owner runs pi-template schedule add -- <argv>",
+  } };
+  const refused = async (attempt: () => Promise<unknown>): Promise<void> => {
+    await assert.rejects(attempt, (error) => error instanceof GatewayRequestError &&
+      error.status === refusal.status && JSON.stringify(error.body) === JSON.stringify(refusal.body));
+  };
+  const asInput = ({ name, enabled, trigger, payload, cwd, timeoutSeconds }: ScheduleDefinition) =>
+    ({ name, enabled, trigger, payload, cwd, timeoutSeconds });
+  await refused(() => agent.createSchedule(asInput(commandSchedule)));
+  await refused(() => agent.updateSchedule(schedule.id, asInput({ ...schedule, payload: commandSchedule.payload })));
+  await refused(() => agent.updateSchedule(commandSchedule.id, asInput({ ...commandSchedule, payload: schedule.payload })));
+  await refused(() => agent.runSchedule(commandSchedule.id));
+  assert.deepEqual(calls, [], "a refused agent call reaches no schedule method");
+  assert.equal((await agent.health()).pid, process.pid);
+  assert.deepEqual(await agent.listNotes(), notes);
+  await agent.createNote({ body: "from the agent" });
+  await agent.createSchedule(asInput(schedule));
+  await agent.updateSchedule(schedule.id, asInput(schedule));
+  await agent.runSchedule(schedule.id);
+  await agent.deleteSchedule(commandSchedule.id);
+  assert.deepEqual(calls, [
+    "note:create:from the agent", "schedule:create:daily", "schedule:update:schedule-1:daily",
+    "schedule:run:schedule-1", "schedule:delete:schedule-command",
+  ]);
+  calls.length = 0;
+  assert.equal((await json("/schedules", { method: "POST", body: JSON.stringify(asInput(commandSchedule)) })).response.status, 201);
+  assert.equal((await json(`/schedules/${commandSchedule.id}`, { method: "PUT", body: JSON.stringify(asInput(commandSchedule)) })).response.status, 200);
+  assert.equal((await json(`/schedules/${commandSchedule.id}/run`, { method: "POST", body: "{}" })).response.status, 202);
+  assert.deepEqual(calls, [
+    "schedule:create:nightly command", "schedule:update:schedule-command:nightly command", "schedule:run:schedule-command",
+  ], "the owner's token still creates, changes, and runs a command schedule");
+  process.stdout.write("ok — injected Gateway routes authenticate, gate setup, and delegate; the agent socket refuses command schedules\n");
 } finally {
   await gateway.close();
+  rmSync(socketDir, { recursive: true, force: true });
 }

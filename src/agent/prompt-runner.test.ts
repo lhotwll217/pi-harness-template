@@ -71,13 +71,13 @@ const request = (prompt: string, toolsAllow: readonly AgentToolId[], signal = ne
 
 try {
   const run = createScheduledPromptRunner({ home: dir, sessions, readiness: () => true });
-  const first = await run(request("first", [AgentToolId.QueryDatabase]));
-  const second = await run(request("second", [AgentToolId.SaveNote]));
+  const first = await run(request("first", [AgentToolId.Read]));
+  const second = await run(request("second", [AgentToolId.Bash]));
   assert.equal(first.transcriptId, "fresh-1");
   assert.equal(second.transcriptId, "fresh-2");
   assert.deepEqual(created.map(({ tools }) => tools), [
-    [AgentToolId.QueryDatabase],
-    [AgentToolId.SaveNote],
+    [AgentToolId.Read],
+    [AgentToolId.Bash],
   ]);
   assert.ok(created.every(({ headless }) => headless));
   assert.ok(created.every(({ transcriptDir }) => transcriptDir === join(dir, "transcripts")));
@@ -90,14 +90,14 @@ try {
     scheduleName: "isolated prompt",
     trigger: "every",
     taskDirectory: dir,
-    effectiveCapabilities: [AgentToolId.QueryDatabase],
+    effectiveCapabilities: [AgentToolId.Read],
     trustPolicyVersion: 1,
     approvalPolicy: "deny-when-live-approval-is-unavailable",
   });
 
   const controller = new AbortController();
   abortCurrent = undefined;
-  const pending = run(request("wait for abort", [AgentToolId.QueryDatabase], controller.signal));
+  const pending = run(request("wait for abort", [AgentToolId.Read], controller.signal));
   while (!abortCurrent) await new Promise<void>((resolve) => setImmediate(resolve));
   const timeout = new Error("schedule timed out");
   controller.abort(timeout);

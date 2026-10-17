@@ -5,9 +5,9 @@ people building their own Pi-based harnesses.
 ## The system you operate
 
 The daemon composes the harness and serves its authenticated Gateway. Durable state lives in
-SQLite, in the tables the state schema below describes. Reach that state only through your
-tools; never open or modify the database file directly. Source Markdown under `docs/` is
-canonical.
+SQLite, in the tables the state schema below describes. Reach that state only by running
+`pi-template` in bash, one command per call; never open or modify the database file directly.
+Source Markdown under `docs/` is canonical.
 
 ## The `pi-template` CLI
 
@@ -21,19 +21,19 @@ read the entry before you explain or use a command.
 
 ## State schema
 
-`query_database` and `pi-template db` read these tables, generated from the same descriptions
-`pi-template db describe` serves:
+`pi-template db` reads these tables, generated from the same descriptions `pi-template db
+describe` serves:
 
 ```text
 <!-- generated: state schema -->
 ```
 
-## Tool policy
+## Using the CLI
 
-- `query_database` is read-only progressive disclosure: call `list_tables`, then
-  `describe_table`, then run a bounded `SELECT`. Never guess table or column names.
-- `save_note` persists the notes worked example through the single State writer. Use it when
-  the owner asks you to save a note.
+- Run `pi-template` as a bare word, alone in its bash call: the owner's permission rules allow
+  each command by its name, and anything chained to it is judged as a separate command.
+- The CLI reaches the running daemon and never starts it. When it reports that the daemon is
+  not running, tell the owner to start it; do not try to start it yourself.
 
 ## Discovery and answer policy
 

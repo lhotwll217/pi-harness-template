@@ -1,0 +1,310 @@
+// The agent reaches harness state through `pi-template` in bash: faux model turns drive real tool
+// calls through the real session, permission system, sandbox, CLI, agent socket, and daemon.
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import type { Message } from "@earendil-works/pi-ai";
+import {
+  AgentToolId,
+  DEFAULT_TOOL_POSTURE,
+  ONBOARDING_VERSION,
+  ScheduleKind,
+  ScheduleRunStatus,
+  ScheduledPayloadKind,
+  ensureHarnessWorkspace,
+  harnessPaths,
+  saveHarnessSettings,
+  savePermissionMode,
+  type ScheduledPromptRunRequest,
+} from "@pi-template/contracts";
+import { startDaemon } from "../daemon";
+import { connectGateway } from "../gateway";
+import { runPromptSession } from "../cli/interactive";
+import { seedFauxProviderHome } from "../../test/helpers/faux-provider";
+import { acknowledgeAgentDefinition } from "../../test/helpers/onboarding";
+import { createScheduledPromptRunner } from "./prompt-runner";
+import { checkoutRoot, createSandboxAdapter } from "./sandbox";
+
+// A unix socket path holds at most 103 bytes on macOS, and the temporary directory is long.
+const root = realpathSync(mkdtempSync(join(tmpdir(), "wp19-")));
+const home = join(root, "home");
+const cwd = join(root, "task");
+const previousHome = process.env.PI_TEMPLATE_HOME;
+process.env.PI_TEMPLATE_HOME = home;
+const faux = registerFauxProvider();
+let daemon: Awaited<ReturnType<typeof startDaemon>> | undefined;
+
+interface AgentTurn {
+  /** Each bash call's tool result, in order. */
+  results: string[];
+  /** The tools the session offered the model. */
+  tools: string[];
+  /** What the agent answered, as `pi-template prompt` prints it. */
+  answer: string;
+}
+
+const textOf = (message: Message | undefined): string =>
+  message?.role === "toolResult" ? message.content.map((part) => part.type === "text" ? part.text : "").join("") : "";
+
+function offeredTools(messages: readonly Message[]): string[] {
+  const tools = new Set<string>();
+  for (const message of messages) {
+    if (message.role !== "system") continue;
+    for (const tool of message.toolsAdded ?? []) tools.add(tool.name);
+    for (const tool of message.toolsRemoved ?? []) tools.delete(tool.name);
+  }
+  return [...tools];
+}
+
+/** One `pi-template prompt` turn in which the model runs each command in bash, then answers from the results. */
+async function agentTurn(commands: readonly string[], answer: (results: string[]) => string): Promise<AgentTurn> {
+  const turn: AgentTurn = { results: [], tools: [], answer: "" };
+  faux.setResponses([
+    ...commands.map((command, index) => (context: { messages: Message[] }) => {
+      if (index === 0) turn.tools = offeredTools(context.messages);
+      else turn.results.push(textOf(context.messages.at(-1)));
+      return fauxAssistantMessage(fauxToolCall("bash", { command }), { stopReason: "toolUse" });
+    }),
+    (context: { messages: Message[] }) => {
+      turn.results.push(textOf(context.messages.at(-1)));
+      return fauxAssistantMessage(answer(turn.results));
+    },
+  ]);
+  const write = process.stdout.write;
+  process.stdout.write = ((chunk: unknown, encoding?: unknown, callback?: unknown) => {
+    turn.answer += String(chunk);
+    (typeof encoding === "function" ? encoding : callback as (() => void) | undefined)?.();
+    return true;
+  }) as typeof process.stdout.write;
+  try {
+    const exitCode = await runPromptSession({ home, cwd, model: faux.getModel(), message: "Use pi-template in bash." });
+    assert.equal(exitCode, 0);
+  } finally {
+    process.stdout.write = write;
+  }
+  turn.answer = turn.answer.trim();
+  return turn;
+}
+
+const countAnswer = ([listed]: string[]) => `There are ${(JSON.parse(listed!) as unknown[]).length} notes saved.`;
+
+/** The real launcher as the agent's bash would run it with no daemon for its home. */
+async function agentCli(args: readonly string[], agentHome: string) {
+  return await new Promise<{ status: number | null; stdout: string; stderr: string }>((resolveRun, reject) => {
+    const child = spawn(join(checkoutRoot, "pi-template"), args, {
+      cwd: root,
+      env: { PATH: process.env.PATH, HOME: process.env.HOME, PI_TEMPLATE_HOME: agentHome, PI_TEMPLATE_AGENT: "1" },
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
+    child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("close", (status) => resolveRun({ status, stdout, stderr }));
+  });
+}
+
+const NO_DAEMON = '{"error":"the pi-template daemon is not running",' +
+  '"hint":"the owner starts it with `pi-template status`; the agent never starts it"}';
+const COMMAND_SCHEDULE_REFUSAL = '{"status":403,"error":"agent callers cannot create, change, or run a command schedule",' +
+  '"hint":"the owner runs pi-template schedule add -- <argv>"}';
+const sandboxPolicy = (enabled: boolean) => JSON.stringify({
+  enabled,
+  filesystem: { allowedReadRoots: [cwd], allowedWriteRoots: [cwd], deniedReadRoots: [] },
+  process: { allowSubprocesses: true },
+  network: { mode: "deny", allowedDomains: [] },
+});
+
+try {
+  const paths = ensureHarnessWorkspace(home);
+  mkdirSync(join(cwd, "workspace"), { recursive: true });
+  writeFileSync(join(cwd, "workspace", "keep.txt"), "kept\n");
+  seedFauxProviderHome(paths, faux.getModel());
+  acknowledgeAgentDefinition(paths);
+  saveHarnessSettings(home, { alwaysOn: "declined" });
+  writeFileSync(paths.sandboxPolicy, sandboxPolicy(false));
+  writeFileSync(paths.onboardingMarker, JSON.stringify({ version: ONBOARDING_VERSION, completedAt: "2026-10-17T00:00:00.000Z" }));
+
+  // AC3, lane 4: with no daemon, an agent caller reports that the owner must start it, and none starts.
+  const absentHome = join(root, "absent");
+  ensureHarnessWorkspace(absentHome);
+  const noDaemon = await agentCli(["notes", "list"], absentHome);
+  assert.deepEqual(noDaemon, { status: 1, stdout: "", stderr: `${NO_DAEMON}\n` });
+  await new Promise<void>((resolveWait) => setTimeout(resolveWait, 2_000));
+  assert.equal(existsSync(harnessPaths(absentHome).daemonInfo), false, "no daemon published discovery");
+  assert.equal(existsSync(harnessPaths(absentHome).agentSocket), false, "no daemon listens for the agent");
+  for (const [args, command] of [[["onboard", "--permission", "allow"], "pi-template onboard"], [["daemon"], "pi-template daemon"], [[], "pi-template with no command"]] as const) {
+    assert.deepEqual(await agentCli(args, absentHome), {
+      status: 2,
+      stdout: "",
+      stderr: `{"error":"${command} is the owner's command","hint":"the agent runs pi-template db | docs | notes | schedule | status | doctor"}\n`,
+    });
+  }
+
+  daemon = await startDaemon({ port: 0, fingerprintIntervalMs: 60_000, scheduler: { wakeIntervalMs: 60_000 } });
+  const owner = await connectGateway();
+  assert.ok(owner);
+  for (const body of ["renew the certificate", "call the bank", "water the plants"]) await owner.createNote({ body });
+
+  // You see, AC1, lane 1: asked how many notes are saved, the agent answers by running pi-template in bash.
+  const counted = await agentTurn(["pi-template notes list"], countAnswer);
+  assert.equal(counted.answer, "There are 3 notes saved.");
+  assert.deepEqual((JSON.parse(counted.results[0]!) as Array<{ body: string }>).map(({ body }) => body).sort(),
+    ["call the bank", "renew the certificate", "water the plants"]);
+  // Lane 10: Pi's built-in tools from the posture, and no data tool.
+  assert.deepEqual(counted.tools.sort(), [...DEFAULT_TOOL_POSTURE].sort());
+  const queried = await agentTurn(["pi-template db query 'SELECT count(*) AS n FROM notes'"], ([result]) => result!);
+  assert.deepEqual(JSON.parse(queried.results[0]!), { rows: [{ n: 3 }], truncated: false });
+
+  // The agent's bash names this session's home, marks an agent caller, and leaves out the port and the token.
+  const environment = await agentTurn(['echo "$PI_TEMPLATE_HOME $PI_TEMPLATE_AGENT ${PI_TEMPLATE_PORT:-no-port}"'], ([result]) => result!);
+  assert.equal(environment.results[0], `${home} 1 no-port\n`);
+
+  // AC2, lanes 2 and 3: the agent saves a note and schedules a prompt through the CLI.
+  const saved = await agentTurn([
+    'pi-template notes add "buy milk"',
+    'pi-template schedule add --every 1d --name "daily summary" --prompt "summarize the notes kept today"',
+  ], () => "Saved the note and scheduled the summary.");
+  assert.equal((JSON.parse(saved.results[0]!) as { body: string }).body, "buy milk");
+  assert.ok((await owner.listNotes()).some(({ body }) => body === "buy milk"));
+  const scheduled = (await owner.listSchedules()).find(({ name }) => name === "daily summary");
+  assert.deepEqual(scheduled?.payload, { kind: ScheduledPayloadKind.Prompt, prompt: "summarize the notes kept today", toolsAllow: [] });
+
+  // A command schedule, which the daemon runs on the host, stays the owner's.
+  const commandAttempt = await agentTurn(["pi-template schedule add --every 1d --name escalate -- touch /tmp/owned"], ([result]) => result!);
+  assert.equal(commandAttempt.results[0], `${COMMAND_SCHEDULE_REFUSAL}\n\n\nCommand exited with code 1`);
+  assert.equal((await owner.listSchedules()).some(({ name }) => name === "escalate"), false);
+  const ownerCommand = await owner.createSchedule({
+    name: "owner command", enabled: false, cwd: root, timeoutSeconds: 30,
+    trigger: { kind: ScheduleKind.Every, everyMs: 86_400_000, anchorMs: Date.now() },
+    payload: { kind: ScheduledPayloadKind.Command, argv: ["true"] },
+  });
+  const runAttempt = await agentTurn([`pi-template schedule run ${ownerCommand.id}`], ([result]) => result!);
+  assert.equal(runAttempt.results[0], `${COMMAND_SCHEDULE_REFUSAL}\n\n\nCommand exited with code 1`);
+  assert.deepEqual(daemon.state.listRuns(ownerCommand.id), []);
+
+  // Lane 9: doctor, run by the agent, reports that the agent can reach the CLI.
+  const doctor = await agentTurn(["pi-template doctor"], ([result]) => result!);
+  assert.deepEqual(JSON.parse(doctor.results[0]!.replace(/\n\n\nCommand exited with code 1$/, "")).checks.agentCli, {
+    reachable: true,
+    reason: `the agent's bash reaches the daemon through ${paths.agentSocket}`,
+  });
+
+  // AC4, lane 5: an owner deny rule on a pi-template command blocks the agent in every mode.
+  const ownerRules = JSON.parse(readFileSync(paths.piPermissionConfig, "utf8")) as { permission: { bash: Record<string, string> } };
+  writeFileSync(paths.piPermissionConfig, JSON.stringify({
+    permission: { ...ownerRules.permission, bash: { ...ownerRules.permission.bash, "pi-template db *": "deny" } },
+  }));
+  for (const mode of ["allow", "ask", "read-only"] as const) {
+    savePermissionMode(home, mode);
+    const denied = await agentTurn(["pi-template db query 'SELECT count(*) FROM notes'"], ([result]) => result!);
+    assert.equal(denied.results[0], "[pi-permission-system] Denied by policy: 'bash' (rule 'pi-template db *').", mode);
+  }
+  writeFileSync(paths.piPermissionConfig, JSON.stringify(ownerRules));
+
+  // AC5, lane 6: in read-only the agent keeps bash for its CLI, and nothing chained to it runs.
+  savePermissionMode(home, "read-only");
+  const readOnly = await agentTurn([
+    "pi-template notes list",
+    'pi-template db query "SELECT 1"; rm -rf workspace',
+    "pi-template notes list > notes.json",
+  ], countAnswer);
+  assert.equal(readOnly.answer, "There are 4 notes saved.");
+  assert.deepEqual(readOnly.tools.sort(), ["bash", "find", "grep", "ls", "read"]);
+  // The chained rm falls to read-only's `*` deny (here on its path, before its command); the CLI rule never covers it.
+  assert.equal(readOnly.results[1], "[pi-permission-system] Denied by policy: 'path' for tool 'bash' for path 'workspace' (rule '*').");
+  assert.equal(readFileSync(join(cwd, "workspace", "keep.txt"), "utf8"), "kept\n");
+  assert.match(readOnly.results[2]!, /^\[pi-permission-system\] Denied by policy: 'path_write'/);
+  assert.equal(existsSync(join(cwd, "notes.json")), false);
+
+  // Headless ask: a scheduled agent's chained command needs approval nobody can give, so it is refused.
+  savePermissionMode(home, "ask");
+  let chained = "";
+  faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("bash", { command: 'pi-template db query "SELECT 1"; rm -rf workspace' }), { stopReason: "toolUse" }),
+    (context) => { chained = textOf(context.messages.at(-1)); return fauxAssistantMessage("refused"); },
+  ]);
+  const prompt = "Query, then clean up.";
+  const headless: ScheduledPromptRunRequest = {
+    payload: { kind: ScheduledPayloadKind.Prompt, prompt, toolsAllow: [AgentToolId.Bash] },
+    cwd,
+    schedule: {
+      id: "schedule-chain", name: "chain", enabled: true, cwd, timeoutSeconds: 30, revision: 1,
+      trigger: { kind: ScheduleKind.Every, everyMs: 60_000, anchorMs: 0 },
+      payload: { kind: ScheduledPayloadKind.Prompt, prompt, toolsAllow: [AgentToolId.Bash] },
+      createdAt: "2026-10-17T00:00:00.000Z", updatedAt: "2026-10-17T00:00:00.000Z", nextRunAt: null,
+    },
+    runId: "run-chain",
+    signal: new AbortController().signal,
+  };
+  assert.equal((await createScheduledPromptRunner({ home, readiness: () => true })(headless)).exitCode, 0);
+  assert.equal(chained, "[pi-permission-system] This 'bash' call (rule '*') requires approval, but no interactive UI is available.");
+  assert.equal(readFileSync(join(cwd, "workspace", "keep.txt"), "utf8"), "kept\n");
+  savePermissionMode(home, "allow");
+
+  // AC6, lane 8: a schedule an older client stores with a retired tool reaches the CLI through bash and runs.
+  const retired = await owner.createSchedule({
+    name: "count with a retired tool", enabled: false, cwd, timeoutSeconds: 60,
+    trigger: { kind: ScheduleKind.Every, everyMs: 86_400_000, anchorMs: Date.now() },
+    payload: { kind: ScheduledPayloadKind.Prompt, prompt: "How many notes are saved?", toolsAllow: ["query_database" as AgentToolId] },
+  });
+  assert.deepEqual(retired.payload, { kind: ScheduledPayloadKind.Prompt, prompt: "How many notes are saved?", toolsAllow: ["bash"] });
+  let scheduledResult = "";
+  faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("bash", { command: "pi-template notes list" }), { stopReason: "toolUse" }),
+    (context) => {
+      scheduledResult = textOf(context.messages.at(-1));
+      return fauxAssistantMessage(countAnswer([scheduledResult]));
+    },
+  ]);
+  const started = await owner.runSchedule(retired.id);
+  for (let waited = 0; daemon.state.runById(started.id)?.status === ScheduleRunStatus.Running; waited += 50) {
+    if (waited > 60_000) throw new Error("the scheduled run did not finish");
+    await new Promise<void>((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  const finished = daemon.state.runById(started.id);
+  assert.equal(finished?.status, ScheduleRunStatus.Completed, finished?.error ?? finished?.stderrTail ?? "");
+  assert.equal(finished?.stdoutTail, "There are 4 notes saved.");
+
+  // Lane 7: with the sandbox on (macOS), the count is right, daemon.json stays unreadable, and the
+  // only way to the daemon is the agent socket.
+  const sandboxProbe = await createSandboxAdapter().verify(JSON.parse(sandboxPolicy(true)));
+  if (sandboxProbe.unavailable) {
+    process.stdout.write(`SKIP — lane 7 needs the real sandbox: ${sandboxProbe.reason}\n`);
+  } else {
+    writeFileSync(paths.sandboxPolicy, sandboxPolicy(true));
+    const sandboxed = await agentTurn([
+      "pi-template notes list",
+      // A glob slips past the literal-path permission rule, so this reaches the sandbox itself.
+      `cat ${home}/daemon.js?n`,
+      `curl -sS -m 3 http://127.0.0.1:${daemon.port}/health`,
+    ], countAnswer);
+    assert.equal(sandboxed.answer, "There are 4 notes saved.");
+    assert.equal(sandboxed.results[1], `cat: ${paths.daemonInfo}: Operation not permitted\n\n\nCommand exited with code 1`);
+    assert.match(sandboxed.results[2]!, /Command exited with code (7|56)$/);
+    writeFileSync(paths.sandboxPolicy, sandboxPolicy(false));
+  }
+
+  // Lane 4 in a turn: the owner stops the daemon, and the agent's call says so and starts nothing.
+  owner.close();
+  await daemon.close();
+  daemon = undefined;
+  const stopped = await agentTurn(["pi-template notes list"], ([result]) => result!);
+  assert.equal(stopped.results[0], `${NO_DAEMON}\n\n\nCommand exited with code 1`);
+  await new Promise<void>((resolveWait) => setTimeout(resolveWait, 2_000));
+  assert.equal(existsSync(paths.daemonInfo), false);
+  assert.equal(existsSync(paths.agentSocket), false);
+  assert.equal(existsSync(join(dirname(paths.daemonInfo), "logs", "daemon.log")), false, "nothing tried to start a daemon");
+
+  process.stdout.write("ok — the agent counts, saves, and schedules through pi-template in bash; owner denies, read-only, " +
+    "headless ask, command-schedule authority, the sandbox, a retired tool's schedule, doctor, and a stopped daemon all hold\n");
+} finally {
+  if (daemon) await daemon.close();
+  faux.unregister();
+  if (previousHome === undefined) delete process.env.PI_TEMPLATE_HOME;
+  else process.env.PI_TEMPLATE_HOME = previousHome;
+  rmSync(root, { recursive: true, force: true });
+}

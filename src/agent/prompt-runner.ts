@@ -10,7 +10,6 @@ import {
   type ScheduleExecutionResult,
   type ScheduledPromptRunRequest,
 } from "@pi-template/contracts";
-import type { AgentToolDependencies } from "./agent-definition";
 import { piTemplateIdentityPrompt } from "./agent-definition";
 import { createHarnessSession } from "./runtime";
 
@@ -49,7 +48,6 @@ export type PromptSessionFactory = (input: PromptSessionFactoryInput) => Promise
 export interface ScheduledPromptRunnerOptions {
   home?: string;
   sessions?: PromptSessionFactory;
-  resources?: AgentToolDependencies;
   readiness?: () => boolean;
 }
 
@@ -82,15 +80,13 @@ function latestAssistant(messages: readonly unknown[]): unknown {
     !!message && typeof message === "object" && (message as { role?: unknown }).role === "assistant");
 }
 
-function realSessionFactory(resources: AgentToolDependencies): PromptSessionFactory {
+function realSessionFactory(): PromptSessionFactory {
   return async (input) => {
     const manager = SessionManager.create(input.cwd, input.transcriptDir);
     manager.appendCustomEntry("pi-template-provenance", input.provenance);
     const created = await createHarnessSession({
       home: input.home,
       cwd: input.cwd,
-      query: resources.query,
-      notes: resources.notes,
       sessionManager: manager,
       toolsAllow: input.toolsAllow,
       headless: true,
@@ -130,8 +126,7 @@ function realSessionFactory(resources: AgentToolDependencies): PromptSessionFact
 export function createScheduledPromptRunner(options: ScheduledPromptRunnerOptions = {}) {
   const home = harnessPaths(options.home).home;
   const readiness = options.readiness ?? (() => isOnboardingComplete(readMarker(home)));
-  const sessions = options.sessions ?? (options.resources ? realSessionFactory(options.resources) : undefined);
-  if (!sessions) throw new Error("scheduled prompt runner requires a Pi session factory or resource dependencies");
+  const sessions = options.sessions ?? realSessionFactory();
   const transcriptDir = join(home, "transcripts");
 
   return async (request: ScheduledPromptRunRequest): Promise<ScheduleExecutionResult> => {

@@ -6,6 +6,7 @@ import {
   type ScheduleCreateInput,
   type ScheduleRun,
 } from "@pi-template/contracts";
+import { isAgentCaller } from "@pi-template/contracts";
 import type { GatewayClient } from "../../gateway/client";
 import { parseScheduleAdd, type ScheduleAddOptions } from "../args";
 import { emit, noun, verb, withGateway } from "./command";
@@ -74,6 +75,8 @@ export function addSchedule(program: Command): void {
     rules: [
       "Exactly one trigger: --at, --every, or --cron with --tz.",
       "Exactly one payload: --prompt for an isolated agent turn, or the command after --, run as given without a shell.",
+      "A prompt's agent turn gets no tools unless --tool names each one, e.g. --tool bash to reach pi-template.",
+      "Only the owner creates, changes, or runs a command schedule; the agent's call is refused.",
     ],
     examples: [
       'pi-template schedule add --every 1h --name "hourly check" --prompt "inspect state"',
@@ -107,6 +110,7 @@ export function addSchedule(program: Command): void {
     .option("--tz <zone>", "IANA time zone for --cron, e.g. Europe/Helsinki", once("--tz"))
     .option("--name <name>", "display name", once("--name"))
     .option("--prompt <text>", "prompt for an isolated agent turn", once("--prompt"))
+    .option("--tool <id>", "tool the prompt's agent turn may use (repeatable; default none)", (value: string, previous: string[]) => [...previous, value], [])
     .option("--timeout <seconds>", "seconds before the run is stopped (default 600)", once("--timeout"));
   commandAfterDoubleDash(add);
 
@@ -119,10 +123,14 @@ export function addSchedule(program: Command): void {
   }));
 
   verb(schedule, "run <id>", "run a schedule now and wait for it to finish", {
+    rules: [
+      "The agent gets the started run back at once, without waiting: one run happens at a time, so a " +
+        "scheduled agent that waited would wait on itself. It reads the outcome later from schedule_runs with pi-template db.",
+    ],
     examples: ["pi-template schedule run <id from schedule list>"],
   }, async ({ args: [id] }) => await withGateway(async (client) => {
     const accepted = await client.runSchedule(id as string);
-    await emit(runRow(await completedRun(client, accepted.id)));
+    await emit(runRow(isAgentCaller() ? accepted : await completedRun(client, accepted.id)));
     return 0;
   }));
 }

@@ -34,7 +34,7 @@ import {
 } from "@pi-template/contracts";
 import { createLaunchdServiceAdapter, type DaemonServiceAdapter } from "../daemon/ensure";
 import { readAuthFile } from "./auth-file";
-import { runDoctor } from "./doctor";
+import { runDoctor, setupReady } from "./doctor";
 import {
   AGENT_DEFINITION,
   definitionIds,
@@ -238,12 +238,10 @@ function assertRerunCanFinish(answers: OnboardingAnswers, hasCredentials: () => 
   for (const [stage, key] of Object.entries(ANSWERED_STAGES) as [OnboardingStage, keyof OnboardingAnswers][]) {
     requireAnswer(stage, answers[key]);
   }
+  // An entry the definition dropped, such as a retired tool, never forces another review.
   const unacknowledged = unacknowledgedDefinitionIds(answers.resources!.acknowledgedDefinitionIds);
   if (unacknowledged.length) {
     throw new OnboardingStageError("resources", unacknowledgedDefinitionMessage(unacknowledged));
-  }
-  if (!sameJson(answers.resources!.acknowledgedDefinitionIds, definitionIds(AGENT_DEFINITION))) {
-    throw new OnboardingStageError("resources", "resource review must acknowledge the exact agent definition");
   }
 }
 
@@ -273,8 +271,8 @@ export async function runOnboarding(
   const sandbox = dependencies.sandbox ?? createSandboxAdapter();
   const service = dependencies.service ?? createLaunchdServiceAdapter({ platform: dependencies.platform });
   const readiness = dependencies.readiness ?? (async (home) => {
-    const report = await runDoctor({ home });
-    return { ok: report.ok, reason: report.ok ? "doctor passed" : "one or more doctor checks failed" };
+    const ready = setupReady(await runDoctor({ home }));
+    return { ok: ready, reason: ready ? "doctor passed" : "one or more doctor checks failed" };
   });
   const writeRootProblem = answers.sandbox && homeInWriteRootsProblem(paths.home, answers.sandbox.policy);
   if (writeRootProblem) throw new OnboardingStageError("sandbox", writeRootProblem);
@@ -344,13 +342,11 @@ export async function runOnboarding(
         }
         case "resources": {
           const answer = requireAnswer(stage, answers.resources);
-          const expected = definitionIds(AGENT_DEFINITION);
-          if (!sameJson(answer.acknowledgedDefinitionIds, expected)) {
-            throw new Error("resource review must acknowledge the exact agent definition");
-          }
+          const unacknowledged = unacknowledgedDefinitionIds(answer.acknowledgedDefinitionIds);
+          if (unacknowledged.length) throw new Error(unacknowledgedDefinitionMessage(unacknowledged));
           saveHarnessSettings(paths.home, { skillPolicy: answer.skillPolicy });
           writeJsonAtomic(paths.resourceApprovals, {
-            acknowledgedDefinitionIds: answer.acknowledgedDefinitionIds,
+            acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION),
             workspaceContext: answer.approveWorkspaceContext,
           });
           if (

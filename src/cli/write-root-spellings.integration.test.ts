@@ -13,8 +13,6 @@ const realRoot = realpathSync(spelledRoot);
 mkdirSync("/tmp/claude", { recursive: true });
 const builtInRoot = mkdtempSync("/tmp/claude/pi-template-write-root-spellings-");
 const faux = registerFauxProvider();
-const unused = async (): Promise<never> => { throw new Error("not used"); };
-const resources = { query: { listTables: unused, describeTable: unused, runQuery: unused }, notes: { createNote: unused } };
 const recovery = "`pi-template onboard --sandbox-write <dir>`, or turn the sandbox off with `--sandbox-off`";
 const contains = (root: string, home: string) =>
   `sandbox write root ${root} contains the harness home ${home}, so sandboxed bash could rewrite the files that set its own limits. ` +
@@ -72,7 +70,7 @@ try {
       passingOnboardingDependencies(home))).complete, true, `${label}: an off sandbox may record any root`);
     await assert.rejects(onboard([...onboardFlags, "--sandbox"], passingOnboardingDependencies(home)), { message: `sandbox: ${refusal}` }, label);
     turnSandboxOn(home, [writeRoot]);
-    await assert.rejects(createAgentResources({ home, cwd: beside, ...resources }), { message: refusal }, `${label} at session start`);
+    await assert.rejects(createAgentResources({ home, cwd: beside }), { message: refusal }, `${label} at session start`);
   }
 
   const editedHome = join(realRoot, "edited-home");
@@ -83,7 +81,7 @@ try {
     ["elsewhere", "is not an absolute path"],
   ] as const) {
     turnSandboxOn(editedHome, [beside, writeRoot]);
-    await assert.rejects(createAgentResources({ home: editedHome, cwd: beside, ...resources }), { message: misspelled(writeRoot, reason) },
+    await assert.rejects(createAgentResources({ home: editedHome, cwd: beside }), { message: misspelled(writeRoot, reason) },
       `a hand-edited ${writeRoot} root at session start`);
     await assert.rejects(onboard([...onboardFlags, "--sandbox"], passingOnboardingDependencies(editedHome)), {
       message: `sandbox: ${misspelled(writeRoot, reason)}`,
@@ -99,7 +97,7 @@ try {
       `a ${writeRoot} write root at onboarding`);
     assert.equal(existsSync(harnessPaths(home).sandboxPolicy), false, `a ${writeRoot} write root is never recorded`);
     turnSandboxOn(editedHome, [beside, writeRoot]);
-    await assert.rejects(createAgentResources({ home: editedHome, cwd: beside, ...resources }), { message: refusal },
+    await assert.rejects(createAgentResources({ home: editedHome, cwd: beside }), { message: refusal },
       `a hand-edited ${writeRoot} root at session start`);
   }
 

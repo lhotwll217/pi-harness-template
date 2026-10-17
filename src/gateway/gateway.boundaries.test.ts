@@ -17,6 +17,7 @@ const ALLOWED_IMPORTS = new Set([
   "node:crypto",
   "node:fs",
   "node:http",
+  "node:stream",
   "./client",
   "./server",
 ]);

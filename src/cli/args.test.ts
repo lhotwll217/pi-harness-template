@@ -39,4 +39,11 @@ assert.throws(() => parseScheduleAdd({ every: "1m" }, []), /payload/);
 assert.throws(() => parseScheduleAdd({ cron: "* * * * *", prompt: "x" }, []), /--tz/);
 assert.throws(() => parseScheduleAdd({ at: "2026-10-01T09:00:00Z", every: "1m", prompt: "x" }, []), /exactly one/);
 
-process.stdout.write("ok — schedule add preserves exact command argv; bare invocation routes by marker and terminal\n");
+assert.deepEqual(parseScheduleAdd({ every: "1d", prompt: "count the notes", tool: ["bash", "read", "bash"] }, []).payload, {
+  kind: "prompt", prompt: "count the notes", toolsAllow: ["bash", "read"],
+});
+assert.throws(() => parseScheduleAdd({ every: "1d", prompt: "x", tool: ["query_database"] }, []),
+  { message: "unknown --tool query_database; one of bash, edit, find, grep, ls, read, write" });
+assert.throws(() => parseScheduleAdd({ every: "1d", tool: ["bash"] }, ["true"]), { message: "--tool applies only to a --prompt schedule" });
+
+process.stdout.write("ok — schedule add preserves exact command argv and names a prompt's tools; bare invocation routes by marker and terminal\n");

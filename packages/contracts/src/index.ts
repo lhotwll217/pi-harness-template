@@ -42,6 +42,9 @@ export type {
   PiPermissionState,
 } from "./permissions";
 
+// The agent's own CLI: which commands it may run from bash, and how the CLI knows its caller.
+export { AGENT_CALLER_VARIABLE, AGENT_CLI_COMMANDS, OWNER_CLI_COMMANDS, isAgentCaller } from "./agent-cli";
+
 // Onboarding stage vocabulary and pure progression rules for the versioned, resumable,
 // fail-closed setup flow (docs/onboarding.md).
 export {
@@ -56,10 +59,12 @@ export type { OnboardingMarker, OnboardingProgress, OnboardingStage } from "./on
 // (docs/scheduler.md).
 export {
   AgentToolId,
+  RETIRED_AGENT_TOOL_IDS,
   ScheduleKind,
   ScheduledPayloadKind,
   ScheduleRunStatus,
   ScheduleRunTrigger,
+  withoutRetiredAgentTools,
 } from "./scheduling";
 export type {
   ScheduleCreateInput,

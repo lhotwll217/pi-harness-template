@@ -30,8 +30,17 @@ export enum AgentToolId {
   Ls = "ls",
   Read = "read",
   Write = "write",
-  QueryDatabase = "query_database",
-  SaveNote = "save_note",
+}
+
+/** Tools that left the agent definition, and the tool that now reaches what each reached. */
+export const RETIRED_AGENT_TOOL_IDS: Readonly<Record<string, AgentToolId>> = Object.freeze({
+  query_database: AgentToolId.Bash,
+  save_note: AgentToolId.Bash,
+});
+
+/** A stored or client-sent tool list with each retired id replaced by its successor, without duplicates. */
+export function withoutRetiredAgentTools(ids: readonly string[]): string[] {
+  return [...new Set(ids.map((id) => RETIRED_AGENT_TOOL_IDS[id] ?? id))];
 }
 
 export type ScheduleTrigger =

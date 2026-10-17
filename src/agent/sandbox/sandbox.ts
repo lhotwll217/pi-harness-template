@@ -1,7 +1,8 @@
 import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getDefaultWritePaths } from "@anthropic-ai/sandbox-runtime";
-import { harnessPaths } from "@pi-template/contracts";
+import { AGENT_CALLER_VARIABLE, harnessPaths } from "@pi-template/contracts";
 
 export interface SandboxFilesystemPolicy {
   allowedReadRoots: string[];
@@ -18,6 +19,8 @@ export interface SandboxProcessPolicy {
 export interface SandboxNetworkPolicy {
   mode: "deny" | "allowlist";
   allowedDomains: string[];
+  /** Unix sockets bash may connect to (macOS). The runtime sets the agent socket; sandbox.json never records it. */
+  allowedUnixSockets?: string[];
 }
 
 export interface SandboxPolicy {
@@ -75,9 +78,33 @@ const COMMAND_ENVIRONMENT = new Set([
   "GIT_SSH_COMMAND",
 ]);
 
+/** What the agent's `pi-template` needs beyond the allowlist: its home, and that it is an agent caller. */
+export const AGENT_CLI_VARIABLES: readonly string[] = Object.freeze(["PI_TEMPLATE_HOME", AGENT_CALLER_VARIABLE]);
+
 /** The variables a bash command sees, sandbox on or off, so the daemon's credentials stay out. */
-export const commandEnvironment = (source: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv =>
-  Object.fromEntries(Object.entries(source ?? {}).filter(([name]) => COMMAND_ENVIRONMENT.has(name) || name.startsWith("LC_")));
+export const commandEnvironment = (source: NodeJS.ProcessEnv | undefined, also: readonly string[] = []): NodeJS.ProcessEnv =>
+  Object.fromEntries(Object.entries(source ?? {}).filter(([name]) =>
+    COMMAND_ENVIRONMENT.has(name) || name.startsWith("LC_") || also.includes(name)));
+
+/** The checkout whose `pi-template` launcher the agent runs. */
+export const checkoutRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+
+/**
+ * The agent's bash environment: the allowlist, plus `PI_TEMPLATE_HOME` naming the session's home
+ * and `PI_TEMPLATE_AGENT=1`, so its `pi-template` reaches this home's daemon as an agent caller and
+ * never starts one. PATH starts with the checkout, so `pi-template` resolves as the bare word the
+ * permission rules match, then the daemon's Node, which the launcher runs. `PI_TEMPLATE_PORT` is
+ * left out: the agent never uses TCP.
+ */
+export function agentCommandEnvironment(source: NodeJS.ProcessEnv | undefined, home: string): NodeJS.ProcessEnv {
+  const path = [checkoutRoot, dirname(process.execPath), ...(source?.PATH ?? "").split(delimiter)].filter(Boolean);
+  return {
+    ...commandEnvironment(source),
+    PATH: [...new Set(path)].join(delimiter),
+    PI_TEMPLATE_HOME: home,
+    [AGENT_CALLER_VARIABLE]: "1",
+  };
+}
 
 export const sandboxPolicyPath = (home: string): string => harnessPaths(home).sandboxPolicy;
 

@@ -15,7 +15,7 @@ import {
   type GatewayEvent,
   type OnboardingMarker,
 } from "@pi-template/contracts";
-import { createScheduledPromptRunner, runDoctor, type AgentToolDependencies } from "../agent";
+import { createScheduledPromptRunner, runDoctor } from "../agent";
 import { createDocsCatalog } from "../docs-catalog/docs-catalog";
 import { startGateway, type RunningGateway } from "../gateway/server";
 import { Scheduler, type SchedulerOptions } from "../scheduler";
@@ -38,7 +38,6 @@ export interface RunningDaemon {
   fingerprint: string;
   state: State;
   scheduler: Scheduler;
-  toolDependencies: AgentToolDependencies;
   close(): Promise<void>;
 }
 
@@ -105,16 +104,12 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
     describeTable: (table: string) => describeTable(table, dbPath),
     runQuery: (sql: string) => runQuery(sql, dbPath),
   };
-  const toolDependencies: AgentToolDependencies = { query, notes: state };
   let scheduler: Scheduler;
   let docs: ReturnType<typeof createDocsCatalog>;
   try {
     scheduler = new Scheduler(state, {
       ...options.scheduler,
-      promptRunner: options.scheduler?.promptRunner ?? createScheduledPromptRunner({
-        home: paths.home,
-        resources: toolDependencies,
-      }),
+      promptRunner: options.scheduler?.promptRunner ?? createScheduledPromptRunner({ home: paths.home }),
     });
     docs = createDocsCatalog(repoRoot);
   } catch (error) {
@@ -170,6 +165,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
       health,
       ready,
       port: options.port,
+      agentSocket: paths.agentSocket,
       notes: {
         list: () => state.listNotes(),
         create: (input) => state.createNote(input),
@@ -196,6 +192,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
     });
     gatewayPort = gateway.port;
     modules.gateway = true;
+    if (gateway.agentSocketProblem) process.stderr.write(`pi-template: ${gateway.agentSocketProblem}; pi-template doctor reports the agent CLI unreachable\n`);
 
     const info: DaemonInfo = {
       port: gateway.port,
@@ -237,7 +234,6 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
     fingerprint,
     state,
     scheduler,
-    toolDependencies,
     async close() {
       if (closed) return;
       closed = true;

@@ -1,7 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { accessSync, constants, existsSync, readFileSync } from "node:fs";
+import { request } from "node:http";
+import { dirname, join, resolve } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
+  DAEMON_PROBE_TIMEOUT_MS,
   ONBOARDING_VERSION,
   ensureHarnessWorkspace,
   loadHarnessSettings,
@@ -12,7 +14,7 @@ import {
 import { agentDefinitionSummary, unacknowledgedDefinitionMessage } from "./agent-definition";
 import { readAuthFile } from "./auth-file";
 import { inspectWorkspaceSkills, protectedPathsProblem, unacknowledgedResources, type SkippedSkillEntry, type SkippedSkillLink } from "./runtime";
-import { homeInWriteRootsProblem, readSandboxPolicy } from "./sandbox";
+import { checkoutRoot, homeInWriteRootsProblem, readSandboxPolicy } from "./sandbox";
 
 type JsonObject = Record<string, unknown>;
 
@@ -30,6 +32,7 @@ export interface DoctorOptions {
   installRoot?: string;
   taskCwd?: string;
   providerModelVerifier?: (provider: string, model: string) => boolean;
+  platform?: NodeJS.Platform;
 }
 
 export interface DoctorReport {
@@ -61,8 +64,66 @@ export interface DoctorReport {
     protectedPaths: { readable: boolean; reason: string };
     sandbox: { enabled: boolean; verified: boolean; reason: string };
     daemon: { configured: boolean; configuration: "installed" | "declined" | "not-configured" };
+    agentCli: { reachable: boolean; reason: string };
   };
 }
+
+// sun_path holds 104 bytes on macOS and 108 on Linux, NUL included.
+const maxSocketPathBytes = (platform: NodeJS.Platform): number => platform === "darwin" ? 103 : 107;
+
+async function answersHealth(socketPath: string): Promise<string | undefined> {
+  return await new Promise((resolveProblem) => {
+    const probe = request({ socketPath, path: "/health", agent: false, timeout: DAEMON_PROBE_TIMEOUT_MS }, (response) => {
+      let body = "";
+      response.setEncoding("utf8").on("data", (chunk: string) => { body += chunk; });
+      response.on("end", () => {
+        let pid: unknown;
+        try { pid = (JSON.parse(body) as { pid?: unknown }).pid; } catch {}
+        resolveProblem(response.statusCode === 200 && typeof pid === "number" ? undefined : `HTTP ${response.statusCode}`);
+      });
+    });
+    probe.on("timeout", () => probe.destroy(new Error("timed out")));
+    probe.on("error", (error) => resolveProblem((error as NodeJS.ErrnoException).code ?? error.message));
+    probe.end();
+  });
+}
+
+/**
+ * Whether the agent's bash can run `pi-template` against this home's daemon, judged without
+ * spawning a command: a sandboxed command would queue behind any running one, so a scheduled
+ * agent calling `doctor` would wait on itself.
+ */
+async function agentCliReach(socketPath: string, sandboxOn: boolean, platform: NodeJS.Platform): Promise<DoctorReport["checks"]["agentCli"]> {
+  for (const program of [join(checkoutRoot, "pi-template"), join(dirname(process.execPath), "node")]) {
+    try {
+      accessSync(program, constants.X_OK);
+    } catch {
+      return { reachable: false, reason: `${program} is missing or not executable, so the agent's bash cannot run pi-template` };
+    }
+  }
+  if (Buffer.byteLength(socketPath) > maxSocketPathBytes(platform)) {
+    return {
+      reachable: false,
+      reason: `the agent socket ${socketPath} is longer than a unix socket path may be; move the harness home to a shorter path`,
+    };
+  }
+  const problem = await answersHealth(socketPath);
+  if (problem) return { reachable: false, reason: `the daemon does not answer on the agent socket ${socketPath} (${problem})` };
+  if (sandboxOn && platform !== "darwin") {
+    return {
+      reachable: false,
+      reason: `the sandbox admits one unix socket only on macOS, so sandboxed bash on ${platform} cannot reach the daemon`,
+    };
+  }
+  return { reachable: true, reason: `the agent's bash reaches the daemon through ${socketPath}` };
+}
+
+/** Every check that setup decides; the agent CLI also needs a running daemon, so onboarding's readiness leaves it out. */
+export const setupReady = ({ checks }: DoctorReport): boolean =>
+  checks.roots.ok && checks.provider.available && checks.model.available &&
+  checks.resources.reviewed && checks.permission.configured &&
+  checks.protectedPaths.readable &&
+  (checks.sandbox.verified || !checks.sandbox.enabled) && checks.daemon.configured;
 
 export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorReport> {
   const paths = ensureHarnessWorkspace(options.home);
@@ -166,12 +227,11 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
       configured: service === "installed" || service === "declined",
       configuration: service,
     },
+    agentCli: await agentCliReach(paths.agentSocket, sandbox.enabled, options.platform ?? process.platform),
   };
-  const ok = checks.roots.ok && checks.provider.available && checks.model.available &&
-    checks.resources.reviewed && checks.permission.configured &&
-    checks.protectedPaths.readable &&
-    (checks.sandbox.verified || !checks.sandbox.enabled) && checks.daemon.configured;
-  return { ok, checks };
+  const report = { ok: false, checks };
+  report.ok = setupReady(report) && checks.agentCli.reachable;
+  return report;
 }
 
 export function formatDoctorReport(report: DoctorReport): string {
@@ -196,6 +256,7 @@ export function formatDoctorReport(report: DoctorReport): string {
     `Protected paths: ${checks.protectedPaths.readable ? checks.protectedPaths.reason : `unreadable (${checks.protectedPaths.reason})`}`,
     `Sandbox: ${checks.sandbox.enabled ? `on, ${checks.sandbox.verified ? "verified" : "not verified"}` : "off"} (${checks.sandbox.reason})`,
     `Daemon: ${checks.daemon.configuration}`,
+    `Agent CLI: ${checks.agentCli.reachable ? "reachable" : "unreachable"} (${checks.agentCli.reason})`,
     ...checks.resources.notices.map((notice) => `Notice: ${notice}`),
   ].join("\n") + "\n";
 }

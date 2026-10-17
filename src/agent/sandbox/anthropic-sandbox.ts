@@ -8,6 +8,7 @@ import {
   type SandboxRuntimeConfig,
 } from "@anthropic-ai/sandbox-runtime";
 import {
+  AGENT_CLI_VARIABLES,
   SANDBOXED_COMMAND_TERMINATION_GRACE_MS,
   commandEnvironment,
   failedSandboxChecks,
@@ -74,6 +75,7 @@ function runtimeConfig(policy: SandboxPolicy, extraDeniedReads: string[] = []): 
       allowedDomains: policy.network.mode === "deny" ? [] : policy.network.allowedDomains,
       deniedDomains: policy.network.mode === "deny" ? ["*"] : [],
       strictAllowlist: true,
+      ...(policy.network.allowedUnixSockets?.length ? { allowUnixSockets: policy.network.allowedUnixSockets } : {}),
     },
     filesystem: {
       denyRead: [...new Set([...policy.filesystem.deniedReadRoots, ...extraDeniedReads])],
@@ -130,10 +132,11 @@ async function spawnSandboxed(
     const child = spawn(argv[0]!, argv.slice(1), {
       cwd: request.cwd,
       detached: true,
+      // The request's own variables win, so the agent's PATH and home reach its `pi-template`.
       env: {
         ...commandEnvironment(process.env),
-        ...commandEnvironment(request.env),
         ...commandEnvironment(env),
+        ...commandEnvironment(request.env, AGENT_CLI_VARIABLES),
         ...sandboxProxyEnvironment,
       },
       stdio: ["ignore", "pipe", "pipe"],

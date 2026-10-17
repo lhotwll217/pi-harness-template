@@ -34,14 +34,14 @@ const scheduleInput = (name: string): ScheduleCreateInput => ({
 });
 
 try {
-  // Migration v1 is explicit, idempotent, and refuses a database from newer code.
+  // Migrations are explicit, idempotent, and refuse a database from newer code.
   new StateDatabase(dbPath).close();
   const migrated = new DatabaseSync(dbPath, { readOnly: true });
   assert.deepEqual(
     (migrated.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as Array<{ version: number }>).map(
       ({ version }) => version,
     ),
-    [1],
+    [1, 2],
   );
   assert.deepEqual(
     (migrated.prepare(
@@ -54,21 +54,61 @@ try {
   const reapplied = new DatabaseSync(dbPath, { readOnly: true });
   assert.equal(
     (reapplied.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count,
-    1,
-    "reopening an up-to-date database does not reapply v1",
+    2,
+    "reopening an up-to-date database does not reapply a migration",
   );
   reapplied.close();
+
+  // v2: a schedule stored before query_database and save_note retired allows bash in their place.
+  const retiredPath = join(dir, "retired.db");
+  new StateDatabase(retiredPath).close();
+  const v1 = new DatabaseSync(retiredPath);
+  v1.exec("DELETE FROM schema_migrations WHERE version = 2");
+  const insertSchedule = v1.prepare(`INSERT INTO schedules (id, name, enabled, trigger_kind, trigger_json, payload_kind,
+    payload_json, cwd, timeout_seconds, revision, created_at, updated_at) VALUES (?, ?, 1, 'every', '{}', ?, ?, ?, 30, 1, ?, ?)`);
+  const storedPayloads = {
+    "both-retired": { kind: "prompt", prompt: "count", toolsAllow: ["query_database", "read", "save_note"] },
+    "beside-bash": { kind: "prompt", prompt: "count", toolsAllow: ["bash", "query_database"] },
+    "untouched": { kind: "prompt", prompt: "count", toolsAllow: ["read"] },
+    "no-tools": { kind: "prompt", prompt: "count" },
+    "command": { kind: "command", argv: ["query_database"] },
+  };
+  for (const [name, payload] of Object.entries(storedPayloads)) {
+    insertSchedule.run(name, name, payload.kind, JSON.stringify(payload), dir, now, now);
+  }
+  v1.prepare(`INSERT INTO schedule_runs (id, schedule_id, trigger, payload_snapshot_json, cwd, timeout_seconds, status, created_at)
+    VALUES ('run-before', 'both-retired', 'manual', ?, ?, 30, 'completed', ?)`).run(JSON.stringify(storedPayloads["both-retired"]), dir, now);
+  v1.close();
+  new StateDatabase(retiredPath).close();
+  const v2 = new DatabaseSync(retiredPath, { readOnly: true });
+  assert.deepEqual(
+    Object.fromEntries((v2.prepare("SELECT id, payload_json FROM schedules ORDER BY id").all() as Array<{ id: string; payload_json: string }>)
+      .map(({ id: scheduleId, payload_json }) => [scheduleId, JSON.parse(payload_json)])),
+    {
+      "both-retired": { kind: "prompt", prompt: "count", toolsAllow: ["bash", "read"] },
+      "beside-bash": { kind: "prompt", prompt: "count", toolsAllow: ["bash"] },
+      "untouched": { kind: "prompt", prompt: "count", toolsAllow: ["read"] },
+      "no-tools": { kind: "prompt", prompt: "count" },
+      "command": { kind: "command", argv: ["query_database"] },
+    },
+  );
+  assert.deepEqual(
+    JSON.parse((v2.prepare("SELECT payload_snapshot_json FROM schedule_runs").get() as { payload_snapshot_json: string }).payload_snapshot_json),
+    storedPayloads["both-retired"],
+    "a run keeps the tools it ran with",
+  );
+  v2.close();
 
   const future = new DatabaseSync(futurePath);
   future.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
   future.exec("CREATE TABLE durable_truth (value TEXT NOT NULL)");
-  future.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(2, now);
+  future.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(3, now);
   future.prepare("INSERT INTO durable_truth (value) VALUES (?)").run("preserve me");
   future.close();
-  assert.throws(() => new StateDatabase(futurePath), /newer|unknown|version 2/i);
+  assert.throws(() => new StateDatabase(futurePath), /newer schema version 3/);
   const preserved = new DatabaseSync(futurePath, { readOnly: true });
   assert.equal((preserved.prepare("SELECT value FROM durable_truth").get() as { value: string }).value, "preserve me");
-  assert.equal((preserved.prepare("SELECT version FROM schema_migrations").get() as { version: number }).version, 2);
+  assert.equal((preserved.prepare("SELECT version FROM schema_migrations").get() as { version: number }).version, 3);
   preserved.close();
 
   const events: DomainEvent[] = [];

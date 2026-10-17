@@ -49,14 +49,6 @@ try {
   const run = createScheduledPromptRunner({
     home,
     readiness: () => true,
-    resources: {
-      query: {
-        async listTables() { return []; },
-        async describeTable() { throw new Error("not used"); },
-        async runQuery() { throw new Error("not used"); },
-      },
-      notes: { async createNote() { throw new Error("not used"); } },
-    },
   });
   const prompt = "Remove the scratch directory.";
   const request: ScheduledPromptRunRequest = {

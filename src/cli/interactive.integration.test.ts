@@ -5,18 +5,14 @@ import { basename, join, relative } from "node:path";
 import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
-  DatabaseQueryAction,
+  DEFAULT_TOOL_POSTURE,
   ONBOARDING_VERSION,
   ensureHarnessWorkspace,
   saveHarnessSettings,
 } from "@pi-template/contracts";
 import { AGENT_DEFINITION, definitionIds, piTemplateIdentityPrompt } from "../agent";
 import { acknowledgeAgentDefinition } from "../../test/helpers/onboarding";
-import {
-  assertInteractiveTerminal,
-  createInteractiveSessionRuntime,
-  type InteractiveGateway,
-} from "./interactive";
+import { assertInteractiveTerminal, createInteractiveSessionRuntime } from "./interactive";
 
 const root = mkdtempSync(join(tmpdir(), "pi-template-interactive-"));
 const home = join(root, "home");
@@ -24,16 +20,6 @@ const cwd = join(root, "task");
 const protectedRoot = join(root, "private");
 let runtime: Awaited<ReturnType<typeof createInteractiveSessionRuntime>> | undefined;
 let fakeModelLayer: ReturnType<typeof registerFauxProvider> | undefined;
-
-const execute = async (
-  tool: { execute: (...args: any[]) => Promise<{ content: Array<{ type: string; text?: string }> }> },
-  input: Record<string, unknown>,
-): Promise<unknown> => {
-  const result = await tool.execute("call-1", input, undefined, undefined, undefined);
-  const text = result.content.find((part) => part.type === "text")?.text;
-  assert.ok(text);
-  return JSON.parse(text);
-};
 
 try {
   assert.throws(
@@ -71,32 +57,12 @@ try {
   }));
   saveHarnessSettings(home, { permissionMode: "ask" });
 
-  const queries: unknown[] = [];
-  const notes: unknown[] = [];
-  const gateway: InteractiveGateway = {
-    async queryDatabase(request) {
-      queries.push(request);
-      if (request.action === DatabaseQueryAction.ListTables) return [{ name: "notes", description: "Saved notes" }];
-      if (request.action === DatabaseQueryAction.DescribeTable) return { description: "Saved notes", columns: [] };
-      return { rows: [{ body: "through the Gateway" }], truncated: false };
-    },
-    async createNote(input) {
-      notes.push(input);
-      return {
-        id: "note-interactive",
-        body: input.body,
-        createdAt: "2026-07-20T12:00:00.000Z",
-        updatedAt: "2026-07-20T12:00:00.000Z",
-      };
-    },
-  };
   fakeModelLayer = registerFauxProvider();
   fakeModelLayer.setResponses([fauxAssistantMessage("deterministic response")]);
 
   runtime = await createInteractiveSessionRuntime({
     home,
     cwd,
-    gateway,
     model: fakeModelLayer.getModel(),
     sandbox: {
       async verify() { throw new Error("verification is outside the interactive seam"); },
@@ -119,38 +85,12 @@ try {
   ]);
   assert.equal(runtime.runtime.session.systemPrompt.includes(staleMemory.trim()), false);
   assert.ok(runtime.runtime.session.systemPrompt.startsWith(piTemplateIdentityPrompt().trimEnd()));
-  assert.match(runtime.runtime.session.systemPrompt, /list_tables.*describe_table.*bounded `SELECT`/s);
-  assert.match(runtime.runtime.session.systemPrompt, /single State writer/);
+  assert.match(runtime.runtime.session.systemPrompt, /Reach that state only by running\s+`pi-template` in bash/);
 
-  const activeTools = runtime.runtime.session.getActiveToolNames();
-  assert.ok(activeTools.includes("read"));
-  assert.ok(activeTools.includes("edit"));
-  assert.ok(activeTools.includes("write"));
-  assert.ok(activeTools.includes("query_database"));
-  assert.ok(activeTools.includes("save_note"));
-  const definedToolNames = AGENT_DEFINITION
-    .filter((entry) => entry.kind === "tool")
-    .map(({ name }) => name);
-  assert.deepEqual(definedToolNames, ["query_database", "save_note"]);
-  assert.ok(definedToolNames.every((name) => runtime?.runtime.session.getToolDefinition(name)));
+  // Pi's built-in tools from the posture, and no data tool: the agent reaches state through its CLI in bash.
+  assert.deepEqual(runtime.runtime.session.getActiveToolNames(), [...DEFAULT_TOOL_POSTURE]);
   const permissionConfig = readFileSync(paths.piPermissionConfig, "utf8");
   assert.ok(permissionConfig.includes(protectedRoot));
-
-  const queryTool = runtime.runtime.session.getToolDefinition("query_database");
-  const saveTool = runtime.runtime.session.getToolDefinition("save_note");
-  assert.ok(queryTool);
-  assert.ok(saveTool);
-  assert.deepEqual(await execute(queryTool, { action: "list_tables" }), [
-    { name: "notes", description: "Saved notes" },
-  ]);
-  assert.deepEqual(await execute(saveTool, { body: "created interactively" }), {
-    id: "note-interactive",
-    body: "created interactively",
-    createdAt: "2026-07-20T12:00:00.000Z",
-    updatedAt: "2026-07-20T12:00:00.000Z",
-  });
-  assert.deepEqual(queries, [{ action: DatabaseQueryAction.ListTables }]);
-  assert.deepEqual(notes, [{ body: "created interactively" }]);
 
   // No session.prompt here: default tiers are deterministic and model-free
   // (docs/testing.md); live model behavior belongs to the opt-in tiers.
@@ -186,7 +126,7 @@ try {
   assert.equal(readFileSync(firstImport, "utf8").startsWith(standaloneBytes), true);
   assert.equal(readFileSync(secondImport, "utf8").startsWith(standaloneBytes), true);
 
-  process.stdout.write("ok — interactive runtime uses exact resources, Gateway tools, workspace context, owned transcripts, and non-overwriting imports\n");
+  process.stdout.write("ok — interactive runtime uses exact resources, the posture's built-in tools, workspace context, owned transcripts, and non-overwriting imports\n");
 } finally {
   if (runtime) await runtime.runtime.dispose();
   fakeModelLayer?.unregister();

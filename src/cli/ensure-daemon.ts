@@ -17,7 +17,7 @@ import {
   launchdOwnership,
   startDaemonService,
 } from "../daemon/ensure";
-import { gatewayClient, probeGateway, type GatewayClient, type GatewayProbe } from "../gateway/client";
+import { ownerGatewayClient, probeGateway, type GatewayClient, type GatewayProbe } from "../gateway/client";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const READY_DEADLINE_MS = 15_000;
@@ -50,10 +50,11 @@ function processExists(pid: number): boolean {
 type UnreachableProbe = Extract<GatewayProbe, { kind: "unreachable" }>;
 type ReachableProbe = Extract<GatewayProbe, { kind: "reachable" }>;
 
-export type ConfirmedGatewayClient = GatewayClient & { readonly probe: ReachableProbe };
+/** A client whose daemon answered health and readiness, with those answers. */
+export type ConfirmedGatewayClient = GatewayClient & { readonly probe: Pick<ReachableProbe, "health" | "ready"> };
 
 const confirmedClient = (probe: ReachableProbe): ConfirmedGatewayClient =>
-  Object.assign(gatewayClient(probe.info), { probe });
+  Object.assign(ownerGatewayClient(probe.info), { probe });
 
 const launchdRestart = (): string =>
   `\`launchctl kickstart -k gui/${process.getuid?.() ?? "<uid>"}/${DAEMON_LAUNCHD_LABEL}\``;

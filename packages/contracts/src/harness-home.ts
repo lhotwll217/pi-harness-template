@@ -52,6 +52,8 @@ export interface HarnessPaths {
   resourceApprovals: string;
   stateDb: string;
   daemonInfo: string;
+  /** The Gateway listener for agent callers; the daemon grants every request on it agent authority. */
+  agentSocket: string;
   logsDir: string;
 }
 
@@ -78,6 +80,7 @@ export function harnessPaths(home = defaultHome()): HarnessPaths {
     resourceApprovals: join(home, "resource-approvals.json"),
     stateDb: join(home, "state.db"),
     daemonInfo: join(home, "daemon.json"),
+    agentSocket: join(home, "agent.sock"),
     logsDir: join(home, "logs"),
   };
 }

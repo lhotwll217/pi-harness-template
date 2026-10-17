@@ -16,8 +16,6 @@ const home = join(dir, "home");
 const cwd = join(dir, "task");
 const expectedDefinitionIds = [
   "prompt:identity",
-  "tool:query_database",
-  "tool:save_note",
   "skill:writing-for-agents",
   "extension:permission-system",
 ];
@@ -36,19 +34,11 @@ try {
   const resources = await createAgentResources({
     home,
     cwd,
-    query: {
-      listTables: () => [],
-      describeTable: () => ({ description: "", columns: [] }),
-      runQuery: () => ({ rows: [], truncated: false }),
-    },
-    notes: {
-      createNote: () => ({ id: "n", body: "", createdAt: "", updatedAt: "" }),
-    },
   });
 
   assert.deepEqual(definitionIds(AGENT_DEFINITION), expectedDefinitionIds);
   assert.deepEqual(resources.loadedIds, expectedDefinitionIds);
-  assert.deepEqual(resources.tools.map(({ name }) => name), ["query_database", "save_note"]);
+  assert.deepEqual([...new Set(AGENT_DEFINITION.map(({ kind }) => kind))], ["prompt", "skill", "extension"], "the agent definition has no tool entry");
   const bundledSkill = fileURLToPath(new URL("./skills/writing-for-agents/SKILL.md", import.meta.url));
   assert.deepEqual(
     resources.loader.getSkills().skills.map(({ name, filePath }) => [name, filePath]),
@@ -65,19 +55,12 @@ try {
     home,
     cwd,
     ephemeral: true,
-    toolsAllow: [],
-    query: {
-      listTables: () => [],
-      describeTable: () => ({ description: "", columns: [] }),
-      runQuery: () => ({ rows: [], truncated: false }),
-    },
-    notes: { createNote: () => ({ id: "n", body: "", createdAt: "", updatedAt: "" }) },
   });
   try {
     assert.ok(created.session.systemPrompt.startsWith(piTemplateIdentityPrompt().trimEnd()));
     assert.match(created.session.systemPrompt, /Pi Harness Template/);
-    assert.match(created.session.systemPrompt, /list_tables.*describe_table.*bounded `SELECT`/s);
-    assert.match(created.session.systemPrompt, /single State writer/);
+    assert.match(created.session.systemPrompt, /Reach that state only by running\s+`pi-template` in bash/);
+    assert.equal(/query_database|save_note/.test(created.session.systemPrompt), false);
     assert.match(created.session.systemPrompt, /routing frontmatter/);
   } finally {
     created.session.dispose();
@@ -95,12 +78,6 @@ try {
   const approved = await createAgentResources({
     home,
     cwd,
-    query: {
-      listTables: () => [],
-      describeTable: () => ({ description: "", columns: [] }),
-      runQuery: () => ({ rows: [], truncated: false }),
-    },
-    notes: { createNote: () => ({ id: "n", body: "", createdAt: "", updatedAt: "" }) },
   });
   assert.deepEqual(
     approved.loader.getAgentsFiles().agentsFiles,
@@ -118,12 +95,6 @@ try {
     home,
     cwd,
     ephemeral: true,
-    query: {
-      listTables: () => [],
-      describeTable: () => ({ description: "", columns: [] }),
-      runQuery: () => ({ rows: [], truncated: false }),
-    },
-    notes: { createNote: () => ({ id: "n", body: "", createdAt: "", updatedAt: "" }) },
   });
   try {
     const prompt = steered.session.systemPrompt;
@@ -139,12 +110,6 @@ try {
   const bundledOnly = await createAgentResources({
     home,
     cwd,
-    query: {
-      listTables: () => [],
-      describeTable: () => ({ description: "", columns: [] }),
-      runQuery: () => ({ rows: [], truncated: false }),
-    },
-    notes: { createNote: () => ({ id: "n", body: "", createdAt: "", updatedAt: "" }) },
   });
   assert.deepEqual(bundledOnly.loader.getSkills().skills.map(({ name }) => name), ["writing-for-agents"]);
 
@@ -155,12 +120,6 @@ try {
       cwd,
       headless: true,
       ephemeral: true,
-      query: {
-        listTables: () => [],
-        describeTable: () => ({ description: "", columns: [] }),
-        runQuery: () => ({ rows: [], truncated: false }),
-      },
-      notes: { createNote: () => ({ id: "n", body: "", createdAt: "", updatedAt: "" }) },
     }),
     /headless.*auto-approval/i,
   );
@@ -181,12 +140,6 @@ try {
         cwd,
         headless,
         ephemeral: true,
-        query: {
-          listTables: () => [],
-          describeTable: () => ({ description: "", columns: [] }),
-          runQuery: () => ({ rows: [], truncated: false }),
-        },
-        notes: { createNote: () => ({ id: "n", body: "", createdAt: "", updatedAt: "" }) },
       }),
       unacknowledged,
     );
