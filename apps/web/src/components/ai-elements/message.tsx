@@ -1,5 +1,7 @@
 "use client";
 
+// Modified from Vercel AI Elements (Apache-2.0); see apps/web/THIRD_PARTY_NOTICES.
+
 import { Button } from "@/components/ui/button";
 import {
   ButtonGroup,
