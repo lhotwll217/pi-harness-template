@@ -74,9 +74,7 @@ try {
   assert.deepEqual(skills.checks.resources.skillPolicy, { mode: "all-workspace", allowlist: [] });
   assert.deepEqual(skills.checks.resources.workspaceSkills, ["dropped", "linked"]);
   assert.deepEqual(skills.checks.resources.brokenSkillLinksNotLoaded, [{ name: "stale", target: join(home, "moved-skill") }]);
-  assert.deepEqual(skills.checks.resources.skippedSkillLinks, [
-    { name: "relinked", target: join(home, "linked-source"), reason: "repeats linked" },
-  ]);
+  assert.deepEqual(skills.checks.resources.skippedSkillLinks, []);
   assert.deepEqual(skills.checks.resources.skillNameCollisionsNotLoaded, [{
     name: "writing-for-agents",
     path: join(paths.workspaceSkills, "writing-for-agents", "SKILL.md"),
@@ -85,7 +83,6 @@ try {
   assert.ok(formatDoctorReport(skills).includes(
     "Workspace skills (all-workspace): dropped, linked\n" +
     `  broken link, not loaded: stale -> ${join(home, "moved-skill")}\n` +
-    `  skipped link, not loaded: relinked -> ${join(home, "linked-source")} (repeats linked)\n` +
     `  name collision, not loaded: ${join(paths.workspaceSkills, "writing-for-agents", "SKILL.md")} (${vendoredSkill} wins)\n`,
   ));
   assert.deepEqual(skills.checks.resources.notices, []);
@@ -112,7 +109,7 @@ try {
     });
     process.stdout.write(JSON.stringify({
       skipped: doctor.checks.resources.skippedSkillLinks,
-      sessionSkills: session.loader.getSkills().skills.map(({ name }) => name),
+      sessionSkills: session.loader.getSkills().skills.map(({ name }) => name).sort(),
       diagnostics: session.loader.getSkills().diagnostics.filter(({ type }) => type !== "collision").map(({ message }) => message),
     }));
   `;
@@ -131,9 +128,8 @@ try {
       { name: "bundle/x", target: "..", reason: "loops back to workspace/skills, so bundle is not loaded" },
       { name: "bundle/y", target: "..", reason: "loops back to workspace/skills, so bundle is not loaded" },
       { name: "nested/inner/up", target: "..", reason: "loops back to nested, so nested is not loaded" },
-      { name: "relinked", target: join(home, "linked-source"), reason: "repeats linked" },
     ],
-    sessionSkills: ["writing-for-agents", "dropped", "loose", "linked"],
+    sessionSkills: ["dropped", "linked", "loose", "writing-for-agents"],
     diagnostics: [],
   });
   for (const entry of ["a", "b", "bundle", "nested", "LICENSE", "package.json", "loose.md"]) {

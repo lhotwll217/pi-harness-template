@@ -11,7 +11,7 @@ import {
 } from "@pi-template/contracts";
 import { agentDefinitionSummary, unacknowledgedDefinitionMessage } from "./agent-definition";
 import { readAuthFile } from "./auth-file";
-import { inspectWorkspaceSkills, protectedPathsProblem, unacknowledgedResources, type SkippedSkillLink } from "./runtime";
+import { inspectWorkspaceSkills, protectedPathsProblem, unacknowledgedResources, type SkippedSkillEntry, type SkippedSkillLink } from "./runtime";
 import { homeInWriteRootsProblem, readSandboxPolicy } from "./sandbox";
 
 type JsonObject = Record<string, unknown>;
@@ -52,6 +52,7 @@ export interface DoctorReport {
       workspaceSkills: string[];
       brokenSkillLinksNotLoaded: Array<{ name: string; target: string }>;
       skippedSkillLinks: SkippedSkillLink[];
+      skippedSkillEntries: SkippedSkillEntry[];
       skillNameCollisionsNotLoaded: Array<{ name: string; path: string; winner: string }>;
       workspaceContext: boolean;
       notices: string[];
@@ -124,6 +125,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
   const staleMemory = resolve(paths.workspace, "MEMORY.md");
   const notices = [
     ...(unacknowledged.length ? [unacknowledgedDefinitionMessage(unacknowledged)] : []),
+    ...(skills.unreadable ? [`${paths.workspaceSkills} is unreadable (${skills.unreadable}), so no workspace skill loads`] : []),
     ...(existsSync(staleMemory) ? [`${staleMemory} is no longer loaded; ${paths.workspaceInstructions} is the instructions file`] : []),
     ...(settings.skillPolicy.mode === "bundled"
       ? ["skill policy is bundled, so no workspace skill loads; load them with " +
@@ -148,6 +150,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
       workspaceSkills: skills.loaded,
       brokenSkillLinksNotLoaded: skills.brokenLinks,
       skippedSkillLinks: skills.skippedLinks,
+      skippedSkillEntries: skills.skippedEntries,
       skillNameCollisionsNotLoaded: skills.collisions,
       workspaceContext: readObject(paths.resourceApprovals).workspaceContext === true,
       notices,
@@ -186,6 +189,7 @@ export function formatDoctorReport(report: DoctorReport): string {
     `Workspace skills (${policy.mode}${policy.allowlist.length ? `: ${policy.allowlist.join(", ")}` : ""}): ${checks.resources.workspaceSkills.join(", ") || "none"}`,
     ...checks.resources.brokenSkillLinksNotLoaded.map(({ name, target }) => `  broken link, not loaded: ${name} -> ${target}`),
     ...checks.resources.skippedSkillLinks.map(({ name, target, reason }) => `  skipped link, not loaded: ${name} -> ${target} (${reason})`),
+    ...checks.resources.skippedSkillEntries.map(({ name, reason }) => `  skipped entry, not loaded: ${name} (${reason})`),
     ...checks.resources.skillNameCollisionsNotLoaded.map(({ path, winner }) => `  name collision, not loaded: ${path} (${winner} wins)`),
     `Workspace context: ${checks.resources.workspaceContext ? "approved" : "not approved"}`,
     `Permission mode: ${checks.permission.mode} (${checks.permission.configured ? "configured" : "not configured"})`,

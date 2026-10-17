@@ -1,5 +1,6 @@
-import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync, type Dirent } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import ignore, { type Ignore } from "ignore";
 import {
   createBashToolDefinition,
   createLocalBashOperations,
@@ -69,91 +70,224 @@ export interface SkippedSkillLink {
   reason: string;
 }
 
+export interface SkippedSkillEntry {
+  name: string;
+  reason: string;
+}
+
 const contains = (folder: string, path: string): boolean => {
   const fromFolder = relative(folder, path);
   return fromFolder !== ".." && !fromFolder.startsWith(`..${sep}`) && !isAbsolute(fromFolder);
 };
 
-/** Links inside a skill folder that lead back to a folder holding them. Pi walks linked folders
- * without a cycle check, so it would never finish such a folder; this walk mirrors Pi's (stop at
- * SKILL.md, skip dot folders and node_modules) and visits each real folder once. */
-function loopingLinks(entryPath: string, realRoot: string): Array<{ path: string; target: string; loopsTo: string }> {
-  const found: Array<{ path: string; target: string; loopsTo: string }> = [];
-  const visited = new Set<string>();
-  const walk = (dir: string, chain: string[]): void => {
-    const real = realpathSync(dir);
-    visited.add(real);
-    let entries: Dirent[];
+/** Pi follows linked folders with no visited set, so stacked links multiply its walk; a workspace
+ * skill entry that would make Pi walk more folders than this stays out. */
+const MAX_SKILL_ENTRY_FOLDERS = 5000;
+
+// Pi 1.3.0 dist/core/skills.js:12-56 (not exported): ignore files apply below the folder holding them.
+const toPosixPath = (path: string) => path.split(sep).join("/");
+function prefixIgnorePattern(line: string, prefix: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed || (trimmed.startsWith("#") && !trimmed.startsWith("\\#"))) return null;
+  let pattern = line;
+  let negated = false;
+  if (pattern.startsWith("!")) {
+    negated = true;
+    pattern = pattern.slice(1);
+  } else if (pattern.startsWith("\\!")) {
+    pattern = pattern.slice(1);
+  }
+  if (pattern.startsWith("/")) pattern = pattern.slice(1);
+  const prefixed = prefix ? `${prefix}${pattern}` : pattern;
+  return negated ? `!${prefixed}` : prefixed;
+}
+function addIgnoreRules(ig: Ignore, dir: string, rootDir: string): void {
+  const relativeDir = relative(rootDir, dir);
+  const prefix = relativeDir ? `${toPosixPath(relativeDir)}/` : "";
+  for (const filename of [".gitignore", ".ignore", ".fdignore"]) {
+    const ignorePath = join(dir, filename);
+    if (!existsSync(ignorePath)) continue;
     try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    const isFile = (path: string) => { try { return statSync(path).isFile(); } catch { return false; } };
-    if (entries.some(({ name }) => name === "SKILL.md") && isFile(join(dir, "SKILL.md"))) return;
-    for (const entry of entries) {
-      if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
-      const path = join(dir, entry.name);
-      let child: string;
+      const patterns = readFileSync(ignorePath, "utf-8")
+        .split(/\r?\n/)
+        .map((line) => prefixIgnorePattern(line, prefix))
+        .filter((line): line is string => Boolean(line));
+      if (patterns.length > 0) ig.add(patterns);
+    } catch {}
+  }
+}
+
+interface SkillFolderChild {
+  name: string;
+  path: string;
+  link: boolean;
+  directory: boolean;
+  file: boolean;
+}
+
+/** One folder as Pi 1.3.0 reads it (dist/core/skills.js:125-207): a SKILL.md ends the folder;
+ * otherwise Pi visits the children that are not dot entries, node_modules, broken links, or ignored. */
+function readSkillFolder(dir: string, root: string, ig: Ignore): { skillFile?: string; children: SkillFolderChild[] } {
+  if (!existsSync(dir)) return { children: [] };
+  addIgnoreRules(ig, dir, root);
+  const entries = readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name !== "SKILL.md") continue;
+    const path = join(dir, entry.name);
+    let isFile = entry.isFile();
+    if (entry.isSymbolicLink()) {
       try {
-        if (!statSync(path).isDirectory()) continue;
-        child = realpathSync(path);
+        isFile = statSync(path).isFile();
       } catch {
         continue;
       }
-      const loopsTo = [...chain, real].find((folder) => contains(child, folder));
-      if (loopsTo && entry.isSymbolicLink()) found.push({ path, target: readlinkSync(path), loopsTo: child });
-      else if (!visited.has(child)) walk(path, [...chain, real]);
     }
-  };
-  walk(entryPath, [realRoot]);
-  return found;
+    if (isFile && !ig.ignores(toPosixPath(relative(root, path)))) return { skillFile: path, children: [] };
+  }
+  const children: SkillFolderChild[] = [];
+  for (const entry of entries) {
+    if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+    const path = join(dir, entry.name);
+    let directory = entry.isDirectory();
+    let file = entry.isFile();
+    if (entry.isSymbolicLink()) {
+      try {
+        const stats = statSync(path);
+        directory = stats.isDirectory();
+        file = stats.isFile();
+      } catch {
+        continue;
+      }
+    }
+    const relativePath = toPosixPath(relative(root, path));
+    if (ig.ignores(directory ? `${relativePath}/` : relativePath)) continue;
+    children.push({ name: entry.name, path, link: entry.isSymbolicLink(), directory, file });
+  }
+  return { children };
 }
 
-function workspaceSkillEntries(home: string): { paths: string[]; skipped: SkippedSkillLink[] } {
+interface SkillWalk {
+  root: string;
+  ig: Ignore;
+  folders: number;
+  overCap: boolean;
+  files: string[];
+  loops: Map<string, { path: string; target: string; loopsTo: string }>;
+}
+
+/** The skill files Pi would load from one folder, walked path by path as Pi walks; a linked folder
+ * that contains a folder on its own walk chain is a loop and is recorded instead of followed. */
+function walkSkillFolder(dir: string, chain: string[], walk: SkillWalk, includeRootFiles: boolean): void {
+  if (walk.overCap) return;
+  if (++walk.folders > MAX_SKILL_ENTRY_FOLDERS) {
+    walk.overCap = true;
+    return;
+  }
+  let folder: ReturnType<typeof readSkillFolder>;
+  try {
+    folder = readSkillFolder(dir, walk.root, walk.ig);
+  } catch {
+    return;
+  }
+  if (folder.skillFile) {
+    walk.files.push(folder.skillFile);
+    return;
+  }
+  for (const child of folder.children) {
+    if (child.directory) {
+      let real: string;
+      try {
+        real = realpathSync(child.path);
+      } catch {
+        continue;
+      }
+      if (chain.some((ancestor) => contains(real, ancestor))) {
+        const key = join(realpathSync(dir), child.name);
+        if (child.link && !walk.loops.has(key)) walk.loops.set(key, { path: child.path, target: readlinkSync(child.path), loopsTo: real });
+        continue;
+      }
+      walkSkillFolder(child.path, [...chain, real], walk, false);
+      if (walk.overCap) return;
+    } else if (includeRootFiles && child.file && child.name.endsWith(".md")) {
+      walk.files.push(child.path);
+    }
+  }
+}
+
+interface WorkspaceSkillSelection {
+  /** Skill files in Pi's discovery order, handed to Pi one by one so Pi never walks a folder itself. */
+  paths: string[];
+  skippedLinks: SkippedSkillLink[];
+  skippedEntries: SkippedSkillEntry[];
+  unreadable?: string;
+}
+
+/** The workspace skill files Pi would load from the skill policy's paths: workspace/skills as one
+ * root for all-workspace, each allowlisted entry as its own root for allowlist. An entry with a
+ * looping link, or one that would make Pi walk more than MAX_SKILL_ENTRY_FOLDERS folders, stays out. */
+function workspaceSkillEntries(home: string): WorkspaceSkillSelection {
   const paths = ensureHarnessWorkspace(home);
   const policy = loadHarnessSettings(home).skillPolicy;
-  if (policy.mode === "bundled") return { paths: [], skipped: [] };
+  const selection: WorkspaceSkillSelection = { paths: [], skippedLinks: [], skippedEntries: [] };
+  if (policy.mode === "bundled") return selection;
   const root = resolve(paths.workspaceSkills);
-  const names = policy.mode === "all-workspace"
-    ? readdirSync(root).filter((name) => !name.startsWith(".") && name !== "node_modules").sort()
-    : policy.allowlist.filter((name) => /^[A-Za-z0-9._-]+$/.test(name));
-  const candidates = names
-    .map((name) => ({ name, path: resolve(root, name) }))
-    .filter(({ path }) => path.startsWith(root + sep) && existsSync(path))
-    .map((entry) => {
-      const stats = statSync(entry.path);
-      return { ...entry, directory: stats.isDirectory(), file: stats.isFile() };
-    })
-    .filter(({ name, directory, file }) => directory || (file && name.endsWith(".md")))
-    .map((entry) => ({ ...entry, link: lstatSync(entry.path).isSymbolicLink(), real: realpathSync(entry.path) }));
-  const realRoot = realpathSync(root);
+  let realRoot: string;
+  let top: ReturnType<typeof readSkillFolder>;
+  const rootIgnore = ignore();
+  try {
+    realRoot = realpathSync(root);
+    top = readSkillFolder(root, root, rootIgnore);
+  } catch (error) {
+    return { ...selection, unreadable: (error as NodeJS.ErrnoException).code ?? String(error) };
+  }
   const shown = (folder: string) => contains(realRoot, folder) ? relative(realRoot, folder) || "workspace/skills" : folder;
-  const seen = new Map<string, string>();
-  const selected: string[] = [];
-  const skipped: SkippedSkillLink[] = [];
-  for (const entry of [...candidates.filter(({ link }) => !link), ...candidates.filter(({ link }) => link)]) {
-    if (contains(entry.real, realRoot)) {
-      skipped.push({ name: entry.name, target: readlinkSync(entry.path), reason: "loops back to workspace/skills" });
-      continue;
+  const take = (entry: SkillFolderChild, walkRoot: string, ig: Ignore, includeEntryFiles: boolean) => {
+    if (!entry.directory) {
+      if (entry.file && entry.name.endsWith(".md")) selection.paths.push(entry.path);
+      return;
     }
-    if (seen.has(entry.real)) {
-      skipped.push({ name: entry.name, target: readlinkSync(entry.path), reason: `repeats ${seen.get(entry.real)}` });
-      continue;
+    const real = realpathSync(entry.path);
+    if (contains(real, realRoot)) {
+      if (entry.link) selection.skippedLinks.push({ name: entry.name, target: readlinkSync(entry.path), reason: "loops back to workspace/skills" });
+      return;
     }
-    const loops = entry.directory ? loopingLinks(entry.path, realRoot) : [];
-    if (loops.length) {
-      skipped.push(...loops.map(({ path, target, loopsTo }) => ({
+    const walk: SkillWalk = { root: walkRoot, ig, folders: 0, overCap: false, files: [], loops: new Map() };
+    walkSkillFolder(entry.path, [realRoot, real], walk, includeEntryFiles);
+    if (walk.loops.size) {
+      selection.skippedLinks.push(...[...walk.loops.values()].map(({ path, target, loopsTo }) => ({
         name: relative(root, path),
         target,
         reason: `loops back to ${shown(loopsTo)}, so ${entry.name} is not loaded`,
       })));
-      continue;
+    } else if (walk.overCap) {
+      selection.skippedEntries.push({
+        name: entry.name,
+        reason: `Pi would walk more than ${MAX_SKILL_ENTRY_FOLDERS} folders in ${entry.name}, so ${entry.name} is not loaded`,
+      });
+    } else {
+      selection.paths.push(...walk.files);
     }
-    seen.set(entry.real, entry.name);
-    selected.push(entry.path);
+  };
+  if (policy.mode === "all-workspace") {
+    if (top.skillFile) return { ...selection, paths: [top.skillFile] };
+    for (const entry of top.children) take(entry, root, rootIgnore, false);
+  } else {
+    for (const name of policy.allowlist.filter((name) => /^[A-Za-z0-9._-]+$/.test(name))) {
+      const path = resolve(root, name);
+      if (!path.startsWith(root + sep) || !existsSync(path)) continue;
+      const stats = statSync(path);
+      take(
+        { name, path, link: lstatSync(path).isSymbolicLink(), directory: stats.isDirectory(), file: stats.isFile() },
+        path,
+        ignore(),
+        true,
+      );
+    }
   }
-  return { paths: selected, skipped: skipped.sort((left, right) => left.name.localeCompare(right.name)) };
+  const byName = (left: { name: string }, right: { name: string }) => left.name.localeCompare(right.name);
+  selection.skippedLinks.sort(byName);
+  selection.skippedEntries.sort(byName);
+  return selection;
 }
 
 function recordedApprovals(home: string): { acknowledgedDefinitionIds?: unknown; workspaceContext?: unknown } {
@@ -356,8 +490,10 @@ export async function createHarnessSession(options: HarnessSessionOptions) {
 
 export interface WorkspaceSkillReport {
   loaded: string[];
+  unreadable?: string;
   brokenLinks: Array<{ name: string; target: string }>;
   skippedLinks: SkippedSkillLink[];
+  skippedEntries: SkippedSkillEntry[];
   collisions: Array<{ name: string; path: string; winner: string }>;
 }
 
@@ -372,14 +508,20 @@ export function inspectWorkspaceSkills(home?: string): WorkspaceSkillReport {
     includeDefaults: false,
   });
   const bundledNames = new Set(bundled.map(({ name }) => name));
+  let links: string[] = [];
+  try {
+    links = readdirSync(paths.workspaceSkills, { withFileTypes: true }).filter((entry) => entry.isSymbolicLink()).map(({ name }) => name);
+  } catch {}
   return {
     loaded: skills.map(({ name }) => name).filter((name) => !bundledNames.has(name)).sort(),
+    ...(entries.unreadable ? { unreadable: entries.unreadable } : {}),
     // Pi skips a link whose target is gone without a diagnostic.
-    brokenLinks: readdirSync(paths.workspaceSkills, { withFileTypes: true })
-      .filter((entry) => entry.isSymbolicLink() && !existsSync(join(paths.workspaceSkills, entry.name)))
-      .map(({ name }) => ({ name, target: readlinkSync(join(paths.workspaceSkills, name)) }))
+    brokenLinks: links
+      .filter((name) => !existsSync(join(paths.workspaceSkills, name)))
+      .map((name) => ({ name, target: readlinkSync(join(paths.workspaceSkills, name)) }))
       .sort((left, right) => left.name.localeCompare(right.name)),
-    skippedLinks: entries.skipped,
+    skippedLinks: entries.skippedLinks,
+    skippedEntries: entries.skippedEntries,
     collisions: diagnostics.flatMap(({ collision }) => collision
       ? [{ name: collision.name, path: collision.loserPath, winner: collision.winnerPath }]
       : []),
