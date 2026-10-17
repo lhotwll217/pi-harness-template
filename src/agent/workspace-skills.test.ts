@@ -5,10 +5,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
-import { ensureHarnessWorkspace, harnessPaths } from "@pi-template/contracts";
+import { ensureHarnessWorkspace, harnessPaths, saveHarnessSettings } from "@pi-template/contracts";
 import { AGENT_DEFINITION, definitionIds } from "./agent-definition";
 import { runDoctor } from "./doctor";
-import { inspectWorkspaceSkills } from "./runtime";
+import { createAgentResources, inspectWorkspaceSkills } from "./runtime";
 
 const write = (path: string, text: string) => {
   mkdirSync(dirname(path), { recursive: true });
@@ -99,6 +99,16 @@ function piLoads(home: string) {
   };
 }
 
+async function sessionSkills(home: string): Promise<string[]> {
+  const session = await createAgentResources({
+    home,
+    cwd: home,
+    query: { listTables: () => [], describeTable: () => ({ description: "", columns: [] }), runQuery: () => ({ rows: [], truncated: false }) },
+    notes: { createNote: () => ({ id: "n", body: "", createdAt: "", updatedAt: "" }) },
+  } as Parameters<typeof createAgentResources>[0]);
+  return session.loader.getSkills().skills.map(({ name }) => name);
+}
+
 const homes: string[] = [];
 try {
   const everything = newHome();
@@ -177,14 +187,7 @@ try {
   chmodSync(locked.skills, 0o000);
   try {
     assert.deepEqual(inspectWorkspaceSkills(locked.home).loaded, []);
-    const { createAgentResources } = await import("./runtime");
-    const session = await createAgentResources({
-      home: locked.home,
-      cwd: locked.home,
-      query: { listTables: () => [], describeTable: () => ({ description: "", columns: [] }), runQuery: () => ({ rows: [], truncated: false }) },
-      notes: { createNote: () => ({ id: "n", body: "", createdAt: "", updatedAt: "" }) },
-    } as Parameters<typeof createAgentResources>[0]);
-    assert.deepEqual(session.loader.getSkills().skills.map(({ name }) => name), ["writing-for-agents"]);
+    assert.deepEqual(await sessionSkills(locked.home), ["writing-for-agents"]);
     const doctor = await runDoctor({ home: locked.home, providerModelVerifier: () => true });
     assert.deepEqual(doctor.checks.resources.workspaceSkills, []);
     assert.ok(doctor.checks.resources.notices.includes(
@@ -193,6 +196,74 @@ try {
   } finally {
     chmodSync(locked.skills, 0o755);
   }
+
+  for (const mode of [0o644, 0o444]) {
+    const listed = newHome();
+    homes.push(listed.home);
+    described(join(listed.skills, "inside", "SKILL.md"));
+    described(join(listed.skills, "nested", "deeper", "SKILL.md"));
+    described(join(listed.outside, "target", "SKILL.md"));
+    symlinkSync(join(listed.outside, "target"), join(listed.skills, "linked"));
+    chmodSync(listed.skills, mode);
+    const label = `workspace/skills at mode ${mode.toString(8)}`;
+    try {
+      assert.deepEqual(piLoads(listed.home).loaded, [], `${label}: Pi loads no skill`);
+      assert.deepEqual(await sessionSkills(listed.home), ["writing-for-agents"], `${label}: a session starts with no workspace skill`);
+      const doctor = await runDoctor({ home: listed.home, providerModelVerifier: () => true });
+      assert.deepEqual(doctor.checks.resources.workspaceSkills, [], label);
+      assert.deepEqual(doctor.checks.resources.brokenSkillLinksNotLoaded, [], label);
+      assert.ok(doctor.checks.resources.notices.includes(
+        `${listed.skills} is unreadable (EACCES), so no workspace skill loads`,
+      ), `${label}: ${JSON.stringify(doctor.checks.resources.notices)}`);
+    } finally {
+      chmodSync(listed.skills, 0o755);
+    }
+  }
+
+  const partly = newHome();
+  homes.push(partly.home);
+  described(join(partly.skills, "fine", "SKILL.md"));
+  described(join(partly.skills, "listed-pack", "inner", "SKILL.md"));
+  described(join(partly.skills, "sealed", "SKILL.md"));
+  chmodSync(join(partly.skills, "listed-pack"), 0o644);
+  chmodSync(join(partly.skills, "sealed"), 0o000);
+  try {
+    assert.deepEqual(inspectWorkspaceSkills(partly.home).loaded, piLoads(partly.home).loaded);
+    assert.deepEqual(await sessionSkills(partly.home), ["writing-for-agents", "fine"]);
+    const doctor = await runDoctor({ home: partly.home, providerModelVerifier: () => true });
+    assert.deepEqual(doctor.checks.resources.skippedSkillEntries, [
+      { name: "listed-pack/inner", reason: "unreadable (EACCES), so nothing in it loads" },
+      { name: "sealed", reason: "unreadable (EACCES), so nothing in it loads" },
+    ]);
+  } finally {
+    chmodSync(join(partly.skills, "listed-pack"), 0o755);
+    chmodSync(join(partly.skills, "sealed"), 0o755);
+  }
+
+  const aliased = newHome();
+  homes.push(aliased.home);
+  described(join(aliased.skills, "holder", "SKILL.md"), "a");
+  described(join(aliased.outside, "nameless", "SKILL.md"));
+  symlinkSync(join(aliased.outside, "nameless"), join(aliased.skills, "a"));
+  symlinkSync(join(aliased.outside, "nameless"), join(aliased.skills, "b"));
+  saveHarnessSettings(aliased.home, { skillPolicy: { mode: "allowlist", allowlist: ["holder", "a", "b"] } });
+  assert.deepEqual(await sessionSkills(aliased.home), ["writing-for-agents", "a"], "the session drops a second path to the same file");
+  const aliasedReport = inspectWorkspaceSkills(aliased.home);
+  assert.deepEqual({ loaded: aliasedReport.loaded, collisions: aliasedReport.collisions }, {
+    loaded: ["a"],
+    collisions: [{ name: "a", path: join(aliased.skills, "a", "SKILL.md"), winner: join(aliased.skills, "holder", "SKILL.md") }],
+  }, "doctor reports what the session loads");
+
+  const wide = newHome();
+  homes.push(wide.home);
+  let bottom = join(wide.skills, "deep");
+  for (let level = 0; level < 400; level += 1) bottom = join(bottom, "d");
+  for (let index = 0; index < 4500; index += 1) mkdirSync(join(bottom, `w${index}`), { recursive: true });
+  described(join(bottom, "w0", "SKILL.md"), "bottom");
+  const wideStarted = Date.now();
+  assert.deepEqual(inspectWorkspaceSkills(wide.home).loaded, ["bottom"]);
+  const wideSeconds = (Date.now() - wideStarted) / 1000;
+  assert.ok(wideSeconds < 5, `walking 400 folders deep and 4,500 wide took ${wideSeconds} s`);
 
   process.stdout.write("ok — workspace skills load as Pi loads workspace/skills, bounded, and an unreadable folder loads none\n");
 } finally {

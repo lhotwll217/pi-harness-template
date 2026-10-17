@@ -1,5 +1,5 @@
-import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { accessSync, constants, existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync } from "node:fs";
+import { join, relative, resolve, sep } from "node:path";
 import ignore, { type Ignore } from "ignore";
 import {
   createBashToolDefinition,
@@ -75,10 +75,20 @@ export interface SkippedSkillEntry {
   reason: string;
 }
 
-const contains = (folder: string, path: string): boolean => {
-  const fromFolder = relative(folder, path);
-  return fromFolder !== ".." && !fromFolder.startsWith(`..${sep}`) && !isAbsolute(fromFolder);
-};
+const containsRealPath = (folder: string, path: string): boolean =>
+  path === folder || path.startsWith(folder.endsWith(sep) ? folder : `${folder}${sep}`);
+
+const errorCode = (error: unknown): string => (error as NodeJS.ErrnoException).code ?? String(error);
+const unreadableEntry = (name: string, error: unknown): SkippedSkillEntry =>
+  ({ name, reason: `unreadable (${errorCode(error)}), so nothing in it loads` });
+
+function linkTarget(path: string): string | undefined {
+  try {
+    return readlinkSync(path);
+  } catch {
+    return undefined;
+  }
+}
 
 /** Pi follows linked folders with no visited set, so stacked links multiply its walk; a workspace
  * skill entry that would make Pi walk more folders than this stays out. */
@@ -128,7 +138,12 @@ interface SkillFolderChild {
 /** One folder as Pi 1.3.0 reads it (dist/core/skills.js:125-207): a SKILL.md ends the folder;
  * otherwise Pi visits the children that are not dot entries, node_modules, broken links, or ignored. */
 function readSkillFolder(dir: string, root: string, ig: Ignore): { skillFile?: string; children: SkillFolderChild[] } {
-  if (!existsSync(dir)) return { children: [] };
+  try {
+    statSync(dir);
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return { children: [] };
+    throw error;
+  }
   addIgnoreRules(ig, dir, root);
   const entries = readdirSync(dir, { withFileTypes: true });
   for (const entry of entries) {
@@ -173,11 +188,12 @@ interface SkillWalk {
   overCap: boolean;
   files: string[];
   loops: Map<string, { path: string; target: string; loopsTo: string }>;
+  unreadable: Map<string, unknown>;
 }
 
 /** The skill files Pi would load from one folder, walked path by path as Pi walks; a linked folder
  * that contains a folder on its own walk chain is a loop and is recorded instead of followed. */
-function walkSkillFolder(dir: string, chain: string[], walk: SkillWalk, includeRootFiles: boolean): void {
+function walkSkillFolder(dir: string, realAncestors: string[], walk: SkillWalk, includeRootFiles: boolean): void {
   if (walk.overCap) return;
   if (++walk.folders > MAX_SKILL_ENTRY_FOLDERS) {
     walk.overCap = true;
@@ -186,7 +202,8 @@ function walkSkillFolder(dir: string, chain: string[], walk: SkillWalk, includeR
   let folder: ReturnType<typeof readSkillFolder>;
   try {
     folder = readSkillFolder(dir, walk.root, walk.ig);
-  } catch {
+  } catch (error) {
+    walk.unreadable.set(dir, error);
     return;
   }
   if (folder.skillFile) {
@@ -197,16 +214,21 @@ function walkSkillFolder(dir: string, chain: string[], walk: SkillWalk, includeR
     if (child.directory) {
       let real: string;
       try {
-        real = realpathSync(child.path);
-      } catch {
+        real = child.link ? realpathSync(child.path) : join(realAncestors[realAncestors.length - 1], child.name);
+      } catch (error) {
+        walk.unreadable.set(child.path, error);
         continue;
       }
-      if (chain.some((ancestor) => contains(real, ancestor))) {
-        const key = join(realpathSync(dir), child.name);
-        if (child.link && !walk.loops.has(key)) walk.loops.set(key, { path: child.path, target: readlinkSync(child.path), loopsTo: real });
+      if (realAncestors.some((ancestor) => containsRealPath(real, ancestor))) {
+        const key = join(realAncestors[realAncestors.length - 1], child.name);
+        if (child.link && !walk.loops.has(key)) {
+          walk.loops.set(key, { path: child.path, target: linkTarget(child.path) ?? real, loopsTo: real });
+        }
         continue;
       }
-      walkSkillFolder(child.path, [...chain, real], walk, false);
+      realAncestors.push(real);
+      walkSkillFolder(child.path, realAncestors, walk, false);
+      realAncestors.pop();
       if (walk.overCap) return;
     } else if (includeRootFiles && child.file && child.name.endsWith(".md")) {
       walk.files.push(child.path);
@@ -236,23 +258,33 @@ function workspaceSkillEntries(home: string): WorkspaceSkillSelection {
   const rootIgnore = ignore();
   try {
     realRoot = realpathSync(root);
+    // A folder that can be listed but not entered yields no readable file, so Pi loads nothing from it.
+    accessSync(root, constants.R_OK | constants.X_OK);
     top = readSkillFolder(root, root, rootIgnore);
   } catch (error) {
-    return { ...selection, unreadable: (error as NodeJS.ErrnoException).code ?? String(error) };
+    return { ...selection, unreadable: errorCode(error) };
   }
-  const shown = (folder: string) => contains(realRoot, folder) ? relative(realRoot, folder) || "workspace/skills" : folder;
+  const shown = (folder: string) => containsRealPath(realRoot, folder) ? relative(realRoot, folder) || "workspace/skills" : folder;
+  const unreadable = (path: string, error: unknown) => selection.skippedEntries.push(unreadableEntry(relative(root, path), error));
   const take = (entry: SkillFolderChild, walkRoot: string, ig: Ignore, includeEntryFiles: boolean) => {
     if (!entry.directory) {
       if (entry.file && entry.name.endsWith(".md")) selection.paths.push(entry.path);
       return;
     }
-    const real = realpathSync(entry.path);
-    if (contains(real, realRoot)) {
-      if (entry.link) selection.skippedLinks.push({ name: entry.name, target: readlinkSync(entry.path), reason: "loops back to workspace/skills" });
+    let real: string;
+    try {
+      real = realpathSync(entry.path);
+    } catch (error) {
+      unreadable(entry.path, error);
       return;
     }
-    const walk: SkillWalk = { root: walkRoot, ig, folders: 0, overCap: false, files: [], loops: new Map() };
+    if (containsRealPath(real, realRoot)) {
+      if (entry.link) selection.skippedLinks.push({ name: entry.name, target: linkTarget(entry.path) ?? real, reason: "loops back to workspace/skills" });
+      return;
+    }
+    const walk: SkillWalk = { root: walkRoot, ig, folders: 0, overCap: false, files: [], loops: new Map(), unreadable: new Map() };
     walkSkillFolder(entry.path, [realRoot, real], walk, includeEntryFiles);
+    for (const [path, error] of walk.unreadable) unreadable(path, error);
     if (walk.loops.size) {
       selection.skippedLinks.push(...[...walk.loops.values()].map(({ path, target, loopsTo }) => ({
         name: relative(root, path),
@@ -274,10 +306,18 @@ function workspaceSkillEntries(home: string): WorkspaceSkillSelection {
   } else {
     for (const name of policy.allowlist.filter((name) => /^[A-Za-z0-9._-]+$/.test(name))) {
       const path = resolve(root, name);
-      if (!path.startsWith(root + sep) || !existsSync(path)) continue;
-      const stats = statSync(path);
+      if (!path.startsWith(root + sep)) continue;
+      let stats: ReturnType<typeof statSync>;
+      let link: boolean;
+      try {
+        stats = statSync(path);
+        link = lstatSync(path).isSymbolicLink();
+      } catch (error) {
+        if (errorCode(error) !== "ENOENT") unreadable(path, error);
+        continue;
+      }
       take(
-        { name, path, link: lstatSync(path).isSymbolicLink(), directory: stats.isDirectory(), file: stats.isFile() },
+        { name, path, link, directory: stats.isDirectory(), file: stats.isFile() },
         path,
         ignore(),
         true,
@@ -287,6 +327,17 @@ function workspaceSkillEntries(home: string): WorkspaceSkillSelection {
   const byName = (left: { name: string }, right: { name: string }) => left.name.localeCompare(right.name);
   selection.skippedLinks.sort(byName);
   selection.skippedEntries.sort(byName);
+  // Pi 1.3.0's resource loader (mergePaths) drops a second path to the same real file before loading.
+  const realFiles = new Set<string>();
+  selection.paths = selection.paths.filter((path) => {
+    let real = path;
+    try {
+      real = realpathSync(path);
+    } catch {}
+    if (realFiles.has(real)) return false;
+    realFiles.add(real);
+    return true;
+  });
   return selection;
 }
 
@@ -508,20 +559,28 @@ export function inspectWorkspaceSkills(home?: string): WorkspaceSkillReport {
     includeDefaults: false,
   });
   const bundledNames = new Set(bundled.map(({ name }) => name));
-  let links: string[] = [];
-  try {
-    links = readdirSync(paths.workspaceSkills, { withFileTypes: true }).filter((entry) => entry.isSymbolicLink()).map(({ name }) => name);
-  } catch {}
+  const brokenLinks: WorkspaceSkillReport["brokenLinks"] = [];
+  const skippedEntries = [...entries.skippedEntries];
+  if (!entries.unreadable) {
+    let links: string[] = [];
+    try {
+      links = readdirSync(paths.workspaceSkills, { withFileTypes: true }).filter((entry) => entry.isSymbolicLink()).map(({ name }) => name);
+    } catch {}
+    for (const name of links.filter((name) => !existsSync(join(paths.workspaceSkills, name)))) {
+      try {
+        brokenLinks.push({ name, target: readlinkSync(join(paths.workspaceSkills, name)) });
+      } catch (error) {
+        skippedEntries.push(unreadableEntry(name, error));
+      }
+    }
+  }
+  const byName = (left: { name: string }, right: { name: string }) => left.name.localeCompare(right.name);
   return {
     loaded: skills.map(({ name }) => name).filter((name) => !bundledNames.has(name)).sort(),
     ...(entries.unreadable ? { unreadable: entries.unreadable } : {}),
-    // Pi skips a link whose target is gone without a diagnostic.
-    brokenLinks: links
-      .filter((name) => !existsSync(join(paths.workspaceSkills, name)))
-      .map((name) => ({ name, target: readlinkSync(join(paths.workspaceSkills, name)) }))
-      .sort((left, right) => left.name.localeCompare(right.name)),
+    brokenLinks: brokenLinks.sort(byName),
     skippedLinks: entries.skippedLinks,
-    skippedEntries: entries.skippedEntries,
+    skippedEntries: skippedEntries.sort(byName),
     collisions: diagnostics.flatMap(({ collision }) => collision
       ? [{ name: collision.name, path: collision.loserPath, winner: collision.winnerPath }]
       : []),

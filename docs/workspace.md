@@ -77,8 +77,9 @@ in `workspace/skills/` (`loadSkillsFromDirInternal` in
   load, with or without a `description`.
 - Pi skips names starting with `.`, `node_modules`, and anything a
   `.gitignore`, `.ignore`, or `.fdignore` in `workspace/skills/` or below
-  excludes. Links count as what they point to; a file reached through two links
-  loads once.
+  excludes. Links count as what they point to; a file reached through two
+  links loads once, through the first. A `SKILL.md` without a `name` takes
+  that first link's name, and does not load if another skill already has it.
 - A `SKILL.md` directly in `workspace/skills/` makes that folder the only skill.
 
 Under `allowlist`, Pi reads each named entry as its own root, so a named folder
@@ -101,14 +102,16 @@ skill policy beside the loaded workspace skills and lists what did not load:
 - `resources.skippedSkillEntries`: an entry where Pi would walk more than 5000
   folders. Pi walks a folder once for every path that reaches it, so stacked
   links multiply the walk; past this bound, one entry would stall every
-  session, doctor, and the daemon that runs them.
+  session, doctor, and the daemon that runs them. Also a folder the harness
+  cannot read or resolve, with its error code (`EACCES`). Pi skips such a
+  folder without a diagnostic and loads the rest of its entry.
 - `resources.skillNameCollisionsNotLoaded`: a skill whose name another skill
   already took.
 
 Doctor also notes, under `resources.notices`, a `workspace/skills/` it cannot
-read (sessions then start with no workspace skills), a `workspace/MEMORY.md`
-that no longer loads, and a `bundled` policy that keeps every workspace skill
-out, with the command that changes it.
+read or enter (sessions then start with no workspace skills), a
+`workspace/MEMORY.md` that no longer loads, and a `bundled` policy that keeps
+every workspace skill out, with the command that changes it.
 
 ## The dividing question
 
