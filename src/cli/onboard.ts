@@ -214,7 +214,8 @@ function answersFromFlags(flags: OnboardFlags, recorded: OnboardingAnswers): Onb
   const unacknowledged = unacknowledgedDefinitionIds(acknowledgedDefinitionIds);
   if (resourceFlags.length && unacknowledged.length) {
     throw new CliUsageError(
-      `${resourceFlags.join(" and ")} need --acknowledge-resources: ${unacknowledgedDefinitionMessage(unacknowledged)}`,
+      `${new Intl.ListFormat("en").format(resourceFlags)} ${resourceFlags.length > 1 ? "need" : "needs"} --acknowledge-resources: ` +
+        unacknowledgedDefinitionMessage(unacknowledged),
     );
   }
   return {

@@ -445,6 +445,10 @@ try {
     acknowledgedDefinitionIds: currentIds.filter((id) => id !== "skill:writing-for-agents"),
     workspaceContext: false,
   }));
+  await assert.rejects(onboard(["--non-interactive", "--skill", "mine"], importedDefaultDependencies), {
+    name: "CliUsageError",
+    message: /^--skill needs --acknowledge-resources: /,
+  });
   await assert.rejects(onboard(["--non-interactive", "--approve-workspace-context", "--skill", "mine"], importedDefaultDependencies), {
     name: "CliUsageError",
     message: "--approve-workspace-context and --skill need --acknowledge-resources: the agent definition gained entries the resource review did not acknowledge: skill:writing-for-agents; " +
