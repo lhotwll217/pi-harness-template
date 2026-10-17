@@ -2,6 +2,7 @@
 // model: streamed replies, list/rename/delete, cancel, one writer per chat, live events, the
 // session start checks on every turn, and shutdown mid-turn.
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +20,7 @@ import {
 } from "@pi-template/contracts";
 import { seedFauxProviderHome } from "../../test/helpers/faux-provider";
 import { acknowledgeAgentDefinition } from "../../test/helpers/onboarding";
+import { checkoutRoot } from "../agent/sandbox";
 import { startDaemon } from "./lifecycle";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-chats-")));
@@ -106,6 +108,22 @@ async function eventsUntilNote(from: number): Promise<GatewayEvent[]> {
   }
   const slice = heard.slice(from);
   return slice.slice(0, slice.findIndex((event) => event.kind === GatewayEventKind.NotesChanged));
+}
+
+/** The real CLI against this daemon; `onStdout` sees each chunk and may signal the child. */
+async function cli(args: readonly string[], onStdout?: (chunk: string, child: ReturnType<typeof spawn>) => void) {
+  return await new Promise<{ status: number | null; stdout: string; stderr: string }>((resolveRun, reject) => {
+    const child = spawn(join(checkoutRoot, "pi-template"), args, {
+      env: { PATH: process.env.PATH, HOME: process.env.HOME, PI_TEMPLATE_HOME: home, PI_TEMPLATE_PORT: "0" },
+      timeout: 30_000,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; onStdout?.(chunk, child); });
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("close", (status) => resolveRun({ status, stdout, stderr }));
+  });
 }
 
 const types = (stream: ChatStreamEvent[]) => stream.map((event) => event.type);
@@ -209,6 +227,20 @@ try {
   assert.deepEqual((await call("GET", "/workspace/file?path=../daemon.json")).body.code, "invalid_path");
   assert.deepEqual((await call("GET", "/chats/c4")).body.messages[1].parts.map((part: any) => [part.type, part.status ?? ""]),
     [["tool", "done"], ["text", ""]]);
+
+  // The owner's CLI sends to a chat through the Gateway; Ctrl-C cancels the turn.
+  faux.setResponses([fauxAssistantMessage("hi")]);
+  assert.deepEqual(await cli(["prompt", "--chat", "c8", "say", "hi"]), { status: 0, stdout: "hi\n", stderr: "" });
+  faux.setResponses([fauxAssistantMessage("hi")]);
+  const json = await cli(["prompt", "--json", "--chat", "c8", "again"]);
+  assert.deepEqual(json.stdout.trim().split("\n").map((line) => JSON.parse(line).type), ["turn.started", "text.delta", "turn.finished"]);
+  faux.setResponses([fauxAssistantMessage(LONG_REPLY)]);
+  let interruptedOnce = false;
+  const cancelledByCtrlC = await cli(["prompt", "--chat", "c8", "long"], (_chunk, child) => {
+    if (!interruptedOnce) { interruptedOnce = true; child.kill("SIGINT"); }
+  });
+  assert.deepEqual([cancelledByCtrlC.status, cancelledByCtrlC.stderr], [1, '{"error":"the chat turn was cancelled"}\n']);
+  assert.equal((await call("GET", "/chats/c8")).body.messages.at(-1).status, "cancelled");
 
   // Ask mode: a headless chat has no one to ask, so a call that would ask is denied, as a tool result.
   savePermissionMode(home, "ask");
