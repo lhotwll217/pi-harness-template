@@ -33,6 +33,8 @@ import {
   type OnboardingDependencies,
   type OnboardingResult,
   type SandboxPolicy,
+  unacknowledgedDefinitionIds,
+  unacknowledgedDefinitionMessage,
 } from "../agent";
 import { CliUsageError } from "./args";
 
@@ -201,6 +203,21 @@ function answersFromFlags(flags: OnboardFlags, recorded: OnboardingAnswers): Onb
   const domains = flags.repeated.get("--network-domain");
   const workspaceSkills = flags.values.get("--workspace-skills");
   const skills = flags.repeated.get("--skill");
+  const resourceFlags = [
+    ...(flags.approveWorkspaceContext ? ["--approve-workspace-context"] : []),
+    ...(workspaceSkills !== undefined ? ["--workspace-skills"] : []),
+    ...(skills !== undefined ? ["--skill"] : []),
+  ];
+  const acknowledgedDefinitionIds = flags.acknowledgeResources
+    ? definitionIds(AGENT_DEFINITION)
+    : recorded.resources?.acknowledgedDefinitionIds ?? [];
+  const unacknowledged = unacknowledgedDefinitionIds(acknowledgedDefinitionIds);
+  if (resourceFlags.length && unacknowledged.length) {
+    throw new CliUsageError(
+      `${new Intl.ListFormat("en").format(resourceFlags)} ${resourceFlags.length > 1 ? "need" : "needs"} --acknowledge-resources: ` +
+        unacknowledgedDefinitionMessage(unacknowledged),
+    );
+  }
   return {
     auth: authFile
       ? importAnswer(piImportSource(authFile))
@@ -208,8 +225,8 @@ function answersFromFlags(flags: OnboardFlags, recorded: OnboardingAnswers): Onb
         ? { kind: "credential", provider, credential: { type: "api_key", key: apiKey } }
         : undefined,
     model: provider && model ? { provider, model } : undefined,
-    resources: flags.acknowledgeResources ? {
-      acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION),
+    resources: flags.acknowledgeResources || resourceFlags.length ? {
+      acknowledgedDefinitionIds,
       skillPolicy: workspaceSkills !== undefined || skills !== undefined
         ? skillPolicy(workspaceSkills ?? "allowlist", skills ?? [])
         : recorded.resources?.skillPolicy ?? DEFAULT_SKILL_POLICY,

@@ -3,7 +3,7 @@ import { isAgentCaller } from "@pi-template/contracts";
 import { harnessProgram } from "./commands/registry";
 
 // Commander reports help as an "error" too; only real usage mistakes exit 2.
-const HELP_CODES = new Set(["commander.helpDisplayed", "commander.version"]);
+const HELP_CODES = new Set(["commander.help", "commander.helpDisplayed", "commander.version"]);
 
 try {
   const agentCaller = isAgentCaller() ? await import("./agent-caller") : undefined;

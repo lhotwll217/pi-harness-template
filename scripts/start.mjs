@@ -130,7 +130,12 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(signal, () => s
 process.stdout.on("error", (error) => stop(1, `nothing is reading stdout (${error.code})${web ? "; stopped the web app" : ""}.`));
 
 async function main() {
-  const env = { ...process.env };
+  // The rule of harnessPaths() in @pi-template/contracts/harness-home, applied here because the CLI
+  // and the web app run from the checkout. npm runs scripts there too and records the caller's
+  // directory in INIT_CWD.
+  const variable = process.env.PI_TEMPLATE_HOME?.trim();
+  const home = variable ? resolve(process.env.INIT_CWD ?? process.cwd(), variable) : join(homedir(), ".pi-template");
+  const env = { ...process.env, PI_TEMPLATE_HOME: home };
   await startDaemonViaStatus(env);
   const port = await webPort(env);
   const url = `http://127.0.0.1:${port}`;
@@ -143,8 +148,6 @@ async function main() {
         `something on port ${port} is not this app (${describeAnswer(existing)}). Stop it, or set PI_TEMPLATE_WEB_PORT to a free port.`,
       );
     }
-    // The default home of harnessPaths() in @pi-template/contracts/harness-home.
-    const home = env.PI_TEMPLATE_HOME ?? join(homedir(), ".pi-template");
     if (existing.body.home !== home) {
       throw new LaunchError(
         `the app on port ${port} serves ${existing.body.home}, not ${home}. Stop it, or set PI_TEMPLATE_WEB_PORT to a free port.`,

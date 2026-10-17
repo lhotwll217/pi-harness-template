@@ -10,7 +10,7 @@ export class LocalRequestError extends Error {
 /**
  * `read` is a GET. A `json` mutation carries a JSON body, which no cross-site form can send
  * without a preflight. A `bodiless` mutation (DELETE) is never a simple request, so the
- * method alone forces the preflight this app never answers.
+ * method alone forces a preflight, which this app answers without CORS headers.
  */
 export type LocalRequestKind = "read" | "json" | "bodiless";
 

@@ -272,15 +272,14 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
   };
 }
 
-export async function daemonMain(): Promise<void> {
+export async function daemonMain(): Promise<number> {
   let daemon: RunningDaemon;
   try {
     daemon = await startDaemon({ onStale: () => process.kill(process.pid, "SIGTERM") });
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
       process.stderr.write("pi-template: another daemon already owns the loopback port\n");
-      process.exitCode = 1;
-      return;
+      return 1;
     }
     throw error;
   }
@@ -290,4 +289,5 @@ export async function daemonMain(): Promise<void> {
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
   });
+  return 0;
 }

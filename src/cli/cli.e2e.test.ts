@@ -90,6 +90,9 @@ try {
   const status = await runCli(["status"]);
   assert.equal(status.status, 0, status.stderr);
   assert.equal((JSON.parse(status.stdout) as { ready: { setupRequired: boolean } }).ready.setupRequired, false);
+  const secondDaemon = await runCli(["daemon"]);
+  assert.equal(secondDaemon.stderr, "pi-template: another daemon already owns the loopback port\n");
+  assert.equal(secondDaemon.status, 1);
   const doctor = await runCli(["doctor"]);
   assert.ok([0, 1].includes(doctor.status ?? -1), doctor.stderr);
   assert.equal((JSON.parse(doctor.stdout) as { checks: { roots: { harnessHome: string } } }).checks.roots.harnessHome, home);

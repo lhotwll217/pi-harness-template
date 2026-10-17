@@ -10,8 +10,7 @@ read_when:
 # Web app
 
 > **Status:** Implemented in `apps/web`. Its chat and workspace-file routes call
-> the Gateway routes of [porting](porting.md) row 21; until those land, the page
-> loads and reports the daemon's state but lists no chats or files.
+> the Gateway routes of [porting](porting.md) row 21.
 
 The template ships an **App** (see [`CONTEXT.md`](../CONTEXT.md)): a browser
 page with a chat list, a streaming chat, a files sidebar that updates live, and
@@ -102,7 +101,8 @@ Next binds `127.0.0.1` only. Every handler first runs `assertLocalRequest`
 - `sec-fetch-site: cross-site` is refused;
 - an `Origin` other than the app's own is refused;
 - a mutation with a body must be `application/json` (415 otherwise), which no
-  cross-site form can send without a preflight the app never answers.
+  cross-site form can send without a preflight. The app answers a preflight
+  with 204 and no CORS headers, so the browser never sends the request.
 
 ## What the page does
 

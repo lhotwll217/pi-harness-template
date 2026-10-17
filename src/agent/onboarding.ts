@@ -307,7 +307,7 @@ export async function runOnboarding(
           } else if (answer?.kind === "import") {
             const imported = readStandaloneCredentials(answer.sourceAuthPath);
             if (!Object.keys(imported).length) throw new Error("approved credential import contains no providers");
-            writeJsonAtomic(paths.piAuth, imported);
+            writeJsonAtomic(paths.piAuth, { ...readAuthFile(paths.piAuth), ...imported });
             if (answer.sourceSettingsPath && existsSync(answer.sourceSettingsPath)) {
               importModelSettings(answer.sourceSettingsPath, paths.piSettings);
             }

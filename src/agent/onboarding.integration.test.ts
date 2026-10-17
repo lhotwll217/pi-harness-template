@@ -186,6 +186,31 @@ try {
     openai: { type: "api_key", key: "openai-secret" },
   });
 
+  // An import merges into the harness's credentials: a provider added through the harness survives,
+  // and the imported entry wins for a provider both hold.
+  const mergeHome = join(root, "import-merge");
+  writeFileSync(ensureHarnessWorkspace(mergeHome).piAuth, JSON.stringify({
+    "harness-only": { type: "api_key", key: "harness-secret" },
+    openai: { type: "api_key", key: "stale-secret" },
+  }));
+  await assert.rejects(
+    runOnboarding({ auth: { kind: "import", sourceAuthPath: legacyAzureSource } }, { ...dependencies(), home: mergeHome }),
+    (error) => error instanceof OnboardingStageError && error.stage === "model",
+  );
+  assert.deepEqual(JSON.parse(readFileSync(harnessPaths(mergeHome).piAuth, "utf8")), {
+    "harness-only": { type: "api_key", key: "harness-secret" },
+    openai: { type: "api_key", key: "openai-secret" },
+    azure: { type: "api_key", key: "azure-secret" },
+  });
+  const damagedImportHome = join(root, "import-into-damaged");
+  writeFileSync(ensureHarnessWorkspace(damagedImportHome).piAuth, "[]");
+  await assert.rejects(
+    runOnboarding({ auth: { kind: "import", sourceAuthPath: legacyAzureSource } }, { ...dependencies(), home: damagedImportHome }),
+    (error) => error instanceof OnboardingStageError && error.message ===
+      `auth: ${harnessPaths(damagedImportHome).piAuth} must hold a JSON object of provider credentials; fix or remove it`,
+  );
+  assert.equal(readFileSync(harnessPaths(damagedImportHome).piAuth, "utf8"), "[]");
+
   const resumeHome = join(root, "resume");
   await assert.rejects(
     runOnboarding({

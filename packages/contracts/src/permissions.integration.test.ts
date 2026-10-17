@@ -95,6 +95,17 @@ try {
   const reparsed = parse(after) as { permission: Record<string, PiPermissionPatternMap> };
   assert.equal(reparsed.permission.path["/tmp/owner-carve-out"], "allow");
   assert.deepEqual(reparsed.permission.path[protectedDir], { action: "deny", reason: "Pi Template protected paths" });
+
+  // Every session start reconciles; an unchanged home must come back byte for byte.
+  reconcilePermissionSettings(home);
+  assert.equal(readFileSync(paths.piPermissionConfig, "utf8"), after);
+
+  // A dropped protected path takes its whole lines with it.
+  writeFileSync(paths.protectedPaths, JSON.stringify({ paths: [], repos: [] }));
+  reconcilePermissionSettings(home);
+  const unprotected = readFileSync(paths.piPermissionConfig, "utf8");
+  assert.equal(unprotected.includes(protectedDir), false);
+  assert.deepEqual(unprotected.split("\n").filter((line, index, lines) => !line.trim() && index < lines.length - 1), []);
 } finally {
   rmSync(home, { recursive: true, force: true });
 }

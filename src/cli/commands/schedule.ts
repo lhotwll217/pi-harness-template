@@ -110,7 +110,7 @@ export function addSchedule(program: Command): void {
     .option("--tz <zone>", "IANA time zone for --cron, e.g. Europe/Helsinki", once("--tz"))
     .option("--name <name>", "display name", once("--name"))
     .option("--prompt <text>", "prompt for an isolated agent turn", once("--prompt"))
-    .option("--tool <id>", "tool the prompt's agent turn may use (repeatable; default none)", (value: string, previous: string[]) => [...previous, value], [])
+    .option("--tool <id>", "tool the prompt's agent turn may use (repeatable; default none)", (value: string, previous: string[] | undefined) => [...(previous ?? []), value])
     .option("--timeout <seconds>", "seconds before the run is stopped (default 600)", once("--timeout"));
   commandAfterDoubleDash(add);
 

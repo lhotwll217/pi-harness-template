@@ -432,12 +432,28 @@ try {
   assert.deepEqual(await skillPolicyAfter([]), { mode: "allowlist", allowlist: ["mine", "theirs"] });
   assert.deepEqual(await skillPolicyAfter(["--workspace-skills", "all"]), { mode: "all-workspace", allowlist: [] });
 
+  // A resource answer on an acknowledged home applies without re-acknowledging the unchanged definition.
   const approvalsPath = harnessPaths(importedDefaultHome).resourceApprovals;
   const currentIds = definitionIds(AGENT_DEFINITION);
+  assert.equal((await onboard(["--non-interactive", "--approve-workspace-context"], importedDefaultDependencies)).complete, true);
+  assert.deepEqual(JSON.parse(readFileSync(approvalsPath, "utf8")), { acknowledgedDefinitionIds: currentIds, workspaceContext: true });
+  assert.equal((await onboard(["--non-interactive", "--workspace-skills", "bundled"], importedDefaultDependencies)).complete, true);
+  assert.deepEqual(JSON.parse(readFileSync(harnessPaths(importedDefaultHome).settings, "utf8")).skillPolicy, { mode: "bundled", allowlist: [] });
+  assert.equal((await onboard(["--non-interactive", "--skill", "mine"], importedDefaultDependencies)).complete, true);
+  assert.deepEqual(JSON.parse(readFileSync(harnessPaths(importedDefaultHome).settings, "utf8")).skillPolicy, { mode: "allowlist", allowlist: ["mine"] });
   writeFileSync(approvalsPath, JSON.stringify({
     acknowledgedDefinitionIds: currentIds.filter((id) => id !== "skill:writing-for-agents"),
     workspaceContext: false,
   }));
+  await assert.rejects(onboard(["--non-interactive", "--skill", "mine"], importedDefaultDependencies), {
+    name: "CliUsageError",
+    message: /^--skill needs --acknowledge-resources: /,
+  });
+  await assert.rejects(onboard(["--non-interactive", "--approve-workspace-context", "--skill", "mine"], importedDefaultDependencies), {
+    name: "CliUsageError",
+    message: "--approve-workspace-context and --skill need --acknowledge-resources: the agent definition gained entries the resource review did not acknowledge: skill:writing-for-agents; " +
+      "review them with `pi-template onboard`, or accept them with `pi-template onboard --non-interactive --acknowledge-resources`",
+  });
   await assert.rejects(onboard(["--non-interactive"], importedDefaultDependencies), {
     name: "OnboardingStageError",
     message: "resources: the agent definition gained entries the resource review did not acknowledge: skill:writing-for-agents; " +

@@ -97,7 +97,6 @@ export function addHarnessCommands(program: Command): void {
     examples: ["pi-template daemon"],
   }, async () => {
     const { daemonMain } = await import("../../daemon");
-    await daemonMain();
-    return 0;
+    return await daemonMain();
   });
 }
