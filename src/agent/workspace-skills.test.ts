@@ -232,12 +232,31 @@ try {
     assert.deepEqual(await sessionSkills(partly.home), ["writing-for-agents", "fine"]);
     const doctor = await runDoctor({ home: partly.home, providerModelVerifier: () => true });
     assert.deepEqual(doctor.checks.resources.skippedSkillEntries, [
-      { name: "listed-pack/inner", reason: "unreadable (EACCES), so nothing in it loads" },
+      { name: "listed-pack", reason: "unreadable (EACCES), so nothing in it loads" },
       { name: "sealed", reason: "unreadable (EACCES), so nothing in it loads" },
     ]);
   } finally {
     chmodSync(join(partly.skills, "listed-pack"), 0o755);
     chmodSync(join(partly.skills, "sealed"), 0o755);
+  }
+
+  for (const mode of [0o644, 0o444]) {
+    const enterless = newHome();
+    homes.push(enterless.home);
+    described(join(enterless.skills, "fine", "SKILL.md"));
+    described(join(enterless.skills, "direct", "SKILL.md"));
+    chmodSync(join(enterless.skills, "direct"), mode);
+    const label = `direct at mode ${mode.toString(8)}`;
+    try {
+      assert.deepEqual(inspectWorkspaceSkills(enterless.home).loaded, piLoads(enterless.home).loaded, label);
+      assert.deepEqual(await sessionSkills(enterless.home), ["writing-for-agents", "fine"], label);
+      const doctor = await runDoctor({ home: enterless.home, providerModelVerifier: () => true });
+      assert.deepEqual(doctor.checks.resources.skippedSkillEntries, [
+        { name: "direct", reason: "unreadable (EACCES), so nothing in it loads" },
+      ], label);
+    } finally {
+      chmodSync(join(enterless.skills, "direct"), 0o755);
+    }
   }
 
   const aliased = newHome();

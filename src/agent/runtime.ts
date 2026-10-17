@@ -144,6 +144,8 @@ function readSkillFolder(dir: string, root: string, ig: Ignore): { skillFile?: s
     if (errorCode(error) === "ENOENT") return { children: [] };
     throw error;
   }
+  // A folder that can be listed but not entered yields no readable file, so Pi loads nothing from it.
+  accessSync(dir, constants.R_OK | constants.X_OK);
   addIgnoreRules(ig, dir, root);
   const entries = readdirSync(dir, { withFileTypes: true });
   for (const entry of entries) {
@@ -258,8 +260,6 @@ function workspaceSkillEntries(home: string): WorkspaceSkillSelection {
   const rootIgnore = ignore();
   try {
     realRoot = realpathSync(root);
-    // A folder that can be listed but not entered yields no readable file, so Pi loads nothing from it.
-    accessSync(root, constants.R_OK | constants.X_OK);
     top = readSkillFolder(root, root, rootIgnore);
   } catch (error) {
     return { ...selection, unreadable: errorCode(error) };

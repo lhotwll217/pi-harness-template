@@ -103,7 +103,7 @@ skill policy beside the loaded workspace skills and lists what did not load:
   folders. Pi walks a folder once for every path that reaches it, so stacked
   links multiply the walk; past this bound, one entry would stall every
   session, doctor, and the daemon that runs them. Also a folder the harness
-  cannot read or resolve, with its error code (`EACCES`). Pi skips such a
+  cannot read, enter, or resolve, with its error code (`EACCES`). Pi skips such a
   folder without a diagnostic and loads the rest of its entry.
 - `resources.skillNameCollisionsNotLoaded`: a skill whose name another skill
   already took.
