@@ -77,7 +77,6 @@ export async function emit(payload: unknown): Promise<void> {
   await writeOut(`${JSON.stringify(payload, null, 2)}\n`);
 }
 
-/** Run with a confirmed Gateway client: the owner's starts the daemon when none runs; an agent caller's never does. */
 export async function withGateway<T>(use: (client: ConfirmedGatewayClient) => Promise<T>): Promise<T> {
   const client = isAgentCaller()
     ? await (await import("../agent-caller")).connectAgentGateway()

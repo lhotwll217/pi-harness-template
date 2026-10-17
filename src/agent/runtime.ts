@@ -449,7 +449,6 @@ export function enforcedSandboxPolicy(home: string, policy: SandboxPolicy): Sand
     ...policy,
     filesystem: {
       ...policy.filesystem,
-      // daemon.json holds the owner's Gateway token; the agent reaches the daemon through its socket.
       deniedReadRoots: [...new Set([...policy.filesystem.deniedReadRoots, paths.piAgentDir, paths.daemonInfo])],
       deniedWriteRoots: harnessControlPaths(paths),
     },

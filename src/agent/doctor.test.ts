@@ -33,10 +33,9 @@ try {
   reconcilePermissionSettings(home);
   writeFileSync(paths.onboardingProgress, JSON.stringify({ version: ONBOARDING_VERSION, stages: { resources: "2026-10-16T12:00:00.000Z" } }));
   writeFileSync(paths.resourceApprovals, JSON.stringify({ acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION), workspaceContext: false }));
-  // Stands in for the daemon's agent socket, which answers /health with the daemon's pid.
   const agentSocket = createServer((request, response) => {
-    response.writeHead(request.url === "/health" ? 200 : 404, { "content-type": "application/json" });
-    response.end(JSON.stringify({ pid: process.pid }));
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(request.url === "/health" ? { pid: process.pid } : { ready: true }));
   });
   await new Promise<void>((resolveListen) => agentSocket.listen(paths.agentSocket, resolveListen));
 
@@ -237,7 +236,6 @@ try {
   writeFileSync(paths.piSettings, JSON.stringify({ defaultProvider: "anthropic", defaultModel: "no-such-model" }));
   assert.equal((await runDoctor({ home })).checks.model.available, false);
 
-  // Whether the agent's bash can reach the CLI gates readiness, and the reason names what fails.
   saveHarnessSettings(home, { alwaysOn: "declined" });
   writeFileSync(paths.piSettings, JSON.stringify({ defaultProvider: "fake", defaultModel: "model" }));
   writeFileSync(join(home, "sandbox.json"), JSON.stringify(policy));

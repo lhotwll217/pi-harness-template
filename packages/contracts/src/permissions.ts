@@ -46,7 +46,6 @@ const PROTECTED_REASON = "Pi Template protected paths";
 const READ_SURFACES = ["read", "grep", "find", "ls", "skill"];
 const CHANGE_SURFACES = ["edit", "write"];
 const MANAGED_SURFACES = [...READ_SURFACES, ...CHANGE_SURFACES, "external_directory", "bash"];
-/** Surfaces of tools the agent definition no longer has; reconciling removes their keys. */
 const RETIRED_SURFACES = ["query_database", "save_note"];
 /** Allowed in every mode, read-only included, so the agent reaches its CLI. One rule per command,
  * not `pi-template *`, which would let read-only run `onboard --permission allow`. */
@@ -114,7 +113,6 @@ function withAgentCliRules(rules: PiPermissionPatternMap): PiPermissionPatternMa
   return { "*": fallback, ...generated, ...ownerRules };
 }
 
-/** Read-only denies every write a path names, so a bash redirect cannot write; the harness owns the `*` key. */
 function pathWriteRules(existing: unknown, mode: PermissionMode): PiPermissionPatternMap | undefined {
   if (mode === "read-only") return withDefault(existing, "deny");
   const { "*": _harnessDefault, ...ownerRules } = patternMap(existing);
@@ -212,12 +210,15 @@ function setJsoncDefaultFirst(text: string, path: (string | number)[], value: un
   return setJsoncValue(withoutLateDefault, path, value, true);
 }
 
-function setJsoncAfterDefault(text: string, path: (string | number)[], value: unknown): string {
+function setJsoncAfter(text: string, path: (string | number)[], value: unknown, after: string): string {
   return applyEdits(text, modify(text, path, value, {
     formattingOptions: JSON_FORMAT,
-    getInsertionIndex: (properties) => Math.max(0, properties.indexOf("*") + 1),
+    getInsertionIndex: (properties) => Math.max(0, properties.indexOf(after) + 1),
   }));
 }
+
+const setJsoncAfterDefault = (text: string, path: (string | number)[], value: unknown): string =>
+  setJsoncAfter(text, path, value, "*");
 
 function reconcilePermissionDocument(
   text: string,
@@ -236,9 +237,10 @@ function reconcilePermissionDocument(
   }
   const existingBash = existingPermission.bash;
   if (isPatternMap(existingBash)) {
-    // Each insertion lands directly after `*`, so inserting in reverse keeps the generated order.
-    for (const rule of [...AGENT_CLI_RULES].reverse()) {
-      if (!(rule in existingBash)) nextText = setJsoncAfterDefault(nextText, ["permission", "bash", rule], "allow");
+    let previous = "*";
+    for (const rule of AGENT_CLI_RULES.filter((generated) => !(generated in existingBash))) {
+      nextText = setJsoncAfter(nextText, ["permission", "bash", rule], "allow", previous);
+      previous = rule;
     }
   }
   const nextPathWrite = nextPermission.path_write as PiPermissionPatternMap | undefined;

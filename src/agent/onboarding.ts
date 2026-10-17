@@ -238,7 +238,6 @@ function assertRerunCanFinish(answers: OnboardingAnswers, hasCredentials: () => 
   for (const [stage, key] of Object.entries(ANSWERED_STAGES) as [OnboardingStage, keyof OnboardingAnswers][]) {
     requireAnswer(stage, answers[key]);
   }
-  // An entry the definition dropped, such as a retired tool, never forces another review.
   const unacknowledged = unacknowledgedDefinitionIds(answers.resources!.acknowledgedDefinitionIds);
   if (unacknowledged.length) {
     throw new OnboardingStageError("resources", unacknowledgedDefinitionMessage(unacknowledged));

@@ -78,7 +78,6 @@ try {
   assert.equal(await bashTurn("pwd", paths.workspace), `${paths.workspace}\n`);
 
   savePermissionMode(home, "read-only");
-  // Read-only keeps bash for the agent's own CLI and denies every other command.
   assert.equal(await bashTurn("ls", paths.workspace), "[pi-permission-system] Denied by policy: 'bash' (rule '*').");
 
   process.stdout.write("ok — a fresh home's agent runs bash on its first turn, with or without a sandbox policy, and read-only denies all but its CLI\n");

@@ -81,7 +81,6 @@ try {
       await bash(`echo '{}' > ../${control.replace(".json", ".js?n")}`);
       assert.equal(readFileSync(join(home, control), "utf8"), before, `${control} is unchanged`);
     }
-    // The owner's Gateway token stays out of reach however it is spelled; the agent reaches the daemon over its socket.
     assert.equal(await bash("cat ../daemon.js?n"), "cat: ../daemon.json: Operation not permitted\nexit 1");
     assert.equal(await bash("cat ../p?/auth.json"), "cat: ../p?/auth.json: No such file or directory\nexit 1");
     assert.equal(await bash("echo kept > bash-note.md && cat bash-note.md"), "kept\nexit 0");

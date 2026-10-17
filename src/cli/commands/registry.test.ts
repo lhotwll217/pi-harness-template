@@ -35,8 +35,6 @@ try {
     "pi-template status", "pi-template doctor", "pi-template onboard", "pi-template prompt", "pi-template daemon",
   ]);
   assert.equal(pages[0]!.help, rootHelp());
-  // Every top-level command is the agent's or the owner's: an agent command gets a generated bash
-  // allow rule, and an owner command is refused to an agent caller.
   assert.deepEqual(
     harnessProgram().commands.map((command) => command.name()).sort(),
     [...AGENT_CLI_COMMANDS, ...OWNER_CLI_COMMANDS].sort(),

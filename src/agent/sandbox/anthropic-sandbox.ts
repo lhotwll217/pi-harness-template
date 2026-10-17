@@ -132,7 +132,6 @@ async function spawnSandboxed(
     const child = spawn(argv[0]!, argv.slice(1), {
       cwd: request.cwd,
       detached: true,
-      // The request's own variables win, so the agent's PATH and home reach its `pi-template`.
       env: {
         ...commandEnvironment(process.env),
         ...commandEnvironment(env),

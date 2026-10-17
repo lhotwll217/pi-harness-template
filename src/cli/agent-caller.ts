@@ -1,11 +1,7 @@
-// The CLI as the agent runs it from bash: `PI_TEMPLATE_AGENT=1` with `PI_TEMPLATE_HOME` naming the
-// session's home. It reaches a running daemon over the agent socket and never starts one, never
-// reads daemon.json, and never writes under the home (docs/security.md#the-agent-uses-its-own-cli).
 import { AGENT_CLI_COMMANDS, DAEMON_PROBE_TIMEOUT_MS, OWNER_CLI_COMMANDS, harnessPaths } from "@pi-template/contracts";
 import { agentTransport, gatewayClient, probeAgentGateway } from "../gateway/client";
 import type { ConfirmedGatewayClient } from "./ensure-daemon";
 
-/** A failure the CLI reports as one JSON line with a hint for what to do instead. */
 export class CliFailure extends Error {
   constructor(message: string, readonly hint: string) {
     super(message);
@@ -42,7 +38,6 @@ export async function connectAgentGateway(): Promise<ConfirmedGatewayClient> {
   }
 }
 
-/** The owner-only command an agent caller asked for, if any: the bare entry, or onboard, daemon, or prompt. */
 export function ownerOnlyCommand(argv: readonly string[]): string | undefined {
   const [command] = argv;
   if (command === undefined) return "pi-template with no command";

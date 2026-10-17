@@ -77,9 +77,6 @@ CREATE INDEX idx_schedule_runs_schedule_created
 `,
   },
   {
-    // query_database and save_note left the agent; the agent reaches state through pi-template in
-    // bash, so a stored prompt schedule that allowed either now allows bash (RETIRED_AGENT_TOOL_IDS).
-    // Run snapshots keep the tools they ran with.
     version: 2,
     sql: `
 UPDATE schedules

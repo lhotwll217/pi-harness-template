@@ -53,7 +53,6 @@ function readDaemonInfo(): DaemonInfo | null {
   }
 }
 
-/** How a client reaches the Gateway: the owner over loopback TCP with the token, the agent over its socket. */
 export type GatewayTransport = (path: string, init?: RequestInit) => Promise<Response>;
 
 const ownerTransport = (info: DaemonInfo): GatewayTransport => async (path, init) => {
@@ -133,7 +132,6 @@ export async function connectGateway(options: GatewayProbeOptions = {}): Promise
   return probe.kind === "reachable" ? gatewayClient(ownerTransport(probe.info)) : null;
 }
 
-/** The daemon's health and readiness over the agent socket; throws the transport's error when nothing answers. */
 export async function probeAgentGateway(socketPath: string, options: GatewayProbeOptions = {}): Promise<{ health: DaemonHealth; ready: DaemonReady }> {
   const transport = agentTransport(socketPath);
   const health = await gatewayJson<DaemonHealth>(transport, "/health", { signal: options.signal });
@@ -141,7 +139,6 @@ export async function probeAgentGateway(socketPath: string, options: GatewayProb
   return { health, ready };
 }
 
-/** A client for the daemon a reachable probe found, as the owner. */
 export function ownerGatewayClient(info: DaemonInfo): GatewayClient {
   return gatewayClient(ownerTransport(info));
 }

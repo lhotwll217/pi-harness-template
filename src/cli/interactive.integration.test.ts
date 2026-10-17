@@ -87,7 +87,6 @@ try {
   assert.ok(runtime.runtime.session.systemPrompt.startsWith(piTemplateIdentityPrompt().trimEnd()));
   assert.match(runtime.runtime.session.systemPrompt, /Reach that state only by running\s+`pi-template` in bash/);
 
-  // Pi's built-in tools from the posture, and no data tool: the agent reaches state through its CLI in bash.
   assert.deepEqual(runtime.runtime.session.getActiveToolNames(), [...DEFAULT_TOOL_POSTURE]);
   const permissionConfig = readFileSync(paths.piPermissionConfig, "utf8");
   assert.ok(permissionConfig.includes(protectedRoot));

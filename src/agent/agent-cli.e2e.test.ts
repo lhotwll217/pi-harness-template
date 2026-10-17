@@ -1,5 +1,3 @@
-// The agent reaches harness state through `pi-template` in bash: faux model turns drive real tool
-// calls through the real session, permission system, sandbox, CLI, agent socket, and daemon.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -29,7 +27,7 @@ import { createScheduledPromptRunner } from "./prompt-runner";
 import { checkoutRoot, createSandboxAdapter } from "./sandbox";
 
 // A unix socket path holds at most 103 bytes on macOS, and the temporary directory is long.
-const root = realpathSync(mkdtempSync(join(tmpdir(), "wp19-")));
+const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-agent-cli-")));
 const home = join(root, "home");
 const cwd = join(root, "task");
 const previousHome = process.env.PI_TEMPLATE_HOME;
@@ -38,11 +36,8 @@ const faux = registerFauxProvider();
 let daemon: Awaited<ReturnType<typeof startDaemon>> | undefined;
 
 interface AgentTurn {
-  /** Each bash call's tool result, in order. */
   results: string[];
-  /** The tools the session offered the model. */
   tools: string[];
-  /** What the agent answered, as `pi-template prompt` prints it. */
   answer: string;
 }
 
@@ -59,7 +54,6 @@ function offeredTools(messages: readonly Message[]): string[] {
   return [...tools];
 }
 
-/** One `pi-template prompt` turn in which the model runs each command in bash, then answers from the results. */
 async function agentTurn(commands: readonly string[], answer: (results: string[]) => string): Promise<AgentTurn> {
   const turn: AgentTurn = { results: [], tools: [], answer: "" };
   faux.setResponses([
@@ -91,7 +85,6 @@ async function agentTurn(commands: readonly string[], answer: (results: string[]
 
 const countAnswer = ([listed]: string[]) => `There are ${(JSON.parse(listed!) as unknown[]).length} notes saved.`;
 
-/** The real launcher as the agent's bash would run it with no daemon for its home. */
 async function agentCli(args: readonly string[], agentHome: string) {
   return await new Promise<{ status: number | null; stdout: string; stderr: string }>((resolveRun, reject) => {
     const child = spawn(join(checkoutRoot, "pi-template"), args, {
@@ -128,7 +121,6 @@ try {
   writeFileSync(paths.sandboxPolicy, sandboxPolicy(false));
   writeFileSync(paths.onboardingMarker, JSON.stringify({ version: ONBOARDING_VERSION, completedAt: "2026-10-17T00:00:00.000Z" }));
 
-  // AC3, lane 4: with no daemon, an agent caller reports that the owner must start it, and none starts.
   const absentHome = join(root, "absent");
   ensureHarnessWorkspace(absentHome);
   const noDaemon = await agentCli(["notes", "list"], absentHome);
@@ -149,21 +141,17 @@ try {
   assert.ok(owner);
   for (const body of ["renew the certificate", "call the bank", "water the plants"]) await owner.createNote({ body });
 
-  // You see, AC1, lane 1: asked how many notes are saved, the agent answers by running pi-template in bash.
   const counted = await agentTurn(["pi-template notes list"], countAnswer);
   assert.equal(counted.answer, "There are 3 notes saved.");
   assert.deepEqual((JSON.parse(counted.results[0]!) as Array<{ body: string }>).map(({ body }) => body).sort(),
     ["call the bank", "renew the certificate", "water the plants"]);
-  // Lane 10: Pi's built-in tools from the posture, and no data tool.
   assert.deepEqual(counted.tools.sort(), [...DEFAULT_TOOL_POSTURE].sort());
   const queried = await agentTurn(["pi-template db query 'SELECT count(*) AS n FROM notes'"], ([result]) => result!);
   assert.deepEqual(JSON.parse(queried.results[0]!), { rows: [{ n: 3 }], truncated: false });
 
-  // The agent's bash names this session's home, marks an agent caller, and leaves out the port and the token.
   const environment = await agentTurn(['echo "$PI_TEMPLATE_HOME $PI_TEMPLATE_AGENT ${PI_TEMPLATE_PORT:-no-port}"'], ([result]) => result!);
   assert.equal(environment.results[0], `${home} 1 no-port\n`);
 
-  // AC2, lanes 2 and 3: the agent saves a note and schedules a prompt through the CLI.
   const saved = await agentTurn([
     'pi-template notes add "buy milk"',
     'pi-template schedule add --every 1d --name "daily summary" --prompt "summarize the notes kept today"',
@@ -173,7 +161,6 @@ try {
   const scheduled = (await owner.listSchedules()).find(({ name }) => name === "daily summary");
   assert.deepEqual(scheduled?.payload, { kind: ScheduledPayloadKind.Prompt, prompt: "summarize the notes kept today", toolsAllow: [] });
 
-  // A command schedule, which the daemon runs on the host, stays the owner's.
   const commandAttempt = await agentTurn(["pi-template schedule add --every 1d --name escalate -- touch /tmp/owned"], ([result]) => result!);
   assert.equal(commandAttempt.results[0], `${COMMAND_SCHEDULE_REFUSAL}\n\n\nCommand exited with code 1`);
   assert.equal((await owner.listSchedules()).some(({ name }) => name === "escalate"), false);
@@ -186,14 +173,12 @@ try {
   assert.equal(runAttempt.results[0], `${COMMAND_SCHEDULE_REFUSAL}\n\n\nCommand exited with code 1`);
   assert.deepEqual(daemon.state.listRuns(ownerCommand.id), []);
 
-  // Lane 9: doctor, run by the agent, reports that the agent can reach the CLI.
   const doctor = await agentTurn(["pi-template doctor"], ([result]) => result!);
   assert.deepEqual(JSON.parse(doctor.results[0]!.replace(/\n\n\nCommand exited with code 1$/, "")).checks.agentCli, {
     reachable: true,
     reason: `the agent's bash reaches the daemon through ${paths.agentSocket}`,
   });
 
-  // AC4, lane 5: an owner deny rule on a pi-template command blocks the agent in every mode.
   const ownerRules = JSON.parse(readFileSync(paths.piPermissionConfig, "utf8")) as { permission: { bash: Record<string, string> } };
   writeFileSync(paths.piPermissionConfig, JSON.stringify({
     permission: { ...ownerRules.permission, bash: { ...ownerRules.permission.bash, "pi-template db *": "deny" } },
@@ -205,7 +190,6 @@ try {
   }
   writeFileSync(paths.piPermissionConfig, JSON.stringify(ownerRules));
 
-  // AC5, lane 6: in read-only the agent keeps bash for its CLI, and nothing chained to it runs.
   savePermissionMode(home, "read-only");
   const readOnly = await agentTurn([
     "pi-template notes list",
@@ -220,7 +204,6 @@ try {
   assert.match(readOnly.results[2]!, /^\[pi-permission-system\] Denied by policy: 'path_write'/);
   assert.equal(existsSync(join(cwd, "notes.json")), false);
 
-  // Headless ask: a scheduled agent's chained command needs approval nobody can give, so it is refused.
   savePermissionMode(home, "ask");
   let chained = "";
   faux.setResponses([
@@ -245,7 +228,6 @@ try {
   assert.equal(readFileSync(join(cwd, "workspace", "keep.txt"), "utf8"), "kept\n");
   savePermissionMode(home, "allow");
 
-  // AC6, lane 8: a schedule an older client stores with a retired tool reaches the CLI through bash and runs.
   const retired = await owner.createSchedule({
     name: "count with a retired tool", enabled: false, cwd, timeoutSeconds: 60,
     trigger: { kind: ScheduleKind.Every, everyMs: 86_400_000, anchorMs: Date.now() },
@@ -269,11 +251,9 @@ try {
   assert.equal(finished?.status, ScheduleRunStatus.Completed, finished?.error ?? finished?.stderrTail ?? "");
   assert.equal(finished?.stdoutTail, "There are 4 notes saved.");
 
-  // Lane 7: with the sandbox on (macOS), the count is right, daemon.json stays unreadable, and the
-  // only way to the daemon is the agent socket.
   const sandboxProbe = await createSandboxAdapter().verify(JSON.parse(sandboxPolicy(true)));
   if (sandboxProbe.unavailable) {
-    process.stdout.write(`SKIP — lane 7 needs the real sandbox: ${sandboxProbe.reason}\n`);
+    process.stdout.write(`SKIP — the sandboxed agent turn needs the real sandbox: ${sandboxProbe.reason}\n`);
   } else {
     writeFileSync(paths.sandboxPolicy, sandboxPolicy(true));
     const sandboxed = await agentTurn([
@@ -288,7 +268,6 @@ try {
     writeFileSync(paths.sandboxPolicy, sandboxPolicy(false));
   }
 
-  // Lane 4 in a turn: the owner stops the daemon, and the agent's call says so and starts nothing.
   owner.close();
   await daemon.close();
   daemon = undefined;

@@ -78,7 +78,6 @@ const COMMAND_ENVIRONMENT = new Set([
   "GIT_SSH_COMMAND",
 ]);
 
-/** What the agent's `pi-template` needs beyond the allowlist: its home, and that it is an agent caller. */
 export const AGENT_CLI_VARIABLES: readonly string[] = Object.freeze(["PI_TEMPLATE_HOME", AGENT_CALLER_VARIABLE]);
 
 /** The variables a bash command sees, sandbox on or off, so the daemon's credentials stay out. */
@@ -86,16 +85,8 @@ export const commandEnvironment = (source: NodeJS.ProcessEnv | undefined, also: 
   Object.fromEntries(Object.entries(source ?? {}).filter(([name]) =>
     COMMAND_ENVIRONMENT.has(name) || name.startsWith("LC_") || also.includes(name)));
 
-/** The checkout whose `pi-template` launcher the agent runs. */
 export const checkoutRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
-/**
- * The agent's bash environment: the allowlist, plus `PI_TEMPLATE_HOME` naming the session's home
- * and `PI_TEMPLATE_AGENT=1`, so its `pi-template` reaches this home's daemon as an agent caller and
- * never starts one. PATH starts with the checkout, so `pi-template` resolves as the bare word the
- * permission rules match, then the daemon's Node, which the launcher runs. `PI_TEMPLATE_PORT` is
- * left out: the agent never uses TCP.
- */
 export function agentCommandEnvironment(source: NodeJS.ProcessEnv | undefined, home: string): NodeJS.ProcessEnv {
   const path = [checkoutRoot, dirname(process.execPath), ...(source?.PATH ?? "").split(delimiter)].filter(Boolean);
   return {

@@ -241,8 +241,6 @@ try {
   assert.deepEqual(recordedFiles(), beforeRerun);
   assert.notEqual(rerun.marker?.completedAt, completed.marker?.completedAt);
 
-  // A review recorded before the data tools retired still covers every current entry, so a rerun
-  // needs no new review and records the current definition.
   const approvals = JSON.parse(readFileSync(join(resumeHome, "resource-approvals.json"), "utf8")) as { acknowledgedDefinitionIds: string[] };
   writeFileSync(join(resumeHome, "resource-approvals.json"), JSON.stringify({
     ...approvals,

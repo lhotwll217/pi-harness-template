@@ -67,27 +67,16 @@ export interface GatewayOptions {
   events: GatewayEvents;
   diagnostics: GatewayDiagnostics;
   port?: number;
-  /** Where to listen for agent callers; omitted, the Gateway serves the owner's TCP listener only. */
   agentSocket?: string;
 }
 
 export interface RunningGateway {
   host: "127.0.0.1";
   port: number;
-  /** Why the agent socket is not listening; undefined when it is or none was asked for. */
   agentSocketProblem?: string;
   close(): Promise<void>;
 }
 
-/**
- * Who sent a request, decided by the listener it arrived on and never by anything the client
- * sends: the loopback TCP listener with the bearer token from daemon.json serves the owner;
- * the agent socket serves the agent's bash and needs no token.
- *
- * Caller policy, per route: an agent caller may use every route except creating, changing, or
- * running a command schedule, because the daemon runs command schedules on the host outside
- * the sandbox. A new route states here whether an agent caller may use it.
- */
 export type Caller = "owner" | "agent";
 
 const AGENT_COMMAND_SCHEDULE_REFUSAL = {
@@ -319,12 +308,10 @@ const inode = (path: string): bigint | undefined => {
   }
 };
 
-/**
- * Listen on the agent socket, owner-only (0600). A file left by a daemon that died is removed
- * first; the caller has already refused to start beside a live daemon. A socket that cannot
- * listen, such as one whose path is too long for a unix socket, leaves the daemon running
- * without it and is reported as the problem.
- */
+const removeSocketIfStillOurs = (path: string, own: bigint | undefined): void => {
+  if (own !== undefined && inode(path) === own) rmSync(path, { force: true });
+};
+
 async function listenAgentSocket(
   path: string,
   listener: (request: IncomingMessage, response: ServerResponse) => void,
@@ -342,6 +329,5 @@ async function listenAgentSocket(
     return { problem: `the agent socket ${path} cannot listen: ${error instanceof Error ? error.message : String(error)}`, remove() {} };
   }
   const own = inode(path);
-  // A daemon that started after this one owns a socket at the same path; leave that one in place.
-  return { server, remove: () => { if (own !== undefined && inode(path) === own) rmSync(path, { force: true }); } };
+  return { server, remove: () => removeSocketIfStillOurs(path, own) };
 }

@@ -6,10 +6,10 @@ import { harnessProgram } from "./commands/registry";
 const HELP_CODES = new Set(["commander.helpDisplayed", "commander.version"]);
 
 try {
-  const ownerOnly = isAgentCaller() ? (await import("./agent-caller")).ownerOnlyCommand(process.argv.slice(2)) : undefined;
-  if (ownerOnly) {
-    const { ownerOnlyRefusal } = await import("./agent-caller");
-    process.stderr.write(`${JSON.stringify(ownerOnlyRefusal(ownerOnly))}\n`);
+  const agentCaller = isAgentCaller() ? await import("./agent-caller") : undefined;
+  const ownerOnly = agentCaller?.ownerOnlyCommand(process.argv.slice(2));
+  if (agentCaller && ownerOnly) {
+    process.stderr.write(`${JSON.stringify(agentCaller.ownerOnlyRefusal(ownerOnly))}\n`);
     process.exitCode = 2;
   } else if (process.argv.length === 2) {
     const { runEntry } = await import("./entry");

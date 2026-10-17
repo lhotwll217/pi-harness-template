@@ -176,7 +176,6 @@ try {
     "schedule:update:schedule-1:daily", "schedule:run:schedule-1", "schedule:delete:schedule-1",
   ]);
 
-  // The agent socket: no token, the same routes, and no way to create, change, or run a command schedule.
   assert.equal(statSync(agentSocket).mode & 0o777, 0o600);
   const agent = gatewayClient(agentTransport(agentSocket));
   calls.length = 0;

@@ -15,7 +15,6 @@ export function requireOnboarded(): void {
   }
 }
 
-// The daemon starts first: the agent's own `pi-template` calls reach it but never start one.
 async function openInteractive(): Promise<void> {
   const { runInteractiveSession } = await import("./interactive");
   await withGateway(async () => await runInteractiveSession({}));

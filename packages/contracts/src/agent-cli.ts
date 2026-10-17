@@ -1,6 +1,4 @@
-// The agent reaches harness state through the same `pi-template` CLI the owner uses, from
-// bash (docs/security.md#the-agent-uses-its-own-cli). Contracts owns the split so the
-// permission rules and the CLI registry read one list.
+// Contracts owns the split so the permission rules and the CLI registry read one list.
 
 /** Top-level commands the agent may run; each gets a generated bash allow rule in every mode. */
 export const AGENT_CLI_COMMANDS = Object.freeze(["db", "docs", "notes", "schedule", "status", "doctor"] as const);

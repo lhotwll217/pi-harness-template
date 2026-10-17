@@ -50,7 +50,6 @@ function processExists(pid: number): boolean {
 type UnreachableProbe = Extract<GatewayProbe, { kind: "unreachable" }>;
 type ReachableProbe = Extract<GatewayProbe, { kind: "reachable" }>;
 
-/** A client whose daemon answered health and readiness, with those answers. */
 export type ConfirmedGatewayClient = GatewayClient & { readonly probe: Pick<ReachableProbe, "health" | "ready"> };
 
 const confirmedClient = (probe: ReachableProbe): ConfirmedGatewayClient =>

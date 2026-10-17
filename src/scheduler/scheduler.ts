@@ -446,7 +446,6 @@ export class Scheduler implements SchedulerService {
     } else if (input.payload.kind === ScheduledPayloadKind.Prompt) {
       if (!input.payload.prompt.trim()) throw new Error("scheduled prompt is required");
       const knownTools = new Set<string>(Object.values(AgentToolId));
-      // A client from before the data tools retired may still send their ids.
       const toolsAllow = withoutRetiredAgentTools(input.payload.toolsAllow ?? []);
       if (toolsAllow.some((tool) => !knownTools.has(tool))) {
         throw new Error("scheduled prompt contains an unknown tool id");
