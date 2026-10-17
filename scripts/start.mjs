@@ -143,7 +143,7 @@ async function main() {
 
   web = spawn("npm", ["--prefix", join(repositoryRoot, "apps", "web"), "run", "dev", "--", "--port", String(port)], {
     cwd: repositoryRoot,
-    env,
+    env: { ...env, NEXT_TELEMETRY_DISABLED: "1" },
     detached: true,
     stdio: ["ignore", process.stderr, process.stderr],
   });

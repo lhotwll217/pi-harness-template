@@ -36,8 +36,8 @@ export interface FakeGateway {
   ready: { ready: boolean; setupRequired: boolean };
   /** The events the next `POST /chats/:id/messages` streams, without `seq` (added in order). */
   reply: ReplyEvent[];
-  /** A status for the next send to answer instead of a stream, as the Gateway does when busy. */
-  refuseSend?: { status: number; error: string; code: string };
+  /** A refusal one route (`"POST /chats/c1/messages"`) answers instead of its result, as the Gateway does when busy. */
+  refuse?: { route: string; status: number; error: string; code: string };
   publish(event: GatewayEvent): void;
   close(): Promise<void>;
 }
@@ -60,7 +60,7 @@ export async function startFakeGateway(): Promise<FakeGateway> {
     notText: new Set<string>(),
     ready: { ready: true, setupRequired: false },
     reply: [] as ReplyEvent[],
-    refuseSend: undefined as FakeGateway["refuseSend"],
+    refuse: undefined as FakeGateway["refuse"],
   };
 
   const respond = (response: ServerResponse, status: number, body: unknown): void => {
@@ -80,6 +80,10 @@ export async function startFakeGateway(): Promise<FakeGateway> {
     if (request.headers.authorization !== `Bearer ${FAKE_TOKEN}`) return respond(response, 401, { error: "unauthorized" });
 
     const route = `${request.method} ${url.pathname}`;
+    if (state.refuse?.route === route) {
+      const { status, error, code } = state.refuse;
+      return respond(response, status, { error, code });
+    }
     if (route === "GET /ready") return respond(response, state.ready.ready ? 200 : 503, { ...state.ready, modules: {} });
     if (route === "GET /events") {
       response.writeHead(200, { "content-type": "text/event-stream" });
@@ -115,7 +119,6 @@ export async function startFakeGateway(): Promise<FakeGateway> {
     const id = decodeURIComponent(chatMatch[1]);
     const action = chatMatch[2];
     if (request.method === "POST" && action === "/messages") {
-      if (state.refuseSend) return respond(response, state.refuseSend.status, { error: state.refuseSend.error, code: state.refuseSend.code });
       response.writeHead(200, { "content-type": "application/x-ndjson" });
       state.reply.forEach((event, seq) => response.write(`${JSON.stringify({ seq, ...event })}\n`));
       response.end();

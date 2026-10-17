@@ -38,7 +38,9 @@ the app reports the daemon ready. It prints one line on stdout:
 pi-template: app ready at http://127.0.0.1:47812
 ```
 
-The web server's own output goes to stderr.
+The web server's own output goes to stderr. The launcher sets
+`NEXT_TELEMETRY_DISABLED=1` for the dev server, so a start sends Next.js no
+usage data.
 
 - `PI_TEMPLATE_WEB_PORT` sets the port (default `47812`, beside the daemon's
   `47811`). `0` picks a free loopback port, as `PI_TEMPLATE_PORT=0` does for the
@@ -72,6 +74,13 @@ holder of the Gateway token:
 | `GET /api/events` | `GET /events`, piped as is |
 | `GET`, `PUT /api/workspace/file?path=` | the same route; a stale save answers 409 with the file on disk |
 | `GET /api/workspace/tree` | `GET /workspace/tree` |
+
+A Gateway refusal reaches the page as one sentence
+(`ownerMessage` in `apps/web/src/lib/gateway-error.ts`) with the Gateway's
+status: `daemon_stopping` says to send again once the daemon restarts;
+`too_large`, `filesystem_error`, `invalid_path`, and a refused chat title lead
+with what failed and add the Gateway's reason when it is short enough to read.
+Other refusals, such as `chat_busy`, show the Gateway's own text.
 
 When the daemon is unreachable, `/api/events` answers one `event: daemon`
 frame and closes, so the browser keeps reconnecting and the page shows "The

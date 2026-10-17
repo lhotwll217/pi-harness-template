@@ -12,7 +12,7 @@ import type {
   WorkspaceWriteResult,
 } from "./gateway-contracts";
 import type { DaemonState } from "./chat-types";
-import { LocalGatewayError } from "./gateway-error";
+import { LocalGatewayError, ownerMessage } from "./gateway-error";
 import { GatewayStreamError, parseGatewayChatStream } from "./gateway-stream";
 
 export { LocalGatewayError } from "./gateway-error";
@@ -38,11 +38,6 @@ function currentDaemonInfo(): LocalDaemonInfo {
   return info as LocalDaemonInfo;
 }
 
-function gatewayMessage(value: unknown, fallback: string): string {
-  const error = value && typeof value === "object" ? (value as { error?: unknown }).error : undefined;
-  return typeof error === "string" && error.trim() && error.length <= 500 ? error : fallback;
-}
-
 async function request(path: string, init: RequestInit = {}): Promise<Response> {
   const info = currentDaemonInfo();
   const headers = new Headers(init.headers);
@@ -57,11 +52,12 @@ async function request(path: string, init: RequestInit = {}): Promise<Response> 
   if (!response.ok) {
     let body: unknown;
     try { body = await response.json(); } catch { body = undefined; }
-    const code = body && typeof body === "object" ? (body as { code?: unknown }).code : undefined;
+    const { code, error } = (body && typeof body === "object" ? body : {}) as { code?: unknown; error?: unknown };
+    const refusal = typeof code === "string" ? code : undefined;
     throw new LocalGatewayError(
       response.status,
-      gatewayMessage(body, "The harness could not complete that request."),
-      typeof code === "string" ? code : undefined,
+      ownerMessage(refusal, typeof error === "string" ? error : undefined, "The harness could not complete that request."),
+      refusal,
       body,
     );
   }
@@ -91,7 +87,12 @@ export async function getChat(id: ChatId): Promise<Chat> {
 }
 
 export async function renameChat(id: ChatId, title: string): Promise<ChatSummary> {
-  return await json<ChatSummary>(chatPath(id), withJson("PATCH", { title }));
+  try {
+    return await json<ChatSummary>(chatPath(id), withJson("PATCH", { title }));
+  } catch (error: unknown) {
+    if (!(error instanceof LocalGatewayError) || error.code !== "invalid_request") throw error;
+    throw new LocalGatewayError(400, `That title cannot be used: ${error.message}.`, error.code, error.body);
+  }
 }
 
 export async function deleteChat(id: ChatId): Promise<void> {

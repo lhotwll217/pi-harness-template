@@ -79,12 +79,30 @@ describe("POST /api/chats/:id/messages", () => {
   });
 
   it("passes a busy chat's refusal on with its status and message", async () => {
-    gateway.refuseSend = { status: 409, error: "chat c1 is replying; cancel it or wait", code: "chat_busy" };
+    gateway.refuse = { route: "POST /chats/c1/messages", status: 409, error: "chat c1 is replying; cancel it or wait", code: "chat_busy" };
 
     const response = await send("again");
 
     expect(response.status).toBe(409);
     expect(await response.text()).toBe("chat c1 is replying; cancel it or wait");
+  });
+
+  it("tells the owner to send again once a stopping daemon restarts", async () => {
+    gateway.refuse = { route: "POST /chats/c1/messages", status: 503, error: "the daemon is stopping; send again once it restarts", code: "daemon_stopping" };
+
+    const response = await send("again");
+
+    expect(response.status).toBe(503);
+    expect(await response.text()).toBe("The harness is stopping. Send again once it restarts.");
+  });
+
+  it("says a message is too large", async () => {
+    gateway.refuse = { route: "POST /chats/c1/messages", status: 413, error: "the request body is longer than 1000000 characters", code: "too_large" };
+
+    const response = await send("x");
+
+    expect(response.status).toBe(413);
+    expect(await response.text()).toBe("That is too large for the harness: the request body is longer than 1000000 characters.");
   });
 
   it("refuses a non-local Origin before calling the Gateway", async () => {
@@ -154,6 +172,23 @@ describe("chat list, history, rename, delete, cancel", () => {
     const deleted = await chat.DELETE(localRequest("/api/chats/c1", { method: "DELETE" }), routeParams("c1"));
     expect(await deleted.json()).toEqual({ ok: true });
     expect(gateway.chats).toEqual([]);
+  });
+
+  it("says why a title cannot be used", async () => {
+    gateway.chats = [summary];
+    gateway.refuse = {
+      route: "PATCH /chats/c1",
+      status: 400,
+      error: "title must not hold control, line-separator, or bidirectional-override characters",
+      code: "invalid_request",
+    };
+
+    const response = await chat.PATCH(localRequest("/api/chats/c1", { method: "PATCH", body: JSON.stringify({ title: "a\u202eb" }) }), routeParams("c1"));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: { message: "That title cannot be used: title must not hold control, line-separator, or bidirectional-override characters." },
+    });
   });
 
   it("cancels the named turn", async () => {
@@ -254,6 +289,30 @@ describe("workspace files", () => {
     const stale = await save("sha256:1");
     expect(stale.status).toBe(409);
     expect(await stale.json()).toEqual({ error: { message: "This file changed on disk." }, current: gateway.files.get("hello.md") });
+  });
+
+  it("says a file cannot be read or written, without the Gateway's raw text standing alone", async () => {
+    gateway.refuse = { route: "GET /workspace/file", status: 500, error: "hello.md: EACCES", code: "filesystem_error" };
+    const unreadable = await file.GET(localRequest("/api/workspace/file?path=hello.md"));
+    expect(unreadable.status).toBe(500);
+    expect(await unreadable.json()).toEqual({ error: { message: "The harness could not read or write that on disk: hello.md: EACCES." } });
+
+    gateway.refuse = { route: "PUT /workspace/file", status: 413, error: "hello.md is longer than 1000000 characters", code: "too_large" };
+    const tooLarge = await file.PUT(localRequest("/api/workspace/file?path=hello.md", { method: "PUT", body: JSON.stringify({ content: "x" }) }));
+    expect(tooLarge.status).toBe(413);
+    expect(await tooLarge.json()).toEqual({ error: { message: "That is too large for the harness: hello.md is longer than 1000000 characters." } });
+  });
+
+  it("says a path cannot be used, and drops a reason too long to read", async () => {
+    gateway.refuse = { route: "GET /workspace/file", status: 400, error: '".notes" names a hidden entry', code: "invalid_path" };
+    const hidden = await file.GET(localRequest("/api/workspace/file?path=.notes"));
+    expect(hidden.status).toBe(400);
+    expect(await hidden.json()).toEqual({ error: { message: 'That file path cannot be used: ".notes" names a hidden entry.' } });
+
+    const long = "a".repeat(256);
+    gateway.refuse = { route: "GET /workspace/file", status: 400, error: `"${long}" holds a name longer than 255 UTF-8 bytes`, code: "invalid_path" };
+    const tooLong = await file.GET(localRequest(`/api/workspace/file?path=${long}`));
+    expect(await tooLong.json()).toEqual({ error: { message: "That file path cannot be used." } });
   });
 
   it("refuses a save that is not JSON", async () => {
