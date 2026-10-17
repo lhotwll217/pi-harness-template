@@ -139,7 +139,10 @@ fails `pi-template doctor`.
 
 On, bash runs through the adapter and onboarding runs the probe. Off, bash runs
 on the host with the owner's permissions through Pi's local executor, and
-onboarding skips the probe. Either way a command sees only a short list of
+onboarding skips the probe. Either way bash takes Pi's timeout bounds, and a
+timeout or abort stops the command's whole process group: on, with SIGTERM and
+SIGKILL one second later; the tool returns then even if a descendant that left
+the group still holds its output. Either way a command sees only a short list of
 environment variables (`PATH`, `HOME`, locale, certificate paths and the like),
 so the daemon's own credentials stay out of transcripts.
 

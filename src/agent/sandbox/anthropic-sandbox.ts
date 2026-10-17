@@ -8,6 +8,7 @@ import {
   type SandboxRuntimeConfig,
 } from "@anthropic-ai/sandbox-runtime";
 import {
+  SANDBOXED_COMMAND_TERMINATION_GRACE_MS,
   commandEnvironment,
   failedSandboxChecks,
   type SandboxAdapter,
@@ -128,6 +129,7 @@ async function spawnSandboxed(
   return await new Promise((resolve, reject) => {
     const child = spawn(argv[0]!, argv.slice(1), {
       cwd: request.cwd,
+      detached: true,
       env: {
         ...commandEnvironment(process.env),
         ...commandEnvironment(request.env),
@@ -138,20 +140,41 @@ async function spawnSandboxed(
     });
     let timeout: NodeJS.Timeout | undefined;
     let timedOut = false;
+    let stopping = false;
+    let settled = false;
     let output = "";
-    const abort = (): void => { child.kill("SIGTERM"); };
+    const signalGroup = (signal: NodeJS.Signals): void => {
+      try {
+        process.kill(-child.pid!, signal);
+      } catch {}
+    };
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      request.signal?.removeEventListener("abort", stop);
+      // A descendant that left the process group can hold the pipes open forever.
+      child.stdout.destroy();
+      child.stderr.destroy();
+      if (output) request.onOutput(redactOutput(output));
+      resolve({ exitCode: child.exitCode, timedOut });
+    };
+    function stop(): void {
+      if (stopping || !child.pid) return;
+      stopping = true;
+      signalGroup("SIGTERM");
+      setTimeout(() => {
+        signalGroup("SIGKILL");
+        finish();
+      }, SANDBOXED_COMMAND_TERMINATION_GRACE_MS).unref();
+    }
     child.stdout.on("data", (chunk) => { output += String(chunk); });
     child.stderr.on("data", (chunk) => { output += String(chunk); });
     child.once("error", reject);
-    child.once("close", (exitCode) => {
-      if (timeout) clearTimeout(timeout);
-      request.signal?.removeEventListener("abort", abort);
-      if (output) request.onOutput(redactOutput(output));
-      resolve({ exitCode, timedOut });
-    });
-    if (request.timeoutMs) timeout = setTimeout(() => { timedOut = true; abort(); }, request.timeoutMs);
-    if (request.signal?.aborted) abort();
-    else request.signal?.addEventListener("abort", abort, { once: true });
+    child.once("close", finish);
+    if (request.timeoutMs) timeout = setTimeout(() => { timedOut = true; stop(); }, request.timeoutMs);
+    if (request.signal?.aborted) stop();
+    else request.signal?.addEventListener("abort", stop, { once: true });
   });
 }
 

@@ -189,6 +189,17 @@ export function enforcedSandboxPolicy(home: string, policy: SandboxPolicy): Sand
   };
 }
 
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+/** Pi's bash timeout rule (pi-coding-agent bash.js resolveTimeoutMs, not exported): Node timers overflow past 2^31-1 ms. */
+function resolveTimeoutMs(timeout: number | undefined): number | undefined {
+  if (timeout === undefined) return undefined;
+  if (!Number.isFinite(timeout) || timeout <= 0) throw new Error("Invalid timeout: must be a finite number of seconds");
+  const timeoutMs = timeout * 1000;
+  if (timeoutMs > MAX_TIMEOUT_MS) throw new Error(`Invalid timeout: maximum is ${MAX_TIMEOUT_MS / 1000} seconds`);
+  return timeoutMs;
+}
+
 function bashOperations(home: string, sandbox: SandboxAdapter): BashOperations {
   const policy = readSandboxPolicy(home);
   if (!policy?.enabled) {
@@ -201,15 +212,17 @@ function bashOperations(home: string, sandbox: SandboxAdapter): BashOperations {
   const enforced = enforcedSandboxPolicy(home, policy);
   return {
     exec: async (command, cwd, execution) => {
+      const timeoutMs = resolveTimeoutMs(execution.timeout);
       const { exitCode, timedOut } = await sandbox.execute(enforced, {
         command,
         cwd,
         env: execution.env,
         signal: execution.signal,
-        timeoutMs: execution.timeout === undefined ? undefined : execution.timeout * 1000,
+        timeoutMs,
         onOutput: execution.onData,
       });
-      // Pi's bash tool turns this message into "Command timed out after N seconds".
+      // Pi's bash tool turns these messages into "Command aborted" and "Command timed out after N seconds".
+      if (execution.signal?.aborted) throw new Error("aborted");
       if (timedOut) throw new Error(`timeout:${execution.timeout}`);
       return { exitCode };
     },

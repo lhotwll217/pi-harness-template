@@ -33,6 +33,7 @@ import {
   type SkillPolicy,
 } from "@pi-template/contracts";
 import { createLaunchdServiceAdapter, type DaemonServiceAdapter } from "../daemon/ensure";
+import { readAuthFile } from "./auth-file";
 import { runDoctor } from "./doctor";
 import { AGENT_DEFINITION, definitionIds } from "./agent-definition";
 import {
@@ -107,20 +108,6 @@ function readObject(path: string): JsonObject {
   }
 }
 
-function readAuthFile(path: string): JsonObject {
-  if (!existsSync(path)) return {};
-  let value: unknown;
-  try {
-    value = JSON.parse(readFileSync(path, "utf8").replace(/^\uFEFF/, ""));
-  } catch (error) {
-    throw new Error(`${path} could not be parsed; fix or remove it: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`${path} must hold a JSON object of provider credentials; fix or remove it`);
-  }
-  return value as JsonObject;
-}
-
 /** Pi 1.0.3 renamed provider azure-openai-responses to azure without migrating auth.json (earendil-works/pi#9714). */
 export function readStandaloneCredentials(path: string): JsonObject {
   const credentials = readAuthFile(path);
@@ -178,7 +165,7 @@ function selectedModel(paths: HarnessPaths): { provider: string; model: string }
 }
 
 function defaultAuthVerifier(paths: HarnessPaths): boolean {
-  return Object.keys(readObject(paths.piAuth)).length > 0;
+  return Object.keys(readAuthFile(paths.piAuth)).length > 0;
 }
 
 function sameJson(left: unknown, right: unknown): boolean {

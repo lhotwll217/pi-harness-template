@@ -48,6 +48,8 @@ export interface SandboxVerification {
   checks: SandboxVerificationChecks;
 }
 
+export const SANDBOXED_COMMAND_TERMINATION_GRACE_MS = 1_000;
+
 export interface SandboxedCommandRequest {
   command: string;
   cwd: string;
