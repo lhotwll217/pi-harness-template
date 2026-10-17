@@ -22,7 +22,8 @@ behavior: every action is one Gateway call.
 
 It is cut from Stitcher's `apps/web` (`d55847f`): Next.js 16, the AI SDK's
 `useChat`, AI Elements, and shadcn components. Stitcher's language-learning
-parts stay in Stitcher.
+parts stay in Stitcher. The licenses of the AI Elements, shadcn/ui, and Create
+Next App code it carries are in `apps/web/THIRD_PARTY_NOTICES`.
 
 ## Start it
 
@@ -38,6 +39,10 @@ the app reports the daemon ready. It prints one line on stdout:
 pi-template: app ready at http://127.0.0.1:47812
 ```
 
+npm prints its own banner on stdout above that line, so a script reads the last
+stdout line, or runs `npm start --silent` or `node scripts/start.mjs`, which
+print only the ready line.
+
 The web server's own output goes to stderr. The launcher sets
 `NEXT_TELEMETRY_DISABLED=1` for the dev server, so a start sends Next.js no
 usage data.
@@ -45,12 +50,14 @@ usage data.
 - `PI_TEMPLATE_WEB_PORT` sets the port (default `47812`, beside the daemon's
   `47811`). `0` picks a free loopback port, as `PI_TEMPLATE_PORT=0` does for the
   daemon.
-- An app already answering on the port is reused. Anything else on the port
-  stops the launch with a message naming the port.
+- An app already answering on the port is reused when it serves the same
+  harness home (`PI_TEMPLATE_HOME`). An app serving another home, or anything
+  else on the port, stops the launch with a message naming the port.
 - An un-onboarded home stops the launch with "run `./pi-template onboard`, then
   `npm start` again".
-- Ctrl-C stops the web server this launch started. The daemon keeps running;
-  `./pi-template` owns it.
+- Ctrl-C, a closed terminal, or a reader that closes stdout
+  (`npm start | head -n1`) stops the web server this launch started; a second
+  Ctrl-C kills it at once. The daemon keeps running; `./pi-template` owns it.
 
 ## How the browser reaches the harness
 
@@ -66,7 +73,7 @@ holder of the Gateway token:
 
 | App route | Gateway route |
 |---|---|
-| `GET /api/status` | `GET /ready`, answered as `{ daemon: "ready" \| "setup" \| "down" }` |
+| `GET /api/status` | `GET /ready`, answered as `{ daemon: "ready" \| "setup" \| "down", home }`, where `home` is the harness home the app serves |
 | `GET /api/chats` | `GET /chats` |
 | `GET`, `PATCH`, `DELETE /api/chats/:id` | the same `/chats/:id` route; a chat id the Gateway has not stored opens empty |
 | `POST /api/chats/:id/messages` | `POST /chats/:id/messages`; the NDJSON reply is re-encoded as the AI SDK UI message stream |

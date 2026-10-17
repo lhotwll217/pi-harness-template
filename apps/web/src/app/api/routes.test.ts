@@ -227,16 +227,16 @@ describe("chat list, history, rename, delete, cancel", () => {
 });
 
 describe("GET /api/status", () => {
-  it("reports ready, setup, and down", async () => {
-    expect(await (await status.GET(localRequest("/api/status"))).json()).toEqual({ daemon: "ready" });
+  it("reports ready, setup, and down, with the home it serves", async () => {
+    expect(await (await status.GET(localRequest("/api/status"))).json()).toEqual({ daemon: "ready", home: gateway.home });
 
     gateway.ready = { ready: false, setupRequired: true };
-    expect(await (await status.GET(localRequest("/api/status"))).json()).toEqual({ daemon: "setup" });
+    expect(await (await status.GET(localRequest("/api/status"))).json()).toEqual({ daemon: "setup", home: gateway.home });
 
     process.env.PI_TEMPLATE_HOME = "/nonexistent/pi-template-home";
     const down = await status.GET(localRequest("/api/status"));
     expect(down.status).toBe(200);
-    expect(await down.json()).toEqual({ daemon: "down" });
+    expect(await down.json()).toEqual({ daemon: "down", home: "/nonexistent/pi-template-home" });
   });
 });
 

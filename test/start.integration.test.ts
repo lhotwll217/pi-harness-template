@@ -27,24 +27,33 @@ chmodSync(join(root, "pi-template"), 0o755);
 
 writeFileSync(join(root, "apps", "web", "package.json"), JSON.stringify({ name: "web", private: true, scripts: { dev: "node server.cjs" } }));
 writeFileSync(join(root, "apps", "web", "server.cjs"), `
+const { execFileSync } = require("node:child_process");
 const { writeFileSync } = require("node:fs");
 const port = Number(process.argv[process.argv.indexOf("--port") + 1]);
 writeFileSync(${JSON.stringify(join(root, "web.pid"))}, String(process.pid));
+writeFileSync(${JSON.stringify(join(root, "web.pgid"))}, execFileSync("ps", ["-o", "pgid=", "-p", String(process.pid)], { encoding: "utf8" }).trim());
 console.log("stand-in dev server on " + port);
 require("node:http").createServer((request, response) => {
   response.writeHead(200, { "content-type": "application/json" });
-  response.end(JSON.stringify({ daemon: "ready" }));
+  response.end(JSON.stringify({ daemon: "ready", home: process.env.PI_TEMPLATE_HOME }));
 }).listen(port, "127.0.0.1");
 `);
 
+const home = join(root, "home");
+
 interface Launch { stdout: string; stderr: string; code: number | null; signal: NodeJS.Signals | null }
 
-function launch(env: NodeJS.ProcessEnv, onStdout?: (stdout: string, child: ReturnType<typeof spawn>) => void): Promise<Launch> {
+function launch(
+  env: NodeJS.ProcessEnv,
+  onStdout?: (stdout: string, child: ReturnType<typeof spawn>) => void,
+  closeStdout = false,
+): Promise<Launch> {
   return new Promise((done, fail) => {
     const child = spawn(process.execPath, [join(root, "scripts", "start.mjs")], {
       cwd: root,
-      env: { ...process.env, PI_TEMPLATE_WEB_PORT: "0", ...env },
+      env: { ...process.env, PI_TEMPLATE_HOME: home, PI_TEMPLATE_WEB_PORT: "0", ...env },
     });
+    if (closeStdout) child.stdout.destroy();
     let stdout = "";
     let stderr = "";
     const deadline = setTimeout(() => { child.kill("SIGKILL"); fail(new Error(`launch timed out; stderr: ${stderr}`)); }, 30_000);
@@ -57,6 +66,21 @@ function launch(env: NodeJS.ProcessEnv, onStdout?: (stdout: string, child: Retur
 const alive = (pid: number): boolean => {
   try { process.kill(pid, 0); return true; } catch { return false; }
 };
+
+const webGroups: number[] = [];
+const webGroup = (): number => {
+  const pgid = Number(readFileSync(join(root, "web.pgid"), "utf8"));
+  webGroups.push(pgid);
+  return pgid;
+};
+
+const groupAlive = (pgid: number): boolean => {
+  try { process.kill(-pgid, 0); return true; } catch { return false; }
+};
+
+async function waitForGroupGone(pgid: number): Promise<void> {
+  for (let waited = 0; groupAlive(pgid) && waited < 8_000; waited += 50) await new Promise((r) => setTimeout(r, 50));
+}
 
 async function stub(body: unknown): Promise<{ server: Server; port: number }> {
   const server = createServer((_request, response) => {
@@ -73,7 +97,7 @@ try {
     if (!stdout.endsWith("\n") || url) return;
     url = stdout.trim().replace("pi-template: app ready at ", "");
     void fetch(`${url}/api/status`).then((response) => response.json()).then((body) => {
-      assert.deepEqual(body, { daemon: "ready" });
+      assert.deepEqual(body, { daemon: "ready", home });
       child.kill("SIGINT");
     });
   });
@@ -87,7 +111,38 @@ try {
   assert.equal(alive(daemonPid), true, "the daemon keeps running");
 
   rmSync(join(root, "web.pid"));
-  const running = await stub({ daemon: "ready" });
+  let hungUpGroup = 0;
+  const hungUp = await launch({}, (stdout, child) => {
+    if (!stdout.endsWith("\n") || hungUpGroup) return;
+    hungUpGroup = webGroup();
+    child.kill("SIGHUP");
+  });
+  assert.notEqual(hungUpGroup, 0);
+  await waitForGroupGone(hungUpGroup);
+  assert.equal(groupAlive(hungUpGroup), false, "a closed terminal (SIGHUP) stops the whole web process group");
+  assert.equal(hungUp.code, 0, hungUp.stderr);
+
+  rmSync(join(root, "web.pid"));
+  const unread = await launch({}, undefined, true);
+  const unreadGroup = webGroup();
+  await waitForGroupGone(unreadGroup);
+  assert.equal(groupAlive(unreadGroup), false, "a reader that closes stdout (`npm start | head -n1`) stops the web process group");
+  assert.equal(unread.code, 1);
+  assert.equal(unread.stderr.split("\n").filter((line) => line.startsWith("pi-template:")).join("\n"),
+    "pi-template: nothing is reading stdout (EPIPE); stopped the web app.");
+
+  rmSync(join(root, "web.pid"));
+  const elsewhere = await stub({ daemon: "ready", home: "/elsewhere/pi-template-home" });
+  const mismatched = await launch({ PI_TEMPLATE_WEB_PORT: String(elsewhere.port) });
+  elsewhere.server.close();
+  assert.equal(mismatched.code, 1);
+  assert.equal(mismatched.stdout, "");
+  assert.equal(
+    mismatched.stderr,
+    `pi-template: the app on port ${elsewhere.port} serves /elsewhere/pi-template-home, not ${home}. Stop it, or set PI_TEMPLATE_WEB_PORT to a free port.\n`,
+  );
+
+  const running = await stub({ daemon: "ready", home });
   const reused = await launch({ PI_TEMPLATE_WEB_PORT: String(running.port) });
   running.server.close();
   assert.equal(reused.stdout, `pi-template: app ready at http://127.0.0.1:${running.port}\n`);
@@ -111,8 +166,11 @@ try {
 
   const badPort = await launch({ PI_TEMPLATE_WEB_PORT: "web" });
   assert.equal(badPort.stderr, "pi-template: PI_TEMPLATE_WEB_PORT must be an integer from 0 through 65535.\n");
-  console.log("✓ npm start prints the app URL, reuses its own app, refuses a stranger, and Ctrl-C leaves the daemon");
+  console.log("✓ npm start prints the app URL, reuses its own app, refuses a stranger or another home, stops the web group on Ctrl-C, SIGHUP, or a closed stdout, and leaves the daemon");
 } finally {
+  for (const pgid of webGroups) {
+    try { process.kill(-pgid, "SIGKILL"); } catch {}
+  }
   for (const file of ["web.pid", "daemon.pid"]) {
     try { process.kill(Number(readFileSync(join(root, file), "utf8")), "SIGKILL"); } catch {}
   }

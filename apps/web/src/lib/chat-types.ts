@@ -36,4 +36,5 @@ export type DaemonState = "ready" | "setup" | "down";
 
 export interface AppStatus {
   readonly daemon: DaemonState;
+  readonly home: string;
 }

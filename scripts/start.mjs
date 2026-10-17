@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 // stdout carries one line, `pi-template: app ready at http://127.0.0.1:<port>`, so a script or
-// an agent can read the URL; the web server's own output goes to stderr. Ctrl-C stops only the
-// web server this launch started. The daemon belongs to the CLI and keeps running.
+// an agent can read the URL; the web server's own output goes to stderr. `npm start` adds npm's
+// banner above it, so scripts run `npm start --silent` or `node scripts/start.mjs`, or read the
+// last stdout line. Ctrl-C, SIGHUP, or a closed stdout stops only the web server this launch
+// started. The daemon belongs to the CLI and keeps running.
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -113,13 +116,18 @@ async function stopWeb() {
   await Promise.race([exited, forced]);
 }
 
-const cancel = () => {
-  if (stopping) return;
+/** A second signal while stopping kills the web group outright. SIGHUP is a closed terminal. */
+const stop = (code, message) => {
+  if (stopping) {
+    try { process.kill(-web.pid, "SIGKILL"); } catch {}
+    process.exit(code);
+  }
   stopping = true;
-  void stopWeb().then(() => process.exit(0), () => process.exit(1));
+  const exit = () => (message ? process.stderr.write(`pi-template: ${message}\n`, () => process.exit(code)) : process.exit(code));
+  void stopWeb().then(exit, () => process.exit(1));
 };
-process.once("SIGINT", cancel);
-process.once("SIGTERM", cancel);
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(signal, () => stop(0));
+process.stdout.on("error", (error) => stop(1, `nothing is reading stdout (${error.code})${web ? "; stopped the web app" : ""}.`));
 
 async function main() {
   const env = { ...process.env };
@@ -133,6 +141,13 @@ async function main() {
     if (!isAppStatus(existing)) {
       throw new LaunchError(
         `something on port ${port} is not this app (${describeAnswer(existing)}). Stop it, or set PI_TEMPLATE_WEB_PORT to a free port.`,
+      );
+    }
+    // The default home of harnessPaths() in @pi-template/contracts/harness-home.
+    const home = env.PI_TEMPLATE_HOME ?? join(homedir(), ".pi-template");
+    if (existing.body.home !== home) {
+      throw new LaunchError(
+        `the app on port ${port} serves ${existing.body.home}, not ${home}. Stop it, or set PI_TEMPLATE_WEB_PORT to a free port.`,
       );
     }
     const settled = await waitForReady(`${url}/api/status`, () => false);
