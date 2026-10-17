@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createServer as createNetServer, type Socket } from "node:net";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -131,6 +132,15 @@ try {
   await new Promise<void>((resolveWait) => setTimeout(resolveWait, 2_000));
   assert.equal(existsSync(harnessPaths(absentHome).daemonInfo), false, "no daemon published discovery");
   assert.equal(existsSync(harnessPaths(absentHome).agentSocket), false, "no daemon listens for the agent");
+  const hungSockets = new Set<Socket>();
+  const hung = createNetServer((socket) => { hungSockets.add(socket); });
+  await new Promise<void>((resolveListen) => hung.listen(harnessPaths(absentHome).agentSocket, resolveListen));
+  assert.deepEqual(await agentCli(["notes", "list"], absentHome), {
+    status: 1,
+    stdout: "",
+    stderr: '{"error":"the pi-template daemon did not answer within 1 s","hint":"tell the owner the daemon is not answering; the agent never restarts it"}\n',
+  });
+  await new Promise<void>((resolveClose) => { hung.close(() => resolveClose()); for (const socket of hungSockets) socket.destroy(); });
   for (const [args, command] of [[["onboard", "--permission", "allow"], "pi-template onboard"], [["daemon"], "pi-template daemon"], [[], "pi-template with no command"]] as const) {
     assert.deepEqual(await agentCli(args, absentHome), {
       status: 2,

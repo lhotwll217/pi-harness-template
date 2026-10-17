@@ -33,6 +33,8 @@ export interface DoctorOptions {
   taskCwd?: string;
   providerModelVerifier?: (provider: string, model: string) => boolean;
   platform?: NodeJS.Platform;
+  /** Why the daemon running this check has no agent socket, when it has none. */
+  agentSocketProblem?: string;
 }
 
 export interface DoctorReport {
@@ -68,8 +70,9 @@ export interface DoctorReport {
   };
 }
 
-// sun_path holds 104 bytes on macOS and 108 on Linux, NUL included.
-const maxSocketPathBytes = (platform: NodeJS.Platform): number => platform === "darwin" ? 103 : 107;
+// sun_path holds 104 bytes on macOS, where Node 26 listens on a 104-byte path and fails at 105,
+// and 108 on Linux, NUL included.
+const maxSocketPathBytes = (platform: NodeJS.Platform): number => platform === "darwin" ? 104 : 107;
 
 async function healthProblem(socketPath: string): Promise<string | undefined> {
   try {
@@ -81,7 +84,12 @@ async function healthProblem(socketPath: string): Promise<string | undefined> {
   }
 }
 
-async function agentCliReach(socketPath: string, sandboxOn: boolean, platform: NodeJS.Platform): Promise<DoctorReport["checks"]["agentCli"]> {
+async function agentCliReach(
+  socketPath: string,
+  sandboxOn: boolean,
+  platform: NodeJS.Platform,
+  socketProblem: string | undefined,
+): Promise<DoctorReport["checks"]["agentCli"]> {
   for (const program of [join(checkoutRoot, "pi-template"), join(dirname(process.execPath), "node")]) {
     try {
       accessSync(program, constants.X_OK);
@@ -95,6 +103,7 @@ async function agentCliReach(socketPath: string, sandboxOn: boolean, platform: N
       reason: `the agent socket ${socketPath} is longer than a unix socket path may be; move the harness home to a shorter path`,
     };
   }
+  if (socketProblem) return { reachable: false, reason: socketProblem };
   const problem = await healthProblem(socketPath);
   if (problem) return { reachable: false, reason: `the daemon does not answer on the agent socket ${socketPath} (${problem})` };
   if (sandboxOn && platform !== "darwin") {
@@ -214,7 +223,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
       configured: service === "installed" || service === "declined",
       configuration: service,
     },
-    agentCli: await agentCliReach(paths.agentSocket, sandbox.enabled, options.platform ?? process.platform),
+    agentCli: await agentCliReach(paths.agentSocket, sandbox.enabled, options.platform ?? process.platform, options.agentSocketProblem),
   };
   const report = { ok: false, checks };
   report.ok = setupReady(report) && checks.agentCli.reachable;

@@ -1,7 +1,9 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { chmodSync, rmSync, statSync } from "node:fs";
+import { chmodSync, lstatSync, rmSync, statSync, type Stats } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { connect } from "node:net";
 import {
+  DAEMON_PROBE_TIMEOUT_MS,
   DEFAULT_DAEMON_PORT,
   DatabaseQueryAction,
   ScheduledPayloadKind,
@@ -313,13 +315,30 @@ const removeSocketIfStillOurs = (path: string, own: bigint | undefined): void =>
   if (own !== undefined && inode(path) === own) rmSync(path, { force: true });
 };
 
+function answers(path: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = connect(path);
+    socket.setTimeout(DAEMON_PROBE_TIMEOUT_MS, () => { socket.destroy(); resolve(true); });
+    socket.once("connect", () => { socket.destroy(); resolve(true); });
+    socket.once("error", () => resolve(false));
+  });
+}
+
+/** Never throws: a socket that cannot listen leaves the daemon running, and doctor names the problem. */
 async function listenAgentSocket(
   path: string,
   listener: (request: IncomingMessage, response: ServerResponse) => void,
 ): Promise<{ server?: Server; problem?: string; remove(): void }> {
-  rmSync(path, { force: true });
+  const refused = (problem: string) => ({ problem, remove() {} });
+  let existing: Stats | undefined;
+  try {
+    existing = lstatSync(path);
+  } catch {}
+  if (existing && !existing.isSocket()) return refused(`${path} exists and is not a socket; the owner removes it and restarts the daemon`);
+  if (existing && await answers(path)) return refused(`another daemon already listens on ${path}`);
   const server = createServer(listener);
   try {
+    rmSync(path, { force: true });
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
       server.listen(path, () => resolve());
@@ -327,7 +346,7 @@ async function listenAgentSocket(
     chmodSync(path, 0o600);
   } catch (error) {
     server.close();
-    return { problem: `the agent socket ${path} cannot listen: ${error instanceof Error ? error.message : String(error)}`, remove() {} };
+    return refused(`the agent socket ${path} cannot listen: ${error instanceof Error ? error.message : String(error)}`);
   }
   const own = inode(path);
   return { server, remove: () => removeSocketIfStillOurs(path, own) };

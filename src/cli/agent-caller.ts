@@ -28,6 +28,12 @@ export async function connectAgentGateway(): Promise<ConfirmedGatewayClient> {
         "the owner starts it with `pi-template status`; the agent never starts it",
       );
     }
+    if (codes.includes("ABORT_ERR")) {
+      throw new CliFailure(
+        `the pi-template daemon did not answer within ${DAEMON_PROBE_TIMEOUT_MS / 1000} s`,
+        "tell the owner the daemon is not answering; the agent never restarts it",
+      );
+    }
     if (codes.includes("EINVAL")) {
       throw new CliFailure(`the agent socket ${socket} is longer than a unix socket path may be`, "the owner runs `pi-template doctor` to see why");
     }

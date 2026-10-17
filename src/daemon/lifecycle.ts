@@ -193,7 +193,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
       events: {
         subscribe: (listener) => state.bus.subscribe((event) => listener(gatewayEvent(event.kind))),
       },
-      diagnostics: { doctor: () => runDoctor({ home: paths.home }) },
+      diagnostics: { doctor: () => runDoctor({ home: paths.home, agentSocketProblem: gateway?.agentSocketProblem }) },
     });
     gatewayPort = gateway.port;
     modules.gateway = true;

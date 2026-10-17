@@ -254,7 +254,15 @@ try {
   });
   assert.equal(stopped.ok, false);
   assert.match(formatDoctorReport(stopped), /^Agent CLI: unreachable \(the daemon does not answer on the agent socket .* \(ENOENT\)\)$/m);
-  const longHome = join(home, "x".repeat(110));
+  // macOS listens on a 104-byte socket path and refuses 105.
+  const limitHome = join(home, "y".repeat(104 - Buffer.byteLength(join(home, "y", "agent.sock")) + 1));
+  ensureHarnessWorkspace(limitHome);
+  assert.equal(Buffer.byteLength(join(limitHome, "agent.sock")), 104);
+  assert.deepEqual((await runDoctor({ home: limitHome, providerModelVerifier: () => true, platform: "darwin" })).checks.agentCli, {
+    reachable: false,
+    reason: `the daemon does not answer on the agent socket ${join(limitHome, "agent.sock")} (ENOENT)`,
+  });
+  const longHome = join(home, "y".repeat(104 - Buffer.byteLength(join(home, "y", "agent.sock")) + 2));
   ensureHarnessWorkspace(longHome);
   assert.deepEqual((await runDoctor({ home: longHome, providerModelVerifier: () => true, platform: "darwin" })).checks.agentCli, {
     reachable: false,
