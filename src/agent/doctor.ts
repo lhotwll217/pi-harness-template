@@ -70,8 +70,8 @@ export interface DoctorReport {
   };
 }
 
-// sun_path holds 104 bytes on macOS, where Node 26 listens on a 104-byte path and fails at 105,
-// and 108 on Linux, NUL included.
+// macOS lets a socket path fill all 104 bytes of sun_path (Node 26 listens at 104, fails at 105);
+// Linux keeps one of its 108 for the NUL.
 const maxSocketPathBytes = (platform: NodeJS.Platform): number => platform === "darwin" ? 104 : 107;
 
 async function healthProblem(socketPath: string): Promise<string | undefined> {
