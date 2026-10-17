@@ -47,6 +47,10 @@ try {
   const helpCommand = piTemplate("help", "daemon");
   assert.equal(helpCommand.status, 0, helpCommand.stderr);
   assert.equal(helpCommand.stdout, pages.find(({ command }) => command === "pi-template daemon")!.help);
+  assert.match(
+    pages.find(({ command }) => command === "pi-template schedule add")!.help,
+    /^ {2}--tool <id> +tool the prompt's agent turn may use \(repeatable; default none\)$/m,
+  );
 
   const verb = piTemplate("docs", "read", "--help");
   assert.equal(verb.status, 0, verb.stderr);
