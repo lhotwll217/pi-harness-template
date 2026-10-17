@@ -4,6 +4,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureHarnessWorkspace } from "@pi-template/contracts";
+import { acknowledgeAgentDefinition } from "../../test/helpers/onboarding";
 import { helpPages } from "../cli/commands/registry";
 import { schemaReference } from "../state/schema-docs";
 import { createHarnessSession } from "./runtime";
@@ -45,6 +47,7 @@ function helpInTerminal(columns: number): string[] {
 }
 
 async function sessionSystemPrompt(): Promise<string> {
+  acknowledgeAgentDefinition(ensureHarnessWorkspace(home));
   const created = await createHarnessSession({
     home,
     cwd,
