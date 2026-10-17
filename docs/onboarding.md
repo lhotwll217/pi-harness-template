@@ -87,7 +87,11 @@ session (interactive, `pi-template prompt`, and scheduled) refuses to start,
 `resources.unacknowledged`, and a rerun of onboarding without
 `--acknowledge-resources` stops. Each names the new entries and the command that
 acknowledges them. A home that never recorded a resource review gets the same
-refusal, worded as no review yet, pointing at `pi-template onboard`.
+refusal, worded as no review yet, pointing at `pi-template onboard`. A
+non-interactive rerun that changes a resource answer (`--approve-workspace-context`,
+`--workspace-skills`, or `--skill`) keeps the recorded acknowledgement while the
+agent definition is unchanged; otherwise it exits 2 and names
+`--acknowledge-resources`.
 
 ## Agent-operated onboarding
 
