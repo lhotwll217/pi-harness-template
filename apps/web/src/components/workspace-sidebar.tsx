@@ -12,7 +12,7 @@ import {
   MoreHorizontalIcon,
   NotebookIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -89,8 +89,11 @@ export function WorkspaceSidebar({
   onRenameChat,
   onDeleteChat,
 }: WorkspaceSidebarProps) {
-  const [chatRenaming, setChatRenaming] = useState<{ readonly id: ChatId; readonly was: string; readonly title: string }>();
-  const [chatDeleting, setChatDeleting] = useState<{ readonly id: ChatId; readonly title: string }>();
+  // A dialog keeps its target after it closes, so the closing animation still shows the chat's name.
+  const [chatRenaming, setChatRenaming] = useState<{ readonly id: ChatId; readonly was: string; readonly title: string; readonly open: boolean }>();
+  const [chatDeleting, setChatDeleting] = useState<{ readonly id: ChatId; readonly title: string; readonly open: boolean }>();
+  const closeRename = useCallback(() => setChatRenaming((current) => (current ? { ...current, open: false } : current)), []);
+  const closeDelete = useCallback(() => setChatDeleting((current) => (current ? { ...current, open: false } : current)), []);
   const rowsRef = useRef<HTMLDivElement>(null);
 
   const rows = useMemo(() => flattenVisible(tree, expanded, chats, localChats), [chats, expanded, localChats, tree]);
@@ -103,11 +106,11 @@ export function WorkspaceSidebar({
 
   const commitChatRename = useCallback(() => {
     const active = chatRenaming;
-    setChatRenaming(undefined);
+    closeRename();
     if (active) onRenameChat(active.id, active.title.trim());
-  }, [chatRenaming, onRenameChat]);
+  }, [chatRenaming, closeRename, onRenameChat]);
 
-  const chatRenameReady = chatRenaming !== undefined
+  const chatRenameReady = chatRenaming?.open === true
     && chatRenaming.title.trim() !== ""
     && chatRenaming.title.trim() !== chatRenaming.was;
 
@@ -140,33 +143,40 @@ export function WorkspaceSidebar({
     </Button>
   );
 
+  const filesNotes = (
+    <>
+      {loading && !tree && <p className="px-2 py-3 text-xs text-muted-foreground">Reading the files folder…</p>}
+      {errorMessage && <p className="px-2 py-3 text-xs text-destructive" role="alert">{errorMessage}</p>}
+      {filesEmpty && <p className="py-1 pl-10 text-xs text-muted-foreground">No files yet.</p>}
+      {tree?.truncated && filesExpanded && <p className="py-1 pl-10 text-xs text-muted-foreground">Only the first files are listed.</p>}
+    </>
+  );
+
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-sidebar text-sidebar-foreground">
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
         <div aria-label="Workspace" className="flex flex-col gap-0.5" onKeyDown={onKeyDown} ref={rowsRef} role="tree">
           {rows.map((row) => (
-            <SidebarRow
-              activeKey={activeKey}
-              cursorKey={cursor ? treeRowKey(cursor) : undefined}
-              key={row.key}
-              onActivate={() => activateRow(row)}
-              onChatDelete={(id) => setChatDeleting({ id, title: row.label })}
-              onChatRename={(id) => setChatRenaming({ id, was: row.label, title: row.label })}
-              onFocusRow={onFocusRow}
-              onToggle={onToggle}
-              row={row}
-              trailing={row.id.kind === "files" ? filesActions : row.id.kind === "chats" ? chatsActions : undefined}
-            />
+            <Fragment key={row.key}>
+              {row.id.kind === "chats" && filesNotes}
+              <SidebarRow
+                activeKey={activeKey}
+                cursorKey={cursor ? treeRowKey(cursor) : undefined}
+                onActivate={() => activateRow(row)}
+                onChatDelete={(id) => setChatDeleting({ id, title: row.label, open: true })}
+                onChatRename={(id) => setChatRenaming({ id, was: row.label, title: row.label, open: true })}
+                onFocusRow={onFocusRow}
+                onToggle={onToggle}
+                row={row}
+                trailing={row.id.kind === "files" ? filesActions : row.id.kind === "chats" ? chatsActions : undefined}
+              />
+            </Fragment>
           ))}
+          {!rows.some((row) => row.id.kind === "chats") && filesNotes}
         </div>
-
-        {loading && !tree && <p className="px-2 py-3 text-xs text-muted-foreground">Reading the files folder…</p>}
-        {errorMessage && <p className="px-2 py-3 text-xs text-destructive" role="alert">{errorMessage}</p>}
-        {filesEmpty && <p className="py-1 pl-10 text-xs text-muted-foreground">No files yet.</p>}
-        {tree?.truncated && filesExpanded && <p className="py-1 pl-10 text-xs text-muted-foreground">Only the first files are listed.</p>}
       </div>
 
-      <Dialog onOpenChange={(open) => { if (!open) setChatRenaming(undefined); }} open={chatRenaming !== undefined}>
+      <Dialog onOpenChange={(open) => { if (!open) closeRename(); }} open={chatRenaming?.open === true}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Rename chat</DialogTitle>
@@ -181,14 +191,14 @@ export function WorkspaceSidebar({
               value={chatRenaming?.title ?? ""}
             />
             <DialogFooter className="mt-4">
-              <Button onClick={() => setChatRenaming(undefined)} type="button" variant="outline">Cancel</Button>
+              <Button onClick={closeRename} type="button" variant="outline">Cancel</Button>
               <Button disabled={!chatRenameReady} type="submit">Save</Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      <AlertDialog onOpenChange={(open) => { if (!open) setChatDeleting(undefined); }} open={chatDeleting !== undefined}>
+      <AlertDialog onOpenChange={(open) => { if (!open) closeDelete(); }} open={chatDeleting?.open === true}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {chatDeleting?.title}?</AlertDialogTitle>
@@ -199,7 +209,7 @@ export function WorkspaceSidebar({
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => { const active = chatDeleting; setChatDeleting(undefined); if (active) onDeleteChat(active.id); }}
+              onClick={() => { const active = chatDeleting; closeDelete(); if (active) onDeleteChat(active.id); }}
               variant="destructive"
             >
               Delete

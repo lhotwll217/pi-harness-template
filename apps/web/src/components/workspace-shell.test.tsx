@@ -172,6 +172,14 @@ describe("WorkspaceShell files", () => {
     expect(await screen.findByRole("treeitem", { name: /hello\.md/ })).toBeDefined();
   });
 
+  it("says the files folder is empty under Files, above the Chats section", async () => {
+    renderShell();
+    const empty = await screen.findByText("No files yet.");
+    const chats = await screen.findByRole("treeitem", { name: /^Chats/ });
+
+    expect(empty.compareDocumentPosition(chats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("creates Untitled.md from the Files section and opens it", async () => {
     const user = userEvent.setup();
     renderShell();
