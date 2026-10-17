@@ -185,14 +185,12 @@ function commaEdit(text: string, start: number, end: number) {
 }
 
 // jsonc-parser's removal range includes neighboring comments. Remove only the property and its
-// separator so owner comments are not part of the deletion range.
+// separator so owner comments are not part of the deletion range; a property alone on its line
+// takes the line with it.
 function removeJsoncProperty(text: string, path: (string | number)[]): string {
   const located = jsoncProperty(text, path);
   if (!located) return text;
   const { property, siblings, index } = located;
-  const edits: { offset: number; length: number; content: string }[] = [
-    { offset: property.offset, length: property.length, content: "" },
-  ];
   const next: Node | undefined = siblings[index + 1];
   const previous: Node | undefined = siblings[index - 1];
   const separator = index < siblings.length - 1 && next
@@ -200,7 +198,18 @@ function removeJsoncProperty(text: string, path: (string | number)[]): string {
     : index > 0 && previous
       ? commaEdit(text, previous.offset + previous.length, property.offset)
       : undefined;
-  if (separator) edits.push(separator);
+  const trailing = separator && separator.offset > property.offset ? separator : undefined;
+  const end = trailing ? trailing.offset + trailing.length : property.offset + property.length;
+  const lineStart = text.lastIndexOf("\n", property.offset - 1) + 1;
+  const lineEnd = text.indexOf("\n", end);
+  const ownLine = lineEnd !== -1
+    && !text.slice(lineStart, property.offset).trim()
+    && !text.slice(property.offset + property.length, end - (trailing?.length ?? 0)).trim()
+    && !text.slice(end, lineEnd).trim();
+  const edits = ownLine
+    ? [{ offset: lineStart, length: lineEnd + 1 - lineStart, content: "" }]
+    : [{ offset: property.offset, length: property.length, content: "" }];
+  if (separator && !(ownLine && trailing)) edits.push(separator);
   return applyEdits(text, edits);
 }
 
@@ -260,12 +269,12 @@ function reconcilePermissionDocument(
 
   nextText = setJsoncDefaultFirst(nextText, ["permission", "path", "*"], nextPath["*"]);
   for (const [pattern, value] of Object.entries(existingPath)) {
-    if (isGeneratedProtectedRule(value)) {
+    if (isGeneratedProtectedRule(value) && !isGeneratedProtectedRule(nextPath[pattern])) {
       nextText = removeJsoncProperty(nextText, ["permission", "path", pattern]);
     }
   }
   for (const [pattern, value] of Object.entries(nextPath)) {
-    if (isGeneratedProtectedRule(value)) {
+    if (isGeneratedProtectedRule(value) && !isGeneratedProtectedRule(existingPath[pattern])) {
       nextText = setJsoncAfterDefault(nextText, ["permission", "path", pattern], value);
     }
   }
