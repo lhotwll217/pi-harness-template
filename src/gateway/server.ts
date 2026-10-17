@@ -1,7 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { chmodSync, lstatSync, rmSync, statSync, type Stats } from "node:fs";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { connect } from "node:net";
+import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
   DAEMON_PROBE_TIMEOUT_MS,
   DEFAULT_DAEMON_PORT,
@@ -315,12 +314,14 @@ const removeSocketIfStillOurs = (path: string, own: bigint | undefined): void =>
   if (own !== undefined && inode(path) === own) rmSync(path, { force: true });
 };
 
+/** Whether a daemon holds the socket: it answers, or it accepts and then hangs. */
 function answers(path: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const socket = connect(path);
-    socket.setTimeout(DAEMON_PROBE_TIMEOUT_MS, () => { socket.destroy(); resolve(true); });
-    socket.once("connect", () => { socket.destroy(); resolve(true); });
-    socket.once("error", () => resolve(false));
+    const probe = httpRequest({ socketPath: path, path: "/health", agent: false, timeout: DAEMON_PROBE_TIMEOUT_MS });
+    probe.once("response", (response) => { response.resume(); resolve(true); });
+    probe.once("timeout", () => { probe.destroy(); resolve(true); });
+    probe.once("error", () => resolve(false));
+    probe.end();
   });
 }
 
