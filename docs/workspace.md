@@ -58,41 +58,57 @@ sets of skills:
   upstream skill, with an `UPSTREAM.md` naming the source repository and the
   commit it was copied from. The first is `writing-for-agents`, from
   [lhotwll217/skills](https://github.com/lhotwll217/skills).
-- **Workspace skills** in `workspace/skills/`: each folder with a `SKILL.md`
-  (Pi also finds one in a subfolder of a folder without one), and each
-  top-level `.md` file whose frontmatter has a `description` (and a `name`;
-  without one, Pi names it `skills`, after its folder). A link to either
-  counts. Onboarding's skill policy chooses which load: `all-workspace` (the
-  default) loads every one, `bundled` loads none, and `allowlist` loads only the
-  named entries. Non-interactive onboarding takes
+- **Workspace skills** in `workspace/skills/`, chosen by onboarding's skill
+  policy: `all-workspace` (the default), `bundled` (none), or `allowlist` (only
+  the named entries). Non-interactive onboarding takes
   `--workspace-skills all|bundled|allowlist` and a repeated `--skill <name>`;
   `--skill` alone means `allowlist`.
 
-The harness hands Pi each folder and `.md` file in `workspace/skills/`
-separately; other files, such as a `LICENSE` or `package.json`, stay out.
-Because Pi reads each entry as its own root, a `.gitignore` (or `.ignore`,
-`.fdignore`) at the root of `workspace/skills/` no longer applies; one inside a
-skill folder still does. When two skills share a name, the first one loaded
-wins: vendored skills, then real folders and files, then links, each group in
-name order (in allowlist order under `allowlist`).
+Under `all-workspace`, the harness loads what Pi's own skill discovery finds
+in `workspace/skills/` (`loadSkillsFromDirInternal` in
+`@earendil-works/pi-coding-agent` 1.3.0, `dist/core/skills.js`):
 
-The harness leaves out what Pi cannot load, would load twice, or would never
-finish walking. `pi-template doctor` prints the skill policy beside the loaded
-workspace skills and lists each entry left out:
+- A top-level `.md` file whose frontmatter has a `description`. Its skill name
+  is the frontmatter `name`, or `skills`, after its folder.
+- A folder holding a `SKILL.md`. Its name is the frontmatter `name`, or the
+  folder's name. Pi searches no deeper inside it.
+- In a folder without a `SKILL.md`, such as a cloned repository or a folder of
+  commands, only the `SKILL.md` folders below it. Its own `.md` files never
+  load, with or without a `description`.
+- Pi skips names starting with `.`, `node_modules`, and anything a
+  `.gitignore`, `.ignore`, or `.fdignore` in `workspace/skills/` or below
+  excludes. Links count as what they point to; a file reached through two links
+  loads once.
+- A `SKILL.md` directly in `workspace/skills/` makes that folder the only skill.
+
+Under `allowlist`, Pi reads each named entry as its own root, so a named folder
+without a `SKILL.md` also loads its own top-level `.md` files that have a
+`description`. When two skills share a name, the first one loaded wins:
+vendored skills, then workspace skills in directory order (allowlist order
+under `allowlist`). A skill file without a `description` never loads.
+
+The harness walks `workspace/skills/` as Pi would and hands Pi the skill files
+it found, so Pi never walks a folder itself. That walk keeps an entry out, with
+everything in it, when Pi could not finish it. `pi-template doctor` prints the
+skill policy beside the loaded workspace skills and lists what did not load:
 
 - `resources.brokenSkillLinksNotLoaded`: a link whose target is gone. Pi skips
   it without a diagnostic.
 - `resources.skippedSkillLinks`: a link back to `workspace/skills/` or a folder
-  above it, a second link to a folder already loaded, or a link inside a skill
-  folder back to a folder that holds it, which keeps that whole entry out. Pi
-  follows linked folders without a cycle check, so a looping link would stall
-  every session, doctor, and the daemon that runs them.
+  above it, or a link inside an entry back to a folder that holds it. Pi
+  follows linked folders without a cycle check, so one looping link keeps its
+  whole entry out.
+- `resources.skippedSkillEntries`: an entry where Pi would walk more than 5000
+  folders. Pi walks a folder once for every path that reaches it, so stacked
+  links multiply the walk; past this bound, one entry would stall every
+  session, doctor, and the daemon that runs them.
 - `resources.skillNameCollisionsNotLoaded`: a skill whose name another skill
   already took.
 
-Doctor also notes, under `resources.notices`, a `workspace/MEMORY.md` that no
-longer loads and a `bundled` policy that keeps every workspace skill out, with
-the command that changes it.
+Doctor also notes, under `resources.notices`, a `workspace/skills/` it cannot
+read (sessions then start with no workspace skills), a `workspace/MEMORY.md`
+that no longer loads, and a `bundled` policy that keeps every workspace skill
+out, with the command that changes it.
 
 ## The dividing question
 
