@@ -161,9 +161,11 @@ Owner Operator's pattern — never a subcommand the owner must discover:
 - The auth stage reads `auth.json` as Pi does (a leading byte-order mark is
   ignored) and stops with the file untouched when it is not a JSON object, so
   a damaged file never loses its saved providers. `pi-template doctor` reads it
-  the same way and reports a damaged file as unreadable. Import renames the provider
-  key `azure-openai-responses`, which Pi 1.0.3 renamed to `azure` without
-  migrating stored credentials.
+  the same way and reports a damaged file as unreadable. Import merges into the
+  harness's `auth.json`: providers added through the harness stay, and an
+  imported provider replaces the harness's entry for the same provider. Import
+  renames the provider key `azure-openai-responses`, which Pi 1.0.3 renamed to
+  `azure` without migrating stored credentials.
 - Guided setup is consolidated onto one review surface: after the import offer
   and a dedicated protected-paths question, every remaining choice — provider
   and model, the exact agent definition, permission mode, skill policy,
