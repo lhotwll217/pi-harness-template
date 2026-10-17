@@ -174,13 +174,18 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
       schedules: {
         list: () => scheduler.list(),
         create: (input) => scheduler.add(input),
-        update: (id, input) => {
-          const current = scheduler.list().find((schedule) => schedule.id === id);
+        update: (id, input, authorize) => {
+          const current = state.scheduleById(id);
           if (!current) throw new Error(`no such schedule: ${id}`);
+          authorize?.(current);
           return scheduler.update(id, input, current.revision);
         },
         delete: (id) => scheduler.remove(id),
-        run: (id) => scheduler.run(id),
+        run: (id, authorize) => {
+          const current = state.scheduleById(id);
+          if (current) authorize?.(current);
+          return scheduler.run(id);
+        },
         runById: (id) => state.runById(id),
       },
       query,

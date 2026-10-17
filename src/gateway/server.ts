@@ -27,12 +27,15 @@ export interface GatewayNotes {
   delete(id: string): MaybePromise<boolean>;
 }
 
+/** Throws to refuse; called on the stored schedule in the same step as the write, so no change slips between. */
+export type ScheduleAuthorization = (current: ScheduleDefinition) => void;
+
 export interface GatewaySchedules {
   list(): MaybePromise<ScheduleDefinition[]>;
   create(input: ScheduleCreateInput): MaybePromise<ScheduleDefinition>;
-  update(id: string, input: ScheduleCreateInput): MaybePromise<ScheduleDefinition>;
+  update(id: string, input: ScheduleCreateInput, authorize?: ScheduleAuthorization): MaybePromise<ScheduleDefinition>;
   delete(id: string): MaybePromise<boolean>;
-  run(id: string): Promise<ScheduleRun>;
+  run(id: string, authorize?: ScheduleAuthorization): Promise<ScheduleRun>;
   runById(id: string): MaybePromise<ScheduleRun | undefined>;
 }
 
@@ -86,6 +89,12 @@ const AGENT_COMMAND_SCHEDULE_REFUSAL = {
 
 const isCommandPayload = (body: unknown): boolean =>
   (body as { payload?: { kind?: unknown } } | undefined)?.payload?.kind === ScheduledPayloadKind.Command;
+
+class CommandScheduleRefused extends Error {}
+
+const agentAuthorization = (caller: Caller): ScheduleAuthorization | undefined => caller === "agent"
+  ? (current) => { if (isCommandPayload(current)) throw new CommandScheduleRefused(); }
+  : undefined;
 
 const SETUP_REQUIRED = {
   error: {
@@ -143,9 +152,6 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
     const frame = `data: ${JSON.stringify(event)}\n\n`;
     for (const stream of streams) stream.write(frame);
   });
-  const storedSchedule = async (id: string): Promise<ScheduleDefinition | undefined> =>
-    (await options.schedules.list()).find((schedule) => schedule.id === id);
-
   const handle = async (caller: Caller, request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const respond = (status: number, body: unknown): void => {
       response.writeHead(status, { "content-type": "application/json" });
@@ -219,19 +225,13 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       }
       const runMatch = /^\/schedules\/([^/]+)\/run$/.exec(url.pathname);
       if (request.method === "POST" && runMatch) {
-        const id = decodeURIComponent(runMatch[1]);
-        if (caller === "agent" && isCommandPayload(await storedSchedule(id))) {
-          return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
-        }
-        return respond(202, await options.schedules.run(id));
+        return respond(202, await options.schedules.run(decodeURIComponent(runMatch[1]), agentAuthorization(caller)));
       }
       const scheduleId = routeId(url.pathname, "schedules");
       if (request.method === "PUT" && scheduleId !== undefined) {
         const body = await readBody(request);
-        if (caller === "agent" && (isCommandPayload(body) || isCommandPayload(await storedSchedule(scheduleId)))) {
-          return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
-        }
-        return respond(200, await options.schedules.update(scheduleId, body as ScheduleCreateInput));
+        if (caller === "agent" && isCommandPayload(body)) return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
+        return respond(200, await options.schedules.update(scheduleId, body as ScheduleCreateInput, agentAuthorization(caller)));
       }
       if (request.method === "DELETE" && scheduleId !== undefined) {
         const deleted = await options.schedules.delete(scheduleId);
@@ -263,6 +263,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
 
       return respond(404, { error: "unknown route" });
     } catch (error) {
+      if (error instanceof CommandScheduleRefused) return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
       return respond(400, { error: error instanceof Error ? error.message : String(error) });
     }
   };

@@ -74,6 +74,10 @@ const commandSchedule: ScheduleDefinition = {
   name: "nightly command",
   payload: { kind: ScheduledPayloadKind.Command, argv: ["touch", "/tmp/owned"] },
 };
+// The listing still shows the owner's earlier prompt; the stored row the write lands on is now a command.
+const raced: ScheduleDefinition = { ...schedule, id: "schedule-raced", name: "raced" };
+const stored = (id: string): ScheduleDefinition | undefined =>
+  id === raced.id ? { ...raced, payload: commandSchedule.payload } : [schedule, commandSchedule].find((entry) => entry.id === id);
 const calls: string[] = [];
 const socketDir = mkdtempSync(join(tmpdir(), "pi-template-gateway-"));
 const agentSocket = join(socketDir, "agent.sock");
@@ -92,11 +96,19 @@ try {
       delete: (id) => { calls.push(`note:delete:${id}`); return true; },
     },
     schedules: {
-      list: () => [schedule, commandSchedule],
+      list: () => [schedule, commandSchedule, raced],
       create: (input) => { calls.push(`schedule:create:${input.name}`); return schedule; },
-      update: (id, input) => { calls.push(`schedule:update:${id}:${input.name}`); return schedule; },
+      update: (id, input, authorize) => {
+        authorize?.(stored(id)!);
+        calls.push(`schedule:update:${id}:${input.name}`);
+        return schedule;
+      },
       delete: (id) => { calls.push(`schedule:delete:${id}`); return true; },
-      run: async (id) => { calls.push(`schedule:run:${id}`); return { ...run, scheduleId: id }; },
+      run: async (id, authorize) => {
+        authorize?.(stored(id)!);
+        calls.push(`schedule:run:${id}`);
+        return { ...run, scheduleId: id };
+      },
       runById: (id) => id === run.id ? run : undefined,
     },
     query: {
@@ -193,6 +205,8 @@ try {
   await refused(() => agent.updateSchedule(schedule.id, asInput({ ...schedule, payload: commandSchedule.payload })));
   await refused(() => agent.updateSchedule(commandSchedule.id, asInput({ ...commandSchedule, payload: schedule.payload })));
   await refused(() => agent.runSchedule(commandSchedule.id));
+  await refused(() => agent.updateSchedule(raced.id, asInput(raced)));
+  await refused(() => agent.runSchedule(raced.id));
   assert.deepEqual(calls, [], "a refused agent call reaches no schedule method");
   assert.equal((await agent.health()).pid, process.pid);
   assert.deepEqual(await agent.listNotes(), notes);
