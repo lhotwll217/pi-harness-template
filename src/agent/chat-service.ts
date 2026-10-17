@@ -15,6 +15,7 @@ import {
   type ChatSummary,
   type ChatTurnStatus,
   type DomainEvent,
+  withoutAbsolutePaths,
 } from "@pi-template/contracts";
 import { projectChat } from "./chat-projection";
 import { createHarnessSession } from "./runtime";
@@ -38,12 +39,26 @@ const WORKSPACE_CHANGING_TOOLS = new Set(["write", "edit", "bash"]);
 /** Marks a turn the owner cancelled, by its user message's timestamp; Pi may store such a turn as an error. */
 const TURN_CANCELLED = "pi-template-turn-cancelled";
 
+/** C0 and C1 controls; U+2028 and U+2029, which split Pi's session listing; and bidirectional overrides. */
+const TITLE_REFUSED = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
+
 const busy = (id: string) => new GatewayRouteError(409, "chat_busy", `chat ${id} is replying; cancel it or wait`);
 const notFound = (id: string) => new GatewayRouteError(404, "chat_not_found", `no chat ${id}`);
 const refused = (error: unknown) =>
-  new GatewayRouteError(503, "session_refused", error instanceof Error ? error.message : String(error));
+  new GatewayRouteError(503, "session_refused", withoutAbsolutePaths(error instanceof Error ? error.message : String(error)));
 const titleOf = (info: SessionInfo): string =>
   info.name ?? info.firstMessage.replace(/\s+/g, " ").trim().slice(0, CHAT_TITLE_MAX);
+
+/** Run `work` on chat `id`'s transcript; a filesystem error becomes a refusal naming the chat and the error code. */
+function onTranscript<T>(id: string, work: () => T): T {
+  try {
+    return work();
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (error instanceof GatewayRouteError || typeof code !== "string") throw error;
+    throw new GatewayRouteError(500, "filesystem_error", `chat ${id} transcript: ${code}`);
+  }
+}
 
 export function createChatService(options: ChatServiceOptions) {
   const paths = harnessPaths(options.home);
@@ -60,8 +75,8 @@ export function createChatService(options: ChatServiceOptions) {
     return name && join(folder, name);
   }
 
-  function stored(file: string): { messages: unknown[]; cancelled: Set<unknown> } {
-    const manager = SessionManager.open(file, folder, paths.workspace);
+  function stored(id: string, file: string): { messages: unknown[]; cancelled: Set<unknown> } {
+    const manager = onTranscript(id, () => SessionManager.open(file, folder, paths.workspace));
     const cancelled = new Set(manager.getEntries().flatMap((entry) => entry.type === "custom" && entry.customType === TURN_CANCELLED
       ? [(entry.data as { userMessageTimestamp?: unknown } | undefined)?.userMessageTimestamp]
       : []));
@@ -75,7 +90,7 @@ export function createChatService(options: ChatServiceOptions) {
       createdAt: info.created.toISOString(),
       updatedAt: info.modified.toISOString(),
       // Pi's own count includes tool results and system entries; a client counts the chat's messages.
-      messageCount: projectChat(stored(info.path).messages, false).length,
+      messageCount: projectChat(stored(info.id, info.path).messages, false).length,
       running: turns.has(info.id),
     }));
   }
@@ -90,7 +105,7 @@ export function createChatService(options: ChatServiceOptions) {
     const turn = turns.get(id);
     const file = transcriptOf(id);
     if (!file && !turn?.session) throw notFound(id);
-    const { messages, cancelled } = turn?.session ? { messages: turn.session.messages, cancelled: undefined } : stored(file!);
+    const { messages, cancelled } = turn?.session ? { messages: turn.session.messages, cancelled: undefined } : stored(id, file!);
     const base: ChatSummary = file
       ? await summary(id)
       : { id, title: "", createdAt: "", updatedAt: "", messageCount: 0, running: true };
@@ -124,9 +139,11 @@ export function createChatService(options: ChatServiceOptions) {
     const emit = (event: StreamEvent): void => { stream.push({ seq: seq++, ...event }); };
     let unsubscribe = (): void => undefined;
     try {
-      mkdirSync(folder, { recursive: true, mode: 0o700 });
-      const file = transcriptOf(id);
-      const manager = file ? SessionManager.open(file, folder, paths.workspace) : SessionManager.create(paths.workspace, folder, { id });
+      const manager = onTranscript(id, () => {
+        mkdirSync(folder, { recursive: true, mode: 0o700 });
+        const file = transcriptOf(id);
+        return file ? SessionManager.open(file, folder, paths.workspace) : SessionManager.create(paths.workspace, folder, { id });
+      });
       let toolNames: string[];
       try {
         const created = await createHarnessSession({ home: paths.home, cwd: paths.workspace, sessionManager: manager, headless: true });
@@ -196,7 +213,7 @@ export function createChatService(options: ChatServiceOptions) {
       }).then(async (outcome) => {
         unsubscribe();
         await release();
-        emit({ type: "turn.finished", ...outcome });
+        emit({ type: "turn.finished", ...outcome, ...(outcome.error ? { error: withoutAbsolutePaths(outcome.error) } : {}) });
         stream.push(null);
         changed(id);
       });
@@ -235,7 +252,9 @@ export function createChatService(options: ChatServiceOptions) {
     if (!trimmed || trimmed.length > CHAT_TITLE_MAX) {
       throw new GatewayRouteError(400, "invalid_request", `title must be 1 to ${CHAT_TITLE_MAX} characters`);
     }
-    if (/[\u0000-\u001f\u007f]/.test(trimmed)) throw new GatewayRouteError(400, "invalid_request", "title must not hold control characters");
+    if (TITLE_REFUSED.test(trimmed)) {
+      throw new GatewayRouteError(400, "invalid_request", "title must not hold control, line-separator, or bidirectional-override characters");
+    }
     const turn = turns.get(id);
     if (turn && !turn.session) throw busy(id);
     if (turn?.session) {
@@ -243,7 +262,7 @@ export function createChatService(options: ChatServiceOptions) {
     } else {
       const file = transcriptOf(id);
       if (!file) throw notFound(id);
-      SessionManager.open(file, folder, paths.workspace).appendSessionInfo(trimmed);
+      onTranscript(id, () => SessionManager.open(file, folder, paths.workspace).appendSessionInfo(trimmed));
     }
     changed(id);
     return await summary(id);
@@ -253,7 +272,7 @@ export function createChatService(options: ChatServiceOptions) {
     if (turns.has(id)) throw busy(id);
     const file = transcriptOf(id);
     if (!file) throw notFound(id);
-    renameSync(file, `${file}.deleted-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+    onTranscript(id, () => renameSync(file, `${file}.deleted-${new Date().toISOString().replace(/[:.]/g, "-")}`));
     changed(id);
   }
 

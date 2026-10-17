@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatPart, ChatTurnStatus } from "@pi-template/contracts";
+import { withoutAbsolutePaths, type ChatMessage, type ChatPart, type ChatTurnStatus } from "@pi-template/contracts";
 
 type PiMessage = { role?: unknown; content?: unknown; stopReason?: unknown; errorMessage?: unknown;
   toolCallId?: unknown; isError?: unknown; timestamp?: unknown };
@@ -63,7 +63,9 @@ export function projectChat(messages: readonly unknown[], running: boolean, canc
       }
     }
     if (raw.stopReason === "error") {
-      turn.error = typeof raw.errorMessage === "string" && raw.errorMessage.trim() ? raw.errorMessage.trim() : "model turn stopped with an error";
+      turn.error = typeof raw.errorMessage === "string" && raw.errorMessage.trim()
+        ? withoutAbsolutePaths(raw.errorMessage.trim())
+        : "model turn stopped with an error";
     }
   }
   if (running) {

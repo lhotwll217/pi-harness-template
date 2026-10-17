@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
@@ -34,6 +34,8 @@ writeFileSync(paths.sandboxPolicy, JSON.stringify({ enabled: false, filesystem: 
 writeFileSync(paths.onboardingMarker, JSON.stringify({ version: ONBOARDING_VERSION, completedAt: "2026-10-17T00:00:00.000Z" }));
 
 let daemon = await startDaemon({ port: 0, fingerprintIntervalMs: 60_000, scheduler: { wakeIntervalMs: 60_000 } });
+/** Every body and stream line the Gateway answered, so the run can check none names an absolute path. */
+const answered: string[] = [];
 const info = (): DaemonInfo => JSON.parse(readFileSync(paths.daemonInfo, "utf8")) as DaemonInfo;
 const call = async (method: string, path: string, body?: unknown) => {
   const response = await fetch(`http://127.0.0.1:${daemon.port}${path}`, {
@@ -41,7 +43,9 @@ const call = async (method: string, path: string, body?: unknown) => {
     headers: { authorization: `Bearer ${info().authToken}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  return { status: response.status, body: await response.json() as any };
+  const answer = await response.text();
+  answered.push(answer);
+  return { status: response.status, body: JSON.parse(answer) as any };
 };
 
 /** Send a chat message; `onLine` sees each NDJSON line as it arrives. */
@@ -51,7 +55,11 @@ async function send(chatId: string, text: string, onLine?: (event: ChatStreamEve
     headers: { authorization: `Bearer ${info().authToken}`, "content-type": "application/json" },
     body: JSON.stringify({ text }),
   });
-  if (response.status !== 200) return { status: response.status, body: await response.json() as any, events: [] as ChatStreamEvent[] };
+  if (response.status !== 200) {
+    const answer = await response.text();
+    answered.push(answer);
+    return { status: response.status, body: JSON.parse(answer) as any, events: [] as ChatStreamEvent[] };
+  }
   assert.equal(response.headers.get("content-type"), "application/x-ndjson");
   const events: ChatStreamEvent[] = [];
   const reader = response.body!.getReader();
@@ -62,6 +70,7 @@ async function send(chatId: string, text: string, onLine?: (event: ChatStreamEve
     if (chunk.done) break;
     buffer += decoder.decode(chunk.value, { stream: true });
     for (let newline = buffer.indexOf("\n"); newline !== -1; newline = buffer.indexOf("\n")) {
+      answered.push(buffer.slice(0, newline));
       const event = JSON.parse(buffer.slice(0, newline)) as ChatStreamEvent;
       buffer = buffer.slice(newline + 1);
       events.push(event);
@@ -163,6 +172,10 @@ try {
   assert.equal((await call("GET", "/chats")).body[0].title, "Greeting");
   assert.equal((await call("PATCH", "/chats/c1", { title: "x".repeat(201) })).status, 400);
   assert.deepEqual((await call("PATCH", "/chats/c1", { title: "bell\u0007" })).body.code, "invalid_request");
+  for (const title of ["line\u2028separator", "right\u202eto left", "c1\u0085control"]) {
+    const refusedTitle = await call("PATCH", "/chats/c1", { title });
+    assert.deepEqual([refusedTitle.status, refusedTitle.body.code], [400, "invalid_request"], JSON.stringify(title));
+  }
   assert.equal((await call("PATCH", "/chats/c1", { title: "two\nlines" })).body.title, "two lines");
   assert.equal((await call("PATCH", "/chats/c1", { title: "Greeting" })).body.title, "Greeting");
   faux.setResponses([fauxAssistantMessage("again")]);
@@ -283,7 +296,7 @@ try {
   const before = chatFiles();
   const refused = await send("c6", "hello");
   assert.deepEqual([refused.status, refused.body.code], [503, "session_refused"]);
-  assert.match(refused.body.error, /protected_paths\.json/);
+  assert.match(refused.body.error, /^protected paths are not valid JSON at protected_paths\.json; .*`pi-template onboard`/);
   assert.deepEqual(chatFiles(), before);
   rmSync(paths.protectedPaths);
 
@@ -294,9 +307,19 @@ try {
     api: faux.getModel().api, baseUrl: "http://127.0.0.1:1", models: [faux.getModel()] } } }));
   const noKey = await send("c3", "hello again");
   assert.deepEqual([noKey.status, noKey.body.code], [503, "session_refused"]);
+  assert.match(noKey.body.error, /^No API key found for [^]*Use \/login [^]*\n {2}providers\.md\n {2}models\.md$/);
   assert.deepEqual([readFileSync(c3File, "utf8"), (await call("GET", "/chats/c3")).body.updatedAt], c3Before,
     "a refused turn leaves an existing chat untouched");
   seedFauxProviderHome(paths, faux.getModel());
+
+  chmodSync(c3File, 0o000);
+  try {
+    const unreadable = { error: "chat c3 transcript: EACCES", code: "filesystem_error" };
+    assert.deepEqual(await call("GET", "/chats/c3"), { status: 500, body: unreadable });
+    assert.deepEqual(await call("PATCH", "/chats/c3", { title: "Renamed" }), { status: 500, body: unreadable });
+  } finally {
+    chmodSync(c3File, 0o600);
+  }
 
   faux.setResponses([fauxAssistantMessage(LONG_REPLY), fauxAssistantMessage(LONG_REPLY)]);
   let closing: Promise<void> | undefined;
@@ -313,6 +336,10 @@ try {
   const afterRestart = (await call("GET", "/chats/c7")).body;
   assert.equal(afterRestart.running, false);
   assert.equal(afterRestart.messages[1].status, "cancelled");
+
+  for (const absolute of [root, checkoutRoot]) {
+    assert.deepEqual(answered.filter((answer) => answer.includes(absolute)), [], `no Gateway answer names ${absolute}`);
+  }
 
   process.stdout.write("ok — chats stream, list, rename, delete, and cancel over the Gateway; one writer per chat; events fire once per change\n");
 } finally {

@@ -100,7 +100,11 @@ daemon is the only writer of chat transcripts. The Gateway routes
   concurrently.
 - **A fresh session per turn.** Each turn builds a headless harness session in
   the workspace, so every session start check runs on every turn; a refused
-  check answers 503 `session_refused` and writes nothing. Provenance records
+  check answers 503 `session_refused` and writes nothing; its message names
+  files by their last path segment only. A transcript the daemon cannot read
+  or write answers 500 `filesystem_error` with the chat id and the error code.
+  An untyped Gateway error has each absolute path cut to its last segment.
+  Provenance records
   `origin: "gateway-chat"` with the chat and turn ids once Pi accepts the turn. The message goes to the
   model as typed: no slash commands, skill commands, or prompt templates.
 - **The reply streams** as NDJSON on the `POST /chats/:id/messages` response:
@@ -116,7 +120,8 @@ daemon is the only writer of chat transcripts. The Gateway routes
   message, with Pi's thinking dropped. A turn that ended without a reply and
   no longer runs, as when the daemon stopped mid-turn, reads `interrupted`.
 - **Title** is the name set by `PATCH /chats/:id` (Pi's `session_info`, up to
-  200 characters on one line, without control characters), else the first
+  200 characters on one line, without C0 or C1 control characters, U+2028 or
+  U+2029, or bidirectional overrides; else 400 `invalid_request`), else the first
   message.
 - **Delete** renames the transcript to `<file>.deleted-<time>`, out of the
   listing; nothing is unlinked, and no retention policy reclaims the space yet.

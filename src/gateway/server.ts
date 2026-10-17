@@ -30,6 +30,7 @@ import {
   type WorkspaceFileWrite,
   type WorkspaceFileWriteResult,
   type WorkspaceTree,
+  withoutAbsolutePaths,
 } from "@pi-template/contracts";
 
 type MaybePromise<T> = T | Promise<T>;
@@ -399,7 +400,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       if (response.headersSent) return void response.end();
       if (error instanceof CommandScheduleRefused) return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
       if (error instanceof GatewayRouteError) return respond(error.status, { error: error.message, code: error.code, ...error.details });
-      return respond(400, { error: error instanceof Error ? error.message : String(error) });
+      return respond(400, { error: withoutAbsolutePaths(error instanceof Error ? error.message : String(error)) });
     }
   };
 
