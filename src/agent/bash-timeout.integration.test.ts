@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/pi-ai";
@@ -14,7 +15,7 @@ import {
 } from "@pi-template/contracts";
 import { seedFauxProviderHome } from "../../test/helpers/faux-provider";
 import { createScheduledPromptRunner } from "./prompt-runner";
-import { createSandboxAdapter } from "./sandbox";
+import { SANDBOXED_COMMAND_TERMINATION_GRACE_MS, createSandboxAdapter } from "./sandbox";
 
 const root = mkdtempSync(join(tmpdir(), "pi-template-bash-timeout-"));
 const faux = registerFauxProvider();
@@ -24,8 +25,24 @@ const policy = {
   process: { allowSubprocesses: true },
   network: { mode: "deny" as const, allowedDomains: [] },
 };
+// Time the agent loop and faux provider add around one tool call.
+const TURN_OVERHEAD_MS = 500;
 
-async function runTwoTimedCommands(name: string, sandboxEnabled: boolean): Promise<void> {
+type BashCall = { command: string; timeout?: number };
+interface BashOutcome { text: string; isError: boolean; elapsedMs: number }
+
+/** A sleep with a duration no other process uses, so pgrep finds exactly the command's own sleep. */
+const uniqueSleep = (slot: number): string => `sleep ${30 + slot}.${String(process.pid).padStart(7, "0")}`;
+
+function running(sleep: string): number {
+  try {
+    return execFileSync("pgrep", ["-f", sleep], { encoding: "utf8" }).trim().split("\n").length;
+  } catch {
+    return 0;
+  }
+}
+
+function prepareHome(name: string, sandboxEnabled: boolean): { home: string; cwd: string } {
   const home = join(root, name, "home");
   const cwd = join(root, name, "task");
   const paths = ensureHarnessWorkspace(home);
@@ -35,32 +52,10 @@ async function runTwoTimedCommands(name: string, sandboxEnabled: boolean): Promi
   }));
   mkdirSync(cwd);
   saveHarnessSettings(home, { permissionMode: "allow" });
+  return { home, cwd };
+}
 
-  const toolResults: Array<{ text: string; isError: boolean }> = [];
-  const recordLastToolResult = (context: Context): void => {
-    const result = [...context.messages].reverse().find((message) => message.role === "toolResult");
-    if (result?.role === "toolResult") {
-      toolResults.push({
-        text: result.content.map((part) => part.type === "text" ? part.text : "").join(""),
-        isError: result.isError,
-      });
-    }
-  };
-  faux.setResponses([
-    fauxAssistantMessage(
-      fauxToolCall("bash", { command: "sleep 0.2 && echo finished-in-time", timeout: 5 }),
-      { stopReason: "toolUse" },
-    ),
-    (context) => {
-      recordLastToolResult(context);
-      return fauxAssistantMessage(fauxToolCall("bash", { command: "sleep 10", timeout: 1 }), { stopReason: "toolUse" });
-    },
-    (context) => {
-      recordLastToolResult(context);
-      return fauxAssistantMessage("done");
-    },
-  ]);
-
+function scheduledRun(home: string, cwd: string, runId: string, signal: AbortSignal) {
   const run = createScheduledPromptRunner({
     home,
     readiness: () => true,
@@ -73,16 +68,17 @@ async function runTwoTimedCommands(name: string, sandboxEnabled: boolean): Promi
       notes: { async createNote() { throw new Error("not used"); } },
     },
   });
-  const prompt = "Run the two commands.";
+  const prompt = "Run the commands.";
+  const payload = { kind: ScheduledPayloadKind.Prompt, prompt, toolsAllow: [AgentToolId.Bash] } as const;
   const request: ScheduledPromptRunRequest = {
-    payload: { kind: ScheduledPayloadKind.Prompt, prompt, toolsAllow: [AgentToolId.Bash] },
+    payload,
     cwd,
     schedule: {
       id: "schedule-timeout",
       name: "bash timeout",
       enabled: true,
       trigger: { kind: ScheduleKind.Every, everyMs: 60_000, anchorMs: 0 },
-      payload: { kind: ScheduledPayloadKind.Prompt, prompt, toolsAllow: [AgentToolId.Bash] },
+      payload,
       cwd,
       timeoutSeconds: 60,
       revision: 1,
@@ -90,30 +86,122 @@ async function runTwoTimedCommands(name: string, sandboxEnabled: boolean): Promi
       updatedAt: "2026-10-16T12:00:00.000Z",
       nextRunAt: null,
     },
-    runId: `run-timeout-${name}`,
-    signal: new AbortController().signal,
+    runId,
+    signal,
   };
-  const startedAt = Date.now();
-  const result = await run(request);
-  const elapsedMs = Date.now() - startedAt;
+  return run(request);
+}
 
-  assert.equal(result.exitCode, 0);
-  assert.deepEqual(toolResults, [
-    { text: "finished-in-time\n", isError: false },
-    { text: "Command timed out after 1 seconds", isError: true },
+const lastToolResult = (context: Context): { text: string; isError: boolean } => {
+  const result = [...context.messages].reverse().find((message) => message.role === "toolResult");
+  assert.ok(result?.role === "toolResult", "the agent saw a tool result");
+  return { text: result.content.map((part) => part.type === "text" ? part.text : "").join(""), isError: result.isError };
+};
+
+/** Drive each bash call through a scheduled prompt and return what the model saw, timed per call. */
+async function runBashCalls(name: string, sandboxEnabled: boolean, calls: BashCall[]): Promise<BashOutcome[]> {
+  const { home, cwd } = prepareHome(name, sandboxEnabled);
+  const outcomes: BashOutcome[] = [];
+  let issuedAt = 0;
+  faux.setResponses([
+    ...calls.map((call, index) => async (context: Context) => {
+      if (index > 0) outcomes.push({ ...lastToolResult(context), elapsedMs: Date.now() - issuedAt });
+      issuedAt = Date.now();
+      return fauxAssistantMessage(fauxToolCall("bash", call), { stopReason: "toolUse" });
+    }),
+    async (context: Context) => {
+      outcomes.push({ ...lastToolResult(context), elapsedMs: Date.now() - issuedAt });
+      return fauxAssistantMessage("done");
+    },
   ]);
-  assert.ok(elapsedMs < 9_000, `the 1-second timeout stopped sleep 10 (run took ${elapsedMs} ms)`);
+  const result = await scheduledRun(home, cwd, `run-${name}`, new AbortController().signal);
+  assert.equal(result.exitCode, 0);
+  return outcomes;
+}
+
+async function checkTimeouts(name: string, sandboxEnabled: boolean): Promise<void> {
+  const plain = uniqueSleep(1);
+  const ignoresTerm = uniqueSleep(2);
+  const escaped = uniqueSleep(4);
+  const escapedLeader = uniqueSleep(5);
+  const outcomes = await runBashCalls(name, sandboxEnabled, [
+    { command: "sleep 0.2 && echo finished-in-time", timeout: 5 },
+    { command: `${plain} && touch plain.done`, timeout: 0.5 },
+    { command: `trap '' TERM; ${ignoresTerm} && touch ignores-term.done`, timeout: 0.5 },
+    { command: `perl -e 'setpgrp(0, 0); exec @ARGV' ${escaped} & ${escapedLeader}`, timeout: 0.5 },
+    { command: "echo no-limit", timeout: 0 },
+    { command: "echo negative", timeout: -1 },
+    { command: "echo too-long", timeout: 2_147_483.648 },
+    { command: "echo longest-allowed", timeout: 2_147_483.647 },
+  ]);
+
+  assert.deepEqual(outcomes.map(({ text, isError }) => ({ text, isError })), [
+    { text: "finished-in-time\n", isError: false },
+    { text: "Command timed out after 0.5 seconds", isError: true },
+    { text: "Command timed out after 0.5 seconds", isError: true },
+    { text: "Command timed out after 0.5 seconds", isError: true },
+    { text: "Invalid timeout: must be a finite number of seconds", isError: true },
+    { text: "Invalid timeout: must be a finite number of seconds", isError: true },
+    { text: "Invalid timeout: maximum is 2147483.647 seconds", isError: true },
+    { text: "longest-allowed\n", isError: false },
+  ]);
+  const bound = 500 + SANDBOXED_COMMAND_TERMINATION_GRACE_MS + TURN_OVERHEAD_MS;
+  for (const index of [1, 2, 3]) {
+    assert.ok(outcomes[index]!.elapsedMs < bound, `call ${index} returned in ${outcomes[index]!.elapsedMs} ms (bound ${bound} ms)`);
+  }
+  assert.equal(running(plain), 0, "the timed-out compound command left its sleep running");
+  assert.equal(running(ignoresTerm), 0, "the timed-out command that ignores SIGTERM left its sleep running");
+  assert.equal(running(escapedLeader), 0, "the timed-out command left its own sleep running");
+  // A descendant that leaves the process group outlives the stop, as it does under Pi's runner;
+  // the call above proves the tool no longer waits on the pipe it holds.
+  assert.equal(running(escaped), 1, "the descendant that left the process group is still running");
+  execFileSync("pkill", ["-f", escaped]);
+}
+
+async function checkAbort(name: string, sandboxEnabled: boolean): Promise<void> {
+  const { home, cwd } = prepareHome(name, sandboxEnabled);
+  const sleep = uniqueSleep(3);
+  const controller = new AbortController();
+  let abortedAt = 0;
+  faux.setResponses([
+    async () => {
+      void (async () => {
+        while (running(sleep) === 0) await new Promise((resolve) => setTimeout(resolve, 50));
+        abortedAt = Date.now();
+        controller.abort(new Error("schedule aborted"));
+      })();
+      return fauxAssistantMessage(fauxToolCall("bash", { command: `${sleep} && touch aborted.done` }), { stopReason: "toolUse" });
+    },
+    fauxAssistantMessage("not reached"),
+  ]);
+  await assert.rejects(scheduledRun(home, cwd, `run-${name}`, controller.signal), /^Error: schedule aborted$/);
+  const settledMs = Date.now() - abortedAt;
+  const bound = SANDBOXED_COMMAND_TERMINATION_GRACE_MS + TURN_OVERHEAD_MS;
+  assert.ok(settledMs < bound, `the aborted run settled ${settledMs} ms after the abort (bound ${bound} ms)`);
+  assert.equal(running(sleep), 0, "the aborted compound command left its sleep running");
+  const transcriptDir = join(home, "transcripts");
+  const transcript = readdirSync(transcriptDir, { recursive: true, encoding: "utf8" }).find((file) => file.endsWith(".jsonl"));
+  assert.ok(transcript, "the aborted run wrote a transcript");
+  const toolResults = readFileSync(join(transcriptDir, transcript), "utf8").trim().split("\n")
+    .map((line) => JSON.parse(line) as { message?: { role?: string; content?: Array<{ text?: string }> } })
+    .filter(({ message }) => message?.role === "toolResult")
+    .map(({ message }) => message!.content!.map((part) => part.text ?? "").join(""));
+  assert.deepEqual(toolResults, ["Command aborted"]);
 }
 
 try {
-  await runTwoTimedCommands("unsandboxed", false);
-  process.stdout.write("ok — an unsandboxed bash timeout is in seconds and reports Pi's timeout error\n");
+  await checkTimeouts("unsandboxed", false);
+  process.stdout.write("ok — unsandboxed bash: timeouts in seconds stop the whole command, and Pi's timeout bounds apply\n");
+  await checkAbort("unsandboxed-abort", false);
+  process.stdout.write("ok — unsandboxed bash: an abort stops the whole command and reports Pi's abort error\n");
   const probe = await createSandboxAdapter().verify(policy);
   if (probe.unavailable) {
     process.stdout.write(`SKIP — real sandbox unavailable for bash timeout check: ${probe.reason}\n`);
   } else {
-    await runTwoTimedCommands("sandboxed", true);
-    process.stdout.write("ok — a sandboxed bash timeout is in seconds and reports Pi's timeout error\n");
+    await checkTimeouts("sandboxed", true);
+    process.stdout.write("ok — sandboxed bash: timeouts in seconds stop the whole command, and Pi's timeout bounds apply\n");
+    await checkAbort("sandboxed-abort", true);
+    process.stdout.write("ok — sandboxed bash: an abort stops the whole command and reports Pi's abort error\n");
   }
 } finally {
   faux.unregister();

@@ -48,6 +48,9 @@ export interface SandboxVerification {
   checks: SandboxVerificationChecks;
 }
 
+/** How long a stopped command's process group has after SIGTERM before SIGKILL; the scheduler uses the same grace. */
+export const SANDBOXED_COMMAND_TERMINATION_GRACE_MS = 1_000;
+
 export interface SandboxedCommandRequest {
   command: string;
   cwd: string;
