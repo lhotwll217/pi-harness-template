@@ -1,4 +1,3 @@
-/** Git-tracked prompt surface served by listTables/describeTable. Keep with database.ts. */
 export interface ColumnDoc {
   name: string;
   description: string;

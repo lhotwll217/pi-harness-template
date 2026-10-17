@@ -9,6 +9,7 @@ import {
   type DaemonReady,
   type DocsDocument,
   type ScheduleDefinition,
+  type ScheduleRun,
 } from "@pi-template/contracts";
 import { startGateway } from "./server";
 
@@ -57,6 +58,12 @@ const notes = [{
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
 }];
+const run: ScheduleRun = {
+  id: "run-1", scheduleId: "schedule-1", trigger: ScheduleRunTrigger.Manual,
+  status: ScheduleRunStatus.Running, scheduledFor: null,
+  startedAt: null, finishedAt: null, exitCode: null, stdoutTail: null,
+  stderrTail: null, error: null, transcriptId: null, attemptCount: 1,
+};
 const calls: string[] = [];
 
 let gateway: Awaited<ReturnType<typeof startGateway>>;
@@ -76,12 +83,8 @@ try {
       create: (input) => { calls.push(`schedule:create:${input.name}`); return schedule; },
       update: (id, input) => { calls.push(`schedule:update:${id}:${input.name}`); return schedule; },
       delete: (id) => { calls.push(`schedule:delete:${id}`); return true; },
-      run: async (id) => ({
-        id: "run-1", scheduleId: id, trigger: ScheduleRunTrigger.Manual,
-        status: ScheduleRunStatus.Running, scheduledFor: null,
-        startedAt: null, finishedAt: null, exitCode: null, stdoutTail: null,
-        stderrTail: null, error: null, transcriptId: null, attemptCount: 1,
-      }),
+      run: async (id) => ({ ...run, scheduleId: id }),
+      runById: (id) => id === run.id ? run : undefined,
     },
     query: {
       listTables: () => [{ name: "notes", rows: 1, description: "Notes" }],
@@ -127,6 +130,7 @@ try {
   for (const [path, init] of [
     ["/notes", {}],
     ["/schedules", {}],
+    ["/schedule-runs/run-1", {}],
     ["/query-database", { method: "POST", body: JSON.stringify({ action: "list_tables" }) }],
   ] as const) {
     const gated = await json(path, init);
@@ -143,6 +147,8 @@ try {
   assert.equal((await json(`/schedules/${schedule.id}`, { method: "PUT", body: JSON.stringify(schedule) })).response.status, 200);
   assert.equal((await json(`/schedules/${schedule.id}/run`, { method: "POST", body: "{}" })).response.status, 202);
   assert.equal((await json(`/schedules/${schedule.id}`, { method: "DELETE" })).response.status, 200);
+  assert.deepEqual((await json("/schedule-runs/run-1")).body, run, "a run is read from State, not through a query process");
+  assert.equal((await json("/schedule-runs/absent")).response.status, 404);
   assert.equal((await json("/query-database", {
     method: "POST", body: JSON.stringify({ action: DatabaseQueryAction.ListTables }),
   })).body[0].name, "notes");

@@ -185,6 +185,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<RunningD
         },
         delete: (id) => scheduler.remove(id),
         run: (id) => scheduler.run(id),
+        runById: (id) => state.runById(id),
       },
       query,
       docs,

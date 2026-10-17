@@ -76,16 +76,18 @@ What you write on top is the specialty.
 
 ```bash
 pi-template                     # interactive; starts setup when needed
+pi-template --help              # every command; each noun and verb has its own --help
 pi-template status              # harness state, no model call
 pi-template docs list           # every page with summary and read-when hints
 pi-template docs query "..."    # ranked pages and a bounded reading plan
 pi-template notes add "..."     # durable state; see docs/state-and-sessions.md
 pi-template schedule add ...    # durable schedules; see docs/scheduler.md
+pi-template db tables           # read-only SQL over durable state: tables, describe, query
 ```
 
-The same operations back every consumer, and a read-only `query_database` tool
-gives an agent progressive access to durable state — list tables, describe one,
-run a bounded `SELECT` — without opening the database file.
+Every command prints JSON. The same operations back every consumer, and a
+read-only `query_database` tool gives an agent the same progressive access to
+durable state as `pi-template db` without opening the database file.
 
 ## Architecture
 
@@ -111,6 +113,7 @@ can decide what to read without loading the whole repository.
 - [Extensibility](docs/extensibility.md) — Pi-native extension seams.
 - [Workspace](docs/workspace.md) — bundled capability versus owner-authored opinion.
 - [Self-documentation](docs/self-documentation.md) — how the repository teaches itself.
+- [Command-line interface](docs/cli.md) — the command registry, JSON output, and help.
 - [Documentation interface](docs/docs-interface.md) — the public docs surface.
 - [Testing](docs/testing.md) — verification tiers and contracts.
 

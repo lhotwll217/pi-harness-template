@@ -218,10 +218,12 @@ try {
   assert.equal(unpublished.status, 1);
   assert.equal(
     unpublished.stderr,
-    `pi-template: daemon did not become ready within 15s. launchd runs pid ${restarted.pid} for this harness home, ` +
-      `but no reachable daemon has published ${paths.daemonInfo}. The daemon was not restarted. ` +
-      `If ${paths.daemonInfo} was removed while pid ${restarted.pid} was running, ` +
-      `run \`launchctl kickstart -k ${target}\`, and retry. See ${join(paths.logsDir, "daemon.log")}.\n`,
+    `${JSON.stringify({
+      error: `daemon did not become ready within 15s. launchd runs pid ${restarted.pid} for this harness home, ` +
+        `but no reachable daemon has published ${paths.daemonInfo}. The daemon was not restarted. ` +
+        `If ${paths.daemonInfo} was removed while pid ${restarted.pid} was running, ` +
+        `run \`launchctl kickstart -k ${target}\`, and retry. See ${join(paths.logsDir, "daemon.log")}.`,
+    })}\n`,
   );
   assert.equal(isAlive(restarted.pid), true);
   assert.equal(daemonStarts(), startsBeforeRemoval);
@@ -249,9 +251,11 @@ try {
   assert.equal(stalledStart.status, 1);
   assert.equal(
     stalledStart.stderr,
-    `pi-template: daemon did not become ready within 15s. launchd started the daemon job for this harness home ` +
-      `and now runs pid ${stalledPid}, but it never became ready; it may be failing at startup or starting slowly. ` +
-      `See ${join(paths.logsDir, "daemon.log")}.\n`,
+    `${JSON.stringify({
+      error: `daemon did not become ready within 15s. launchd started the daemon job for this harness home ` +
+        `and now runs pid ${stalledPid}, but it never became ready; it may be failing at startup or starting slowly. ` +
+        `See ${join(paths.logsDir, "daemon.log")}.`,
+    })}\n`,
   );
   assert.deepEqual(launchctlCalls(), [`print ${target}`, `enable ${target}`, `kickstart ${target}`, `print ${target}`]);
   await kill(stalledPid);
@@ -278,7 +282,7 @@ try {
   const startsBeforeFailures = daemonStarts();
   const notBootstrapped = await runCli(["status"]);
   assert.equal(notBootstrapped.status, 1);
-  assert.equal(notBootstrapped.stderr, `pi-template: Command failed: launchctl bootstrap gui/${process.getuid!()} ${plist}\n\n`);
+  assert.equal(notBootstrapped.stderr, `${JSON.stringify({ error: `Command failed: launchctl bootstrap gui/${process.getuid!()} ${plist}\n` })}\n`);
   assert.deepEqual(launchctlCalls(), [
     `print ${target}`,
     `enable ${target}`,
@@ -290,13 +294,13 @@ try {
   overrideNextCalls("kickstart", "1");
   const failed = await runCli(["status"]);
   assert.equal(failed.status, 1);
-  assert.equal(failed.stderr, `pi-template: Command failed: launchctl kickstart ${target}\n\n`);
+  assert.equal(failed.stderr, `${JSON.stringify({ error: `Command failed: launchctl kickstart ${target}\n` })}\n`);
   assert.deepEqual(launchctlCalls(), [`print ${target}`, `enable ${target}`, `kickstart ${target}`]);
 
   overrideNextCalls("kickstart", "hang");
   const hung = await runCli(["status"]);
   assert.equal(hung.status, 1, "a hung launchctl is abandoned instead of hanging the command");
-  assert.equal(hung.stderr, `pi-template: Command failed: launchctl kickstart ${target}\n\n`);
+  assert.equal(hung.stderr, `${JSON.stringify({ error: `Command failed: launchctl kickstart ${target}\n` })}\n`);
   assert.deepEqual(launchctlCalls(), [`print ${target}`, `enable ${target}`, `kickstart ${target}`]);
   assert.equal(daemonStarts(), startsBeforeFailures, "a failed launchd start never falls back to a detached daemon");
   console.log("ok — a failed or hung launchctl fails the command without starting a detached daemon");

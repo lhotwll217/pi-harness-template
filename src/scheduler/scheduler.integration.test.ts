@@ -248,10 +248,10 @@ try {
     startedAfterMs: 4_000,
     missedOccurrences: 4,
   });
-  const recordedContext = runQuery(
+  const recordedContext = (await runQuery(
     `SELECT trigger_context_json AS context FROM schedule_runs WHERE schedule_id = '${backlog.id}'`,
     join(dir, "state.db"),
-  ).rows[0]?.context;
+  )).rows[0]?.context;
   assert.deepEqual(JSON.parse(String(recordedContext)), backlogRequest.triggerContext);
   assert.equal(state.listRuns(backlog.id).length, 1, "recurring backlog collapses into one claimed run");
   assert.equal(state.scheduleById(backlog.id)?.nextRunAt, new Date(nowMs + 1_000).toISOString());

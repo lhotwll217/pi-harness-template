@@ -31,6 +31,7 @@ export interface GatewaySchedules {
   update(id: string, input: ScheduleCreateInput): MaybePromise<ScheduleDefinition>;
   delete(id: string): MaybePromise<boolean>;
   run(id: string): Promise<ScheduleRun>;
+  runById(id: string): MaybePromise<ScheduleRun | undefined>;
 }
 
 export interface GatewayQueryService {
@@ -177,7 +178,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
 
       const gatedRoute = url.pathname === "/notes" || url.pathname.startsWith("/notes/") ||
         url.pathname === "/schedules" || url.pathname.startsWith("/schedules/") ||
-        url.pathname === "/query-database";
+        url.pathname.startsWith("/schedule-runs/") || url.pathname === "/query-database";
       if (gatedRoute && options.ready().setupRequired) return respond(428, SETUP_REQUIRED);
 
       if (route === "GET /notes") return respond(200, await options.notes.list());
@@ -213,15 +214,26 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
         const deleted = await options.schedules.delete(scheduleId);
         return deleted ? respond(200, { ok: true }) : respond(404, { error: "no such schedule" });
       }
+      const runId = routeId(url.pathname, "schedule-runs");
+      if (request.method === "GET" && runId !== undefined) {
+        const run = await options.schedules.runById(runId);
+        return run ? respond(200, run) : respond(404, { error: "no such schedule run" });
+      }
 
       if (route === "POST /query-database") {
         const query = await readBody(request) as Record<string, unknown>;
-        if (query.action === DatabaseQueryAction.ListTables) return respond(200, options.query.listTables());
-        if (query.action === DatabaseQueryAction.DescribeTable && typeof query.table === "string") {
-          return respond(200, options.query.describeTable(query.table));
-        }
-        if (query.action === DatabaseQueryAction.Query && typeof query.sql === "string") {
-          return respond(200, options.query.runQuery(query.sql));
+        try {
+          if (query.action === DatabaseQueryAction.ListTables) return respond(200, options.query.listTables());
+          if (query.action === DatabaseQueryAction.DescribeTable && typeof query.table === "string") {
+            return respond(200, options.query.describeTable(query.table));
+          }
+          if (query.action === DatabaseQueryAction.Query && typeof query.sql === "string") {
+            return respond(200, await options.query.runQuery(query.sql));
+          }
+        } catch (error) {
+          if (!(error instanceof Error)) throw error;
+          const { hint, closest } = error as { hint?: string; closest?: string[] };
+          return respond(400, { error: error.message, hint, closest });
         }
         return respond(400, { error: "invalid database query request" });
       }

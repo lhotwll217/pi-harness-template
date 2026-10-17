@@ -49,11 +49,12 @@ const status = async (env = environment): Promise<DaemonHealth> => {
   return body.health;
 };
 
-const unreachableDiagnostic = (pid: number, port: number, probeFailure: string, recovery?: string): string =>
-  `pi-template: daemon pid ${pid} is running but this process cannot reach it at 127.0.0.1:${port}. ` +
+const unreachableDiagnostic = (pid: number, port: number, probeFailure: string, recovery?: string): string => `${JSON.stringify({
+  error: `daemon pid ${pid} is running but this process cannot reach it at 127.0.0.1:${port}. ` +
     `Probe failed: ${probeFailure}. The daemon was not restarted. ` +
     `Verify that pid ${pid} is this harness's daemon, then ` +
-    `${recovery ?? `run \`kill ${pid}\` (if it does not exit, \`kill -9 ${pid}\`)`}, and retry.\n`;
+    `${recovery ?? `run \`kill ${pid}\` (if it does not exit, \`kill -9 ${pid}\`)`}, and retry.`,
+})}\n`;
 const PROBE_TIMEOUT = "TimeoutError: The operation was aborted due to timeout";
 const discovery = (): DaemonInfo => JSON.parse(readFileSync(paths.daemonInfo, "utf8")) as DaemonInfo;
 const writeDiscovery = (info: DaemonInfo): void => writeFileSync(paths.daemonInfo, JSON.stringify(info));
@@ -120,7 +121,7 @@ try {
   assert.equal(launchd.status, 1);
   assert.match(
     launchd.stderr,
-    new RegExp(`then run \`launchctl kickstart -k gui/${process.getuid!()}/com\\.pi-template\\.daemon\`, and retry\\.\\n$`),
+    new RegExp(`then run \`launchctl kickstart -k gui/${process.getuid!()}/com\\.pi-template\\.daemon\`, and retry\\."\\}\\n$`),
   );
   assert.equal(isAlive(second.pid), true);
   console.log("ok — a launchd-owned daemon's diagnostic gives the launchd recovery command");

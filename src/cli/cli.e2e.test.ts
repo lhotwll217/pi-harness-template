@@ -102,11 +102,84 @@ try {
   assert.equal(listed.status, 0, listed.stderr);
   assert.ok((JSON.parse(listed.stdout) as Array<{ id: string }>).some(({ id }) => id === note.id));
 
+  for (const [words, body] of [
+    [["-5", "degrees"], "-5 degrees"],
+    [["note", "--", "-x"], "note -- -x"],
+    [["--frob", "it"], "--frob it"],
+  ] as const) {
+    const dashed = await runCli(["notes", "add", ...words]);
+    assert.equal(dashed.status, 0, dashed.stderr);
+    assert.equal((JSON.parse(dashed.stdout) as { body: string }).body, body);
+  }
+  const dashedQuestion = await runCli(["docs", "query", "what", "is", "--json"]);
+  assert.equal(dashedQuestion.status, 0, dashedQuestion.stderr);
+
+  const tables = await runCli(["db", "tables"]);
+  assert.equal(tables.status, 0, tables.stderr);
+  assert.deepEqual(
+    (JSON.parse(tables.stdout) as Array<{ name: string }>).map(({ name }) => name),
+    ["notes", "schedule_runs", "schedules", "schema_migrations"],
+  );
+  const described = await runCli(["db", "describe", "notes"]);
+  assert.equal(described.status, 0, described.stderr);
+  assert.deepEqual(
+    (JSON.parse(described.stdout) as { columns: Array<{ name: string; description: string }> }).columns
+      .map(({ name, description }) => [name, description]),
+    [
+      ["id", "Stable note id."],
+      ["body", "Owner-authored note text."],
+      ["created_at", "ISO creation time."],
+      ["updated_at", "ISO last-update time."],
+    ],
+  );
+
+  const write = await runCli(["db", "query", "UPDATE notes SET body = 'x'"]);
+  assert.equal(write.status, 1);
+  assert.equal(write.stdout, "");
+  assert.deepEqual(JSON.parse(write.stderr), {
+    status: 400,
+    error: "not authorized",
+    hint: "`pi-template db query` runs one read-only SELECT against the state database.",
+  });
+  assert.equal(write.stderr.trimEnd().split("\n").length, 1, "a failure is one JSON line on stderr");
+  const trailing = await runCli(["db", "query", "SELECT 1; DELETE FROM notes"]);
+  assert.equal(trailing.status, 1);
+  assert.deepEqual(JSON.parse(trailing.stderr), {
+    status: 400,
+    error: "db query runs one statement; found more after the first",
+    hint: "Send each statement in its own `pi-template db query`.",
+  });
+  const vacuum = await runCli(["db", "query", "VACUUM"]);
+  assert.equal(vacuum.status, 1);
+  assert.deepEqual(JSON.parse(vacuum.stderr), {
+    status: 400,
+    error: "authorization denied",
+    hint: "`pi-template db query` runs one read-only SELECT against the state database.",
+  });
+  const unchanged = await runCli(["db", "query", "SELECT body FROM notes WHERE body = 'visible from the CLI'"]);
+  assert.deepEqual(JSON.parse(unchanged.stdout), { rows: [{ body: "visible from the CLI" }], truncated: false });
+
+  const misspelled = await runCli(["db", "query", "SELECT * FROM note"]);
+  assert.equal(misspelled.status, 1);
+  assert.deepEqual(JSON.parse(misspelled.stderr), {
+    status: 400,
+    error: "no such table: note",
+    hint: "`pi-template db tables` lists every table.",
+    closest: ["notes"],
+  });
+
+  const large = await runCli(["db", "query", "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n LIMIT 500) SELECT i FROM n"]);
+  assert.equal(large.status, 0, large.stderr);
+  const capped = JSON.parse(large.stdout) as { rows: unknown[]; truncated: boolean; hint: string };
+  assert.equal(capped.rows.length, 200);
+  assert.equal(capped.truncated, true);
+  assert.equal(capped.hint, "add WHERE or LIMIT, select fewer or shorter columns, or aggregate with count(*) and GROUP BY");
+
   const client = await connectGateway();
   assert.ok(client);
   const queried = await client.queryDatabase({
     action: DatabaseQueryAction.Query,
-    sql: "SELECT body FROM notes",
+    sql: "SELECT body FROM notes WHERE body = 'visible from the CLI'",
   }) as { rows: Array<{ body: string }> };
   assert.deepEqual(queried.rows, [{ body: "visible from the CLI" }]);
 
@@ -120,6 +193,13 @@ try {
   ]);
   assert.equal(scheduled.status, 0, scheduled.stderr);
   const schedule = JSON.parse(scheduled.stdout) as { id: string };
+  const exact = await runCli(["schedule", "add", "--every", "1h", "--name", "exact", "--", "node", "-h", "--every", "2h", "--"]);
+  assert.equal(exact.status, 0, exact.stderr);
+  assert.deepEqual(
+    (JSON.parse(exact.stdout) as { payload: { argv: string[] } }).payload.argv,
+    ["node", "-h", "--every", "2h", "--"],
+    "every word after the first -- is the command, as typed",
+  );
   const run = await runCli(["schedule", "run", schedule.id]);
   assert.equal(run.status, 0, run.stderr);
   const completed = JSON.parse(run.stdout) as { status: string; stdout_tail: string };
@@ -129,7 +209,7 @@ try {
   assert.ok((JSON.parse(schedules.stdout) as Array<{ id: string }>).some(({ id }) => id === schedule.id));
   client.close();
 
-  process.stdout.write("ok — CLI traverses Gateway for docs, notes, query visibility, and command schedules\n");
+  process.stdout.write("ok — CLI traverses Gateway for docs, notes, read-only db, and command schedules, printing JSON\n");
 } finally {
   await daemon?.close();
   if (previousHome === undefined) delete process.env.PI_TEMPLATE_HOME;
