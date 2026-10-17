@@ -62,15 +62,15 @@ improvements back under [#15](https://github.com/lhotwll217/pi-harness-template/
 
 | # | Package | Prior art | Key contract | Status |
 |---|---|---|---|---|
-| 14 | Pi 1.3.0 | Stitcher `738470f`, `08ca36b`, `0cb445f`, `4671f75` | [Architecture](architecture.md) | Planned ([#16](https://github.com/lhotwll217/pi-harness-template/issues/16)) |
-| 15 | Allow by default; sandbox opt-in, off by default | Stitcher `37b827f`, `7ef75b9`, `18ad6af` | [Security](security.md), [Onboarding](onboarding.md) | Planned ([#17](https://github.com/lhotwll217/pi-harness-template/issues/17)) |
-| 16 | AGENTS.md alone; workspace skills by default; vendored harness skills | Stitcher `a00e3fc`, `085921c`; OO `src/agent/skills.ts`, `10fae0d` | [Workspace](workspace.md), [Extensibility](extensibility.md) | Planned ([#18](https://github.com/lhotwll217/pi-harness-template/issues/18)) |
-| 17 | One command registry; JSON output; read-only `db` noun | Stitcher `595ac4d`, `f0ba616`, `914a47b`, `75db0d9`, `1f63ce4`, `81f9189` | [Documentation interface](docs-interface.md), [State and sessions](state-and-sessions.md) | Planned ([#19](https://github.com/lhotwll217/pi-harness-template/issues/19)) |
-| 18 | System prompt generated from the help tree and schema | OO `52fa55f` (PR #187) | [Self-documentation](self-documentation.md) | Planned ([#20](https://github.com/lhotwll217/pi-harness-template/issues/20)) |
-| 19 | The agent uses its own CLI; `query_database` and `save_note` retired | Stitcher `0a261ec`, `37b827f`, ADR 0001; OO `cf8ba7b` | [State and sessions](state-and-sessions.md), [Security](security.md) | Planned ([#21](https://github.com/lhotwll217/pi-harness-template/issues/21)) |
-| 20 | Daemon recovery from stale discovery | OO `039359a`, `643f99d`, `b548896`, `7e1aa60` | [Architecture](architecture.md) | Planned ([#22](https://github.com/lhotwll217/pi-harness-template/issues/22)) |
-| 21 | Chats and workspace files over the Gateway, with live events | Stitcher `3fa5d16`, `224c4fe`, `6eda897`, `07dbb75`, `a31b7f2` | [Architecture](architecture.md), [Workspace](workspace.md) | Planned ([#23](https://github.com/lhotwll217/pi-harness-template/issues/23)) |
-| 22 | Generic web chat app | Stitcher `apps/web`, without pronunciation, assessment, and vocabulary parts | [Web app](web-app.md) | Planned ([#24](https://github.com/lhotwll217/pi-harness-template/issues/24)) |
+| 14 | Pi 1.3.0 | Stitcher `738470f`, `08ca36b`, `0cb445f`, `4671f75` | [Architecture](architecture.md) | Landed |
+| 15 | Allow by default; sandbox opt-in, off by default | Stitcher `37b827f`, `7ef75b9`, `18ad6af` | [Security](security.md), [Onboarding](onboarding.md) | Landed |
+| 16 | AGENTS.md alone; workspace skills by default; vendored harness skills | Stitcher `a00e3fc`, `085921c`; OO `src/agent/skills.ts`, `10fae0d` | [Workspace](workspace.md), [Extensibility](extensibility.md) | Landed |
+| 17 | One command registry; JSON output; read-only `db` noun | Stitcher `595ac4d`, `f0ba616`, `914a47b`, `75db0d9`, `1f63ce4`, `81f9189` | [Documentation interface](docs-interface.md), [State and sessions](state-and-sessions.md) | Landed |
+| 18 | System prompt generated from the help tree and schema | OO `52fa55f` (PR #187) | [Self-documentation](self-documentation.md) | Landed |
+| 19 | The agent uses its own CLI; `query_database` and `save_note` retired | Stitcher `0a261ec`, `37b827f`, ADR 0001; OO `cf8ba7b` | [State and sessions](state-and-sessions.md), [Security](security.md) | Landed |
+| 20 | Daemon recovery from stale discovery | OO `039359a`, `643f99d`, `b548896`, `7e1aa60` | [Architecture](architecture.md) | Landed |
+| 21 | Chats and workspace files over the Gateway, with live events | Stitcher `3fa5d16`, `224c4fe`, `6eda897`, `07dbb75`, `a31b7f2` | [Architecture](architecture.md), [Workspace](workspace.md) | Landed |
+| 22 | Generic web chat app | Stitcher `apps/web`, without pronunciation, assessment, and vocabulary parts | [Web app](web-app.md) | Landed |
 
 14 is first. 15, 17, and 20 need 14. 16 needs 15; 18 needs 17; 19 needs 16 and
 18; 21 needs 19; 22 needs 21.
