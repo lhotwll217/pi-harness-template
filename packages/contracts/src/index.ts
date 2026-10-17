@@ -91,7 +91,7 @@ export type { DomainEvent, GatewayEvent } from "./events";
 
 // The wire contract: daemon identity, health, readiness, the database query surface, and
 // the typed Gateway API every client consumes.
-export { DAEMON_PROBE_TIMEOUT_MS, DEFAULT_DAEMON_PORT, DatabaseQueryAction } from "./protocol";
+export { DAEMON_PROBE_TIMEOUT_MS, DEFAULT_DAEMON_PORT, DatabaseQueryAction, GatewayRouteError } from "./protocol";
 export type {
   DaemonHealth,
   DaemonInfo,
@@ -100,6 +100,38 @@ export type {
   DatabaseQueryResponse,
   GatewayApi,
 } from "./protocol";
+
+// Chats over the Gateway: Pi sessions the daemon alone writes, projected to text and tool
+// calls, with the reply streamed as NDJSON (docs/state-and-sessions.md#chats).
+export { CHAT_TITLE_MAX, isChatId } from "./chats";
+export type {
+  Chat,
+  ChatCancelResult,
+  ChatId,
+  ChatMessage,
+  ChatPart,
+  ChatSendInput,
+  ChatStreamEvent,
+  ChatSummary,
+  ChatTurnStatus,
+} from "./chats";
+
+// The owner's workspace files over the Gateway, and the path rule that keeps every file
+// route inside the workspace and off the harness's own entries (docs/workspace.md).
+export {
+  MAX_WORKSPACE_FILE_CHARS,
+  MAX_WORKSPACE_TREE_ENTRIES,
+  RESERVED_WORKSPACE_ROOT_NAMES,
+  isReservedWorkspaceRootName,
+  parseWorkspacePath,
+} from "./workspace-files";
+export type {
+  WorkspaceEntry,
+  WorkspaceFile,
+  WorkspaceFileWrite,
+  WorkspaceFileWriteResult,
+  WorkspaceTree,
+} from "./workspace-files";
 
 // Deterministic documentation catalog, query results, and lookup failures
 // (docs/docs-interface.md).

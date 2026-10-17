@@ -51,6 +51,10 @@ export interface HarnessPaths {
   sandboxVerification: string;
   resourceApprovals: string;
   stateDb: string;
+  /** Every session's Pi transcript; interactive and scheduled sessions sit here directly. */
+  transcripts: string;
+  /** Gateway chat transcripts. Pi lists a session folder without descending, so the TUI's /resume never offers a chat. */
+  chatTranscripts: string;
   daemonInfo: string;
   /** The Gateway listener for agent callers; the daemon grants every request on it agent authority. */
   agentSocket: string;
@@ -79,6 +83,8 @@ export function harnessPaths(home = defaultHome()): HarnessPaths {
     sandboxVerification: join(home, "sandbox-verification.json"),
     resourceApprovals: join(home, "resource-approvals.json"),
     stateDb: join(home, "state.db"),
+    transcripts: join(home, "transcripts"),
+    chatTranscripts: join(home, "transcripts", "chats"),
     daemonInfo: join(home, "daemon.json"),
     agentSocket: join(home, "agent.sock"),
     logsDir: join(home, "logs"),

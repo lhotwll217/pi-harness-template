@@ -534,7 +534,7 @@ export async function createHarnessSession(options: HarnessSessionOptions) {
   }
   const sessionManager = options.sessionManager ?? (options.ephemeral
     ? SessionManager.inMemory(options.cwd)
-    : SessionManager.create(options.cwd, join(paths.home, "transcripts")));
+    : SessionManager.create(options.cwd, paths.transcripts));
   const result = await createAgentSessionFromServices({
     services: resources.services,
     sessionManager,

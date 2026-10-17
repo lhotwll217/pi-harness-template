@@ -48,6 +48,14 @@ export type DatabaseQueryRequest =
 
 export type DatabaseQueryResponse = unknown;
 
+/** A refusal a Gateway seam throws; the server answers `status` with `{ error, code, ...details }`. */
+export class GatewayRouteError extends Error {
+  constructor(readonly status: number, readonly code: string, message: string, readonly details?: Record<string, unknown>) {
+    super(message);
+    this.name = "GatewayRouteError";
+  }
+}
+
 export interface GatewayApi {
   health(): Promise<DaemonHealth>;
   ready(): Promise<DaemonReady>;

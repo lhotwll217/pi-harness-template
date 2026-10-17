@@ -7,7 +7,7 @@
   "types": "src/index.ts",
   "exports": { ".": "./src/index.ts" },
   "scripts": {
-    "test": "tsx src/protected-paths.test.ts && tsx src/onboarding.test.ts && tsx src/harness-home.integration.test.ts && tsx src/permissions.integration.test.ts",
+    "test": "tsx src/protected-paths.test.ts && tsx src/workspace-files.test.ts && tsx src/onboarding.test.ts && tsx src/harness-home.integration.test.ts && tsx src/permissions.integration.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
