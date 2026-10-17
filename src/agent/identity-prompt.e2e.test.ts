@@ -28,6 +28,22 @@ const printedHelp = async (args: readonly string[]) => await new Promise<string>
   });
 });
 
+// Commander wraps help to process.stdout.columns when stdout is a terminal; pipes never are.
+function helpInTerminal(columns: number): string[] {
+  const stdout = process.stdout as { isTTY?: boolean; columns?: number };
+  const saved = (["isTTY", "columns"] as const).map((key) => [key, Object.getOwnPropertyDescriptor(stdout, key)] as const);
+  Object.defineProperty(stdout, "isTTY", { value: true, configurable: true });
+  Object.defineProperty(stdout, "columns", { value: columns, configurable: true });
+  try {
+    return helpPages().map(({ help }) => help);
+  } finally {
+    for (const [key, descriptor] of saved) {
+      if (descriptor) Object.defineProperty(stdout, key, descriptor);
+      else delete stdout[key];
+    }
+  }
+}
+
 async function sessionSystemPrompt(): Promise<string> {
   const created = await createHarnessSession({
     home,
@@ -58,6 +74,11 @@ try {
   });
   assert.ok(prompt.includes(`\`\`\`text\n${printed.join("\n").trimEnd()}\n\`\`\``),
     "the prompt embeds every printed page, root first, in one block");
+  for (const columns of [30, 250]) {
+    helpInTerminal(columns).forEach((page, index) => {
+      assert.ok(prompt.includes(page), `\`${["pi-template", ...commands[index]!].join(" ")} --help\` in a ${columns}-column terminal is in the prompt word for word`);
+    });
+  }
   assert.ok(prompt.includes(`\`\`\`text\n${schemaReference()}\n\`\`\``), "the prompt embeds the schema reference");
   assert.ok(prompt.includes([
     "schedule_runs — Durable execution history with immutable launch context and terminal outcome tails.",
