@@ -30,6 +30,9 @@ behavior is opt-in and never part of the default suite.
 | Smoke | Explicit checks against the developer's live machine | No |
 | Live model | Paid provider behavior and qualitative agent checks | No |
 
+Root `npm test` also runs each workspace's own `test` script, which brings in
+the [web app](web-app.md#tests)'s Vitest suite.
+
 ## Contract coverage
 
 Future tests should prove:

@@ -83,6 +83,7 @@ pi-template docs query "..."    # ranked pages and a bounded reading plan
 pi-template notes add "..."     # durable state; see docs/state-and-sessions.md
 pi-template schedule add ...    # durable schedules; see docs/scheduler.md
 pi-template db tables           # read-only SQL over durable state: tables, describe, query
+npm start                       # the web chat app; prints its local URL
 ```
 
 Every command prints JSON. The same operations back every consumer, the
@@ -117,6 +118,7 @@ can decide what to read without loading the whole repository.
 - [Command-line interface](docs/cli.md) — the command registry, JSON output, and help.
 - [Documentation interface](docs/docs-interface.md) — the public docs surface.
 - [Testing](docs/testing.md) — verification tiers and contracts.
+- [Web app](docs/web-app.md) — the chat and files app `npm start` opens.
 
 Ported from proven
 [Owner Operator](https://github.com/lhotwll217/owner-operator) modules and

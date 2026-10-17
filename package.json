@@ -9,12 +9,14 @@
   "description": "Running, self-documenting, demonstrative harness template for Pi-based products.",
   "license": "MIT",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "engines": {
     "node": ">=22.19"
   },
   "scripts": {
+    "start": "node scripts/start.mjs",
     "docs:list": "node scripts/docs-list.mjs",
     "test": "npm run test:unit && npm run test:integration && npm run test:e2e && npm run test --workspaces --if-present",
     "test:unit": "node test/run.mjs unit",

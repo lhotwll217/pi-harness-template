@@ -70,7 +70,7 @@ improvements back under [#15](https://github.com/lhotwll217/pi-harness-template/
 | 19 | The agent uses its own CLI; `query_database` and `save_note` retired | Stitcher `0a261ec`, `37b827f`, ADR 0001; OO `cf8ba7b` | [State and sessions](state-and-sessions.md), [Security](security.md) | Planned ([#21](https://github.com/lhotwll217/pi-harness-template/issues/21)) |
 | 20 | Daemon recovery from stale discovery | OO `039359a`, `643f99d`, `b548896`, `7e1aa60` | [Architecture](architecture.md) | Planned ([#22](https://github.com/lhotwll217/pi-harness-template/issues/22)) |
 | 21 | Chats and workspace files over the Gateway, with live events | Stitcher `3fa5d16`, `224c4fe`, `6eda897`, `07dbb75`, `a31b7f2` | [Architecture](architecture.md), [Workspace](workspace.md) | Planned ([#23](https://github.com/lhotwll217/pi-harness-template/issues/23)) |
-| 22 | Generic web chat app | Stitcher `apps/web`, without pronunciation, assessment, and vocabulary parts | Web app page, created with the package | Planned ([#24](https://github.com/lhotwll217/pi-harness-template/issues/24)) |
+| 22 | Generic web chat app | Stitcher `apps/web`, without pronunciation, assessment, and vocabulary parts | [Web app](web-app.md) | Planned ([#24](https://github.com/lhotwll217/pi-harness-template/issues/24)) |
 
 14 is first. 15, 17, and 20 need 14. 16 needs 15; 18 needs 17; 19 needs 16 and
 18; 21 needs 19; 22 needs 21.
