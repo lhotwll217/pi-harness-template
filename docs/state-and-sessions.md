@@ -86,6 +86,17 @@ scheduled prompt, or another approved surface. Scheduled work also records job
 and run identity. Provenance is immutable context attached at session creation
 and propagated to tool and command boundaries.
 
+## Resuming an interactive session
+
+When the interactive session (bare `pi-template`) exits, Pi prints its own
+hint, `To resume this session: pi --session-dir <dir> --session <id>`. Pi builds
+that line from its own package name (`formatResumeCommand`,
+`@earendil-works/pi-coding-agent` 1.3.0,
+`dist/modes/interactive/interactive-mode.js`), so the harness cannot change it.
+The printed command opens the transcript in standalone Pi, without the
+harness's agent definition, credentials, or permission policy. Resume inside
+`pi-template` with `/resume` instead.
+
 ## Chats
 
 A chat is a Pi session whose transcript sits in `<home>/transcripts/chats/`;
