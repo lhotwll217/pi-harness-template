@@ -74,6 +74,15 @@ export const SCHEMA_DOCS: readonly TableDoc[] = [
   },
 ];
 
+/** Every table and column description as plain text. */
+export function schemaReference(): string {
+  const width = Math.max(...SCHEMA_DOCS.flatMap((table) => table.columns.map((column) => column.name.length)));
+  return SCHEMA_DOCS.map((table) => [
+    `${table.name} — ${table.description}`,
+    ...table.columns.map((column) => `  ${column.name.padEnd(width)}  ${column.description}`),
+  ].join("\n")).join("\n\n");
+}
+
 export function tableDoc(name: string): TableDoc | undefined {
   return SCHEMA_DOCS.find((table) => table.name === name);
 }

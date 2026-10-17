@@ -16,6 +16,7 @@ import {
   QUERY_TIME_LIMIT_MS,
   runQuery,
 } from "./query";
+import { SCHEMA_DOCS } from "./schema-docs";
 
 const READ_ONLY_HINT = "`pi-template db query` runs one read-only SELECT against the state database.";
 const RUNAWAY = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n";
@@ -66,6 +67,17 @@ try {
     assert.ok(
       describeTable(table.name, dbPath).columns.every((column) => column.description !== "(undocumented)"),
       `${table.name} has descriptions for every live column`,
+    );
+  }
+  const liveColumns = new Map(tables.map((table) => [
+    table.name,
+    describeTable(table.name, dbPath).columns.map((column) => column.name).sort(),
+  ]));
+  for (const doc of SCHEMA_DOCS) {
+    assert.deepEqual(
+      doc.columns.map((column) => column.name).sort(),
+      liveColumns.get(doc.name),
+      `every table and column SCHEMA_DOCS describes for ${doc.name} is in the live schema`,
     );
   }
 

@@ -71,7 +71,9 @@ future catalog generator must fail if a page lacks any required field.
 Behavior is stated where it is owned and linked elsewhere. Once executable
 contracts exist, schemas, catalogs, flags, and parsers should document their own
 exact shapes. Narrative pages explain purpose and invariants and point to those
-contracts rather than copying them.
+contracts rather than copying them. The agent's system prompt follows the same
+rule: it embeds the CLI's help and the schema descriptions as generated text
+instead of restating them ([Command-line interface](cli.md#help-is-the-guidance)).
 
 ## Catalog
 

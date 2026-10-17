@@ -133,6 +133,10 @@ try {
     ],
   );
 
+  const commented = await runCli(["db", "query", "-- leading comment\nSELECT 1 AS one"]);
+  assert.equal(commented.status, 0, "SQL that opens with a -- comment is SQL, not an unknown option");
+  assert.deepEqual(JSON.parse(commented.stdout), { rows: [{ one: 1 }], truncated: false });
+
   const write = await runCli(["db", "query", "UPDATE notes SET body = 'x'"]);
   assert.equal(write.status, 1);
   assert.equal(write.stdout, "");

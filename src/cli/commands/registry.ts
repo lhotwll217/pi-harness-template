@@ -97,3 +97,8 @@ export function helpPages(): HelpPage[] {
   });
   return pages;
 }
+
+/** Every help page in `helpPages()` order, one blank line apart, each exactly as printed. */
+export function helpTree(): string {
+  return helpPages().map(({ help }) => help).join("\n");
+}
