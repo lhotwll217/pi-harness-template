@@ -142,7 +142,8 @@ export async function ensureDaemon(): Promise<ConfirmedGatewayClient> {
       cwd: repositoryRoot,
       detached: true,
       stdio: ["ignore", log, log],
-      env: process.env,
+      // The daemon runs in the checkout, so a relative PI_TEMPLATE_HOME would name another home there.
+      env: { ...process.env, PI_TEMPLATE_HOME: paths.home },
     });
     closeSync(log);
     child.unref();

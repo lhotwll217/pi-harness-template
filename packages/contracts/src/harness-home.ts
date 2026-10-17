@@ -4,7 +4,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 export type SkillPolicy =
   | { mode: "bundled"; allowlist: [] }
@@ -30,7 +30,11 @@ const FAIL_CLOSED_PERMISSION_MODE: PermissionMode = "read-only";
 const SKILL_MODES = new Set(["bundled", "all-workspace", "allowlist"]);
 const TOOL_NAMES = new Set(DEFAULT_TOOL_POSTURE);
 const PERMISSION_MODES = new Set<string>(["ask", "allow", "read-only"]);
-const defaultHome = () => process.env.PI_TEMPLATE_HOME || join(homedir(), ".pi-template");
+/** Whitespace is unset; a relative value names a home under the caller's directory. */
+const defaultHome = () => {
+  const variable = process.env.PI_TEMPLATE_HOME?.trim();
+  return variable ? resolve(variable) : join(homedir(), ".pi-template");
+};
 
 export interface HarnessPaths {
   home: string;
