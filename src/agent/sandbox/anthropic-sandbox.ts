@@ -146,9 +146,7 @@ async function spawnSandboxed(
     const signalGroup = (signal: NodeJS.Signals): void => {
       try {
         process.kill(-child.pid!, signal);
-      } catch {
-        // The group is already gone.
-      }
+      } catch {}
     };
     const finish = (): void => {
       if (settled) return;

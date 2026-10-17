@@ -25,13 +25,11 @@ const policy = {
   process: { allowSubprocesses: true },
   network: { mode: "deny" as const, allowedDomains: [] },
 };
-// Time the agent loop and faux provider add around one tool call.
 const TURN_OVERHEAD_MS = 500;
 
 type BashCall = { command: string; timeout?: number };
 interface BashOutcome { text: string; isError: boolean; elapsedMs: number }
 
-/** A sleep with a duration no other process uses, so pgrep finds exactly the command's own sleep. */
 const uniqueSleep = (slot: number): string => `sleep ${30 + slot}.${String(process.pid).padStart(7, "0")}`;
 
 function running(sleep: string): number {
@@ -98,7 +96,6 @@ const lastToolResult = (context: Context): { text: string; isError: boolean } =>
   return { text: result.content.map((part) => part.type === "text" ? part.text : "").join(""), isError: result.isError };
 };
 
-/** Drive each bash call through a scheduled prompt and return what the model saw, timed per call. */
 async function runBashCalls(name: string, sandboxEnabled: boolean, calls: BashCall[]): Promise<BashOutcome[]> {
   const { home, cwd } = prepareHome(name, sandboxEnabled);
   const outcomes: BashOutcome[] = [];
@@ -152,9 +149,7 @@ async function checkTimeouts(name: string, sandboxEnabled: boolean): Promise<voi
   assert.equal(running(plain), 0, "the timed-out compound command left its sleep running");
   assert.equal(running(ignoresTerm), 0, "the timed-out command that ignores SIGTERM left its sleep running");
   assert.equal(running(escapedLeader), 0, "the timed-out command left its own sleep running");
-  // A descendant that leaves the process group outlives the stop, as it does under Pi's runner;
-  // the call above proves the tool no longer waits on the pipe it holds.
-  assert.equal(running(escaped), 1, "the descendant that left the process group is still running");
+  assert.equal(running(escaped), 1, "a descendant that left the process group outlives the stop, as under Pi's runner");
   execFileSync("pkill", ["-f", escaped]);
 }
 

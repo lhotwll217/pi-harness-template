@@ -152,7 +152,6 @@ try {
     google: { type: "api_key", key: "google-secret" },
   });
 
-  // The default auth check (no injected verifier) reads auth.json the way Pi does.
   const defaultVerifier = { ...dependencies(), authVerifier: undefined };
   const bomCheckHome = join(root, "bom-auth-check");
   writeFileSync(ensureHarnessWorkspace(bomCheckHome).piAuth, `\uFEFF${JSON.stringify(savedProviders)}`);
