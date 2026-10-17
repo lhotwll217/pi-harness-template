@@ -35,7 +35,12 @@ import {
 import { createLaunchdServiceAdapter, type DaemonServiceAdapter } from "../daemon/ensure";
 import { readAuthFile } from "./auth-file";
 import { runDoctor } from "./doctor";
-import { AGENT_DEFINITION, definitionIds } from "./agent-definition";
+import {
+  AGENT_DEFINITION,
+  definitionIds,
+  unacknowledgedDefinitionIds,
+  unacknowledgedDefinitionMessage,
+} from "./agent-definition";
 import {
   createSandboxAdapter,
   homeInWriteRootsProblem,
@@ -175,7 +180,7 @@ function sameJson(left: unknown, right: unknown): boolean {
 function verifyHome(paths: HarnessPaths): boolean {
   return [paths.home, paths.workspace, paths.workspaceSkills, paths.workspaceArtifacts, paths.piAgentDir, paths.logsDir]
     .every((path) => existsSync(path) && statSync(path).isDirectory()) &&
-    [paths.workspaceInstructions, paths.workspaceMemory].every((path) => existsSync(path) && statSync(path).isFile());
+    existsSync(paths.workspaceInstructions) && statSync(paths.workspaceInstructions).isFile();
 }
 
 /** The answers onboarding wrote to a home; an answer it never wrote is undefined, never a default. */
@@ -232,6 +237,10 @@ function assertRerunCanFinish(answers: OnboardingAnswers, hasCredentials: () => 
   requireAnswer("model", answers.model);
   for (const [stage, key] of Object.entries(ANSWERED_STAGES) as [OnboardingStage, keyof OnboardingAnswers][]) {
     requireAnswer(stage, answers[key]);
+  }
+  const unacknowledged = unacknowledgedDefinitionIds(answers.resources!.acknowledgedDefinitionIds);
+  if (unacknowledged.length) {
+    throw new OnboardingStageError("resources", unacknowledgedDefinitionMessage(unacknowledged));
   }
   if (!sameJson(answers.resources!.acknowledgedDefinitionIds, definitionIds(AGENT_DEFINITION))) {
     throw new OnboardingStageError("resources", "resource review must acknowledge the exact agent definition");

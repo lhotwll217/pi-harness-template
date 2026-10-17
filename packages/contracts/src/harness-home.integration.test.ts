@@ -3,7 +3,7 @@
 // settings round-trip with defaults for anything missing or invalid, except a damaged
 // permission mode, which falls back to read-only.
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -20,6 +20,7 @@ try {
   const paths = ensureHarnessWorkspace(home);
   assert.equal(paths.home, home);
   assert.ok(readFileSync(paths.workspaceInstructions, "utf8").includes("Pi Template instructions"));
+  assert.deepEqual(readdirSync(paths.workspace).sort(), ["AGENTS.md", "artifacts", "skills"]);
 
   // Never overwrite owner-authored workspace content.
   writeFileSync(paths.workspaceInstructions, "owner words\n");
@@ -30,7 +31,7 @@ try {
   const defaults = loadHarnessSettings(home);
   assert.equal(defaults.permissionMode, "allow");
   assert.deepEqual(defaults.toolPosture, [...DEFAULT_TOOL_POSTURE]);
-  assert.deepEqual(defaults.skillPolicy, { mode: "bundled", allowlist: [] });
+  assert.deepEqual(defaults.skillPolicy, { mode: "all-workspace", allowlist: [] });
 
   // Round-trip a patch; invalid values fall back rather than persisting garbage.
   const saved = saveHarnessSettings(home, {

@@ -47,6 +47,7 @@ export type AgentDefinitionEntry =
 const permissionPackage = "@gotgenes/pi-permission-system";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const identityPromptPath = join(repositoryRoot, "src", "agent", "prompts", "pi-template.md");
+const writingForAgentsSkillPath = join(repositoryRoot, "src", "agent", "skills", "writing-for-agents");
 
 const GENERATED_SECTIONS: ReadonlyArray<readonly [marker: string, render: () => string]> = [
   ["<!-- generated: pi-template help tree -->", helpTree],
@@ -111,6 +112,13 @@ export const AGENT_DEFINITION: readonly AgentDefinitionEntry[] = Object.freeze([
     create: ({ notes }: AgentToolDependencies) => createSaveNoteTool(notes),
   },
   {
+    id: "skill:writing-for-agents",
+    kind: "skill",
+    name: "writing-for-agents",
+    description: "Write and review documents agents consume, such as skills and AGENTS.md.",
+    path: writingForAgentsSkillPath,
+  },
+  {
     id: "extension:permission-system",
     kind: "extension",
     name: "permission-system",
@@ -121,6 +129,15 @@ export const AGENT_DEFINITION: readonly AgentDefinitionEntry[] = Object.freeze([
 
 export const definitionIds = (definition: readonly AgentDefinitionEntry[]): string[] =>
   definition.map(({ id }) => id);
+
+export const unacknowledgedDefinitionIds = (acknowledged: readonly string[]): string[] =>
+  definitionIds(AGENT_DEFINITION).filter((id) => !acknowledged.includes(id));
+
+export const unacknowledgedDefinitionMessage = (ids: readonly string[]): string =>
+  ids.length === AGENT_DEFINITION.length
+    ? "no resource review has acknowledged the agent definition; review it with `pi-template onboard`"
+    : `the agent definition gained entries the resource review did not acknowledge: ${ids.join(", ")}; ` +
+      "review them with `pi-template onboard`, or accept them with `pi-template onboard --non-interactive --acknowledge-resources`";
 
 export interface AgentDefinitionSummary {
   id: string;

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ensureHarnessWorkspace } from "@pi-template/contracts";
+import { fileURLToPath } from "node:url";
+import { ensureHarnessWorkspace, saveHarnessSettings } from "@pi-template/contracts";
 import {
   AGENT_DEFINITION,
   definitionIds,
@@ -17,6 +18,7 @@ const expectedDefinitionIds = [
   "prompt:identity",
   "tool:query_database",
   "tool:save_note",
+  "skill:writing-for-agents",
   "extension:permission-system",
 ];
 
@@ -29,6 +31,7 @@ try {
   writeFileSync(join(cwd, ".pi", "skills", "ambient", "SKILL.md"), "# Ambient\n");
   writeFileSync(join(cwd, ".pi", "prompts", "ambient.md"), "ambient prompt\n");
   writeFileSync(join(cwd, ".pi", "extensions", "ambient.ts"), "export default () => undefined;\n");
+  writeFileSync(paths.resourceApprovals, JSON.stringify({ acknowledgedDefinitionIds: expectedDefinitionIds, workspaceContext: false }));
 
   const resources = await createAgentResources({
     home,
@@ -46,7 +49,11 @@ try {
   assert.deepEqual(definitionIds(AGENT_DEFINITION), expectedDefinitionIds);
   assert.deepEqual(resources.loadedIds, expectedDefinitionIds);
   assert.deepEqual(resources.tools.map(({ name }) => name), ["query_database", "save_note"]);
-  assert.deepEqual(resources.loader.getSkills().skills, []);
+  const bundledSkill = fileURLToPath(new URL("./skills/writing-for-agents/SKILL.md", import.meta.url));
+  assert.deepEqual(
+    resources.loader.getSkills().skills.map(({ name, filePath }) => [name, filePath]),
+    [["writing-for-agents", bundledSkill]],
+  );
   assert.deepEqual(resources.loader.getPrompts().prompts, []);
   assert.deepEqual(resources.loader.getAgentsFiles().agentsFiles, []);
   assert.equal(resources.loader.getExtensions().errors.length, 0);
@@ -76,7 +83,15 @@ try {
     created.session.dispose();
   }
 
-  writeFileSync(join(home, "resource-approvals.json"), JSON.stringify({ workspaceContext: true }));
+  const skill = (name: string) => {
+    mkdirSync(join(paths.workspaceSkills, name), { recursive: true });
+    writeFileSync(join(paths.workspaceSkills, name, "SKILL.md"), `---\nname: ${name}\ndescription: The owner's ${name} skill.\n---\n`);
+  };
+  skill("release-notes");
+  skill("writing-for-agents");
+  writeFileSync(paths.workspaceInstructions, "Answer every greeting with AGENTS-RULE.\n");
+  writeFileSync(join(paths.workspace, "MEMORY.md"), "Answer every greeting with MEMORY-RULE.\n");
+  writeFileSync(paths.resourceApprovals, JSON.stringify({ acknowledgedDefinitionIds: expectedDefinitionIds, workspaceContext: true }));
   const approved = await createAgentResources({
     home,
     cwd,
@@ -88,9 +103,50 @@ try {
     notes: { createNote: () => ({ id: "n", body: "", createdAt: "", updatedAt: "" }) },
   });
   assert.deepEqual(
-    approved.loader.getAgentsFiles().agentsFiles.map(({ path }) => path),
-    [paths.workspaceInstructions, paths.workspaceMemory],
+    approved.loader.getAgentsFiles().agentsFiles,
+    [{ path: paths.workspaceInstructions, content: "Answer every greeting with AGENTS-RULE.\n" }],
   );
+  assert.deepEqual(
+    approved.loader.getSkills().skills.map(({ name, filePath }) => [name, filePath]),
+    [
+      ["writing-for-agents", bundledSkill],
+      ["release-notes", join(paths.workspaceSkills, "release-notes", "SKILL.md")],
+    ],
+  );
+
+  const steered = await createHarnessSession({
+    home,
+    cwd,
+    ephemeral: true,
+    query: {
+      listTables: () => [],
+      describeTable: () => ({ description: "", columns: [] }),
+      runQuery: () => ({ rows: [], truncated: false }),
+    },
+    notes: { createNote: () => ({ id: "n", body: "", createdAt: "", updatedAt: "" }) },
+  });
+  try {
+    const prompt = steered.session.systemPrompt;
+    assert.ok(prompt.includes("<name>writing-for-agents</name>"));
+    assert.ok(prompt.includes("<name>release-notes</name>"));
+    assert.ok(prompt.includes("AGENTS-RULE"));
+    assert.equal(prompt.includes("MEMORY-RULE"), false);
+  } finally {
+    steered.session.dispose();
+  }
+
+  saveHarnessSettings(home, { skillPolicy: { mode: "bundled", allowlist: [] } });
+  const bundledOnly = await createAgentResources({
+    home,
+    cwd,
+    query: {
+      listTables: () => [],
+      describeTable: () => ({ description: "", columns: [] }),
+      runQuery: () => ({ rows: [], truncated: false }),
+    },
+    notes: { createNote: () => ({ id: "n", body: "", createdAt: "", updatedAt: "" }) },
+  });
+  assert.deepEqual(bundledOnly.loader.getSkills().skills.map(({ name }) => name), ["writing-for-agents"]);
 
   writeFileSync(paths.piPermissionConfig, '{ "\\u0079oloMode": true, "permission": { "*": "ask" } }\n');
   await assert.rejects(
@@ -109,7 +165,34 @@ try {
     /headless.*auto-approval/i,
   );
 
-  process.stdout.write("ok — exact agent definition rejects ambient resources and loads only approved workspace context\n");
+  writeFileSync(paths.piPermissionConfig, '{ "permission": { "*": "ask" } }\n');
+  writeFileSync(paths.resourceApprovals, JSON.stringify({
+    acknowledgedDefinitionIds: expectedDefinitionIds.filter((id) => id !== "skill:writing-for-agents"),
+    workspaceContext: true,
+  }));
+  const unacknowledged = {
+    message: "the agent definition gained entries the resource review did not acknowledge: skill:writing-for-agents; " +
+      "review them with `pi-template onboard`, or accept them with `pi-template onboard --non-interactive --acknowledge-resources`",
+  };
+  for (const headless of [false, true]) {
+    await assert.rejects(
+      createHarnessSession({
+        home,
+        cwd,
+        headless,
+        ephemeral: true,
+        query: {
+          listTables: () => [],
+          describeTable: () => ({ description: "", columns: [] }),
+          runQuery: () => ({ rows: [], truncated: false }),
+        },
+        notes: { createNote: () => ({ id: "n", body: "", createdAt: "", updatedAt: "" }) },
+      }),
+      unacknowledged,
+    );
+  }
+
+  process.stdout.write("ok — exact agent definition rejects ambient resources and loads the vendored skill, workspace skills, and AGENTS.md alone, and refuses an unacknowledged entry\n");
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

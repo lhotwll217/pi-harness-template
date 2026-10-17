@@ -7,10 +7,11 @@ import {
   loadHarnessSettings,
   loadProtectedPaths,
   type OnboardingProgress,
+  type SkillPolicy,
 } from "@pi-template/contracts";
-import { agentDefinitionSummary } from "./agent-definition";
+import { agentDefinitionSummary, unacknowledgedDefinitionMessage } from "./agent-definition";
 import { readAuthFile } from "./auth-file";
-import { configuredWorkspaceSkillNames, protectedPathsProblem } from "./runtime";
+import { inspectWorkspaceSkills, protectedPathsProblem, unacknowledgedResources, type SkippedSkillEntry, type SkippedSkillLink } from "./runtime";
 import { homeInWriteRootsProblem, readSandboxPolicy } from "./sandbox";
 
 type JsonObject = Record<string, unknown>;
@@ -43,7 +44,19 @@ export interface DoctorReport {
     };
     provider: { available: boolean; configuredCount: number; problem?: string };
     model: { available: boolean; selected: string | null };
-    resources: { reviewed: boolean; bundled: string[]; workspaceSkills: string[]; workspaceContext: boolean };
+    resources: {
+      reviewed: boolean;
+      unacknowledged: string[];
+      bundled: string[];
+      skillPolicy: SkillPolicy;
+      workspaceSkills: string[];
+      brokenSkillLinksNotLoaded: Array<{ name: string; target: string }>;
+      skippedSkillLinks: SkippedSkillLink[];
+      skippedSkillEntries: SkippedSkillEntry[];
+      skillNameCollisionsNotLoaded: Array<{ name: string; path: string; winner: string }>;
+      workspaceContext: boolean;
+      notices: string[];
+    };
     permission: { configured: boolean; mode: string; configPath: string };
     protectedPaths: { readable: boolean; reason: string };
     sandbox: { enabled: boolean; verified: boolean; reason: string };
@@ -107,6 +120,18 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
     }
   }
   const service = settings.alwaysOn ?? "not-configured";
+  const unacknowledged = unacknowledgedResources(paths.home);
+  const skills = inspectWorkspaceSkills(paths.home);
+  const staleMemory = resolve(paths.workspace, "MEMORY.md");
+  const notices = [
+    ...(unacknowledged.length ? [unacknowledgedDefinitionMessage(unacknowledged)] : []),
+    ...(skills.unreadable ? [`${paths.workspaceSkills} is unreadable (${skills.unreadable}), so no workspace skill loads`] : []),
+    ...(existsSync(staleMemory) ? [`${staleMemory} is no longer loaded; ${paths.workspaceInstructions} is the instructions file`] : []),
+    ...(settings.skillPolicy.mode === "bundled"
+      ? ["skill policy is bundled, so no workspace skill loads; load them with " +
+        "`pi-template onboard --non-interactive --acknowledge-resources --workspace-skills all`"]
+      : []),
+  ];
   const checks: DoctorReport["checks"] = {
     roots: {
       ok: existsSync(paths.home) && existsSync(paths.workspace),
@@ -118,10 +143,17 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
     provider: providerCheck,
     model: { available: modelAvailable, selected },
     resources: {
-      reviewed: progress.version === ONBOARDING_VERSION && !!progress.stages?.resources,
+      reviewed: progress.version === ONBOARDING_VERSION && !!progress.stages?.resources && !unacknowledged.length,
+      unacknowledged,
       bundled: agentDefinitionSummary().map(({ id }) => id),
-      workspaceSkills: configuredWorkspaceSkillNames(paths.home),
+      skillPolicy: settings.skillPolicy,
+      workspaceSkills: skills.loaded,
+      brokenSkillLinksNotLoaded: skills.brokenLinks,
+      skippedSkillLinks: skills.skippedLinks,
+      skippedSkillEntries: skills.skippedEntries,
+      skillNameCollisionsNotLoaded: skills.collisions,
       workspaceContext: readObject(paths.resourceApprovals).workspaceContext === true,
+      notices,
     },
     permission: {
       configured: existsSync(paths.piPermissionConfig),
@@ -144,6 +176,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
 
 export function formatDoctorReport(report: DoctorReport): string {
   const { checks } = report;
+  const policy = checks.resources.skillPolicy;
   return [
     `Status: ${report.ok ? "ready" : "not ready"}`,
     `Install root: ${checks.roots.installRoot}`,
@@ -153,11 +186,16 @@ export function formatDoctorReport(report: DoctorReport): string {
     `Providers: ${checks.provider.problem ? `unreadable (${checks.provider.problem})` : `${checks.provider.configuredCount} configured`}`,
     `Model: ${checks.model.selected ?? "not configured"} (${checks.model.available ? "available" : "unavailable"})`,
     `Bundled resources: ${checks.resources.bundled.join(", ")}`,
-    `Workspace skills: ${checks.resources.workspaceSkills.join(", ") || "none"}`,
+    `Workspace skills (${policy.mode}${policy.allowlist.length ? `: ${policy.allowlist.join(", ")}` : ""}): ${checks.resources.workspaceSkills.join(", ") || "none"}`,
+    ...checks.resources.brokenSkillLinksNotLoaded.map(({ name, target }) => `  broken link, not loaded: ${name} -> ${target}`),
+    ...checks.resources.skippedSkillLinks.map(({ name, target, reason }) => `  skipped link, not loaded: ${name} -> ${target} (${reason})`),
+    ...checks.resources.skippedSkillEntries.map(({ name, reason }) => `  skipped entry, not loaded: ${name} (${reason})`),
+    ...checks.resources.skillNameCollisionsNotLoaded.map(({ path, winner }) => `  name collision, not loaded: ${path} (${winner} wins)`),
     `Workspace context: ${checks.resources.workspaceContext ? "approved" : "not approved"}`,
     `Permission mode: ${checks.permission.mode} (${checks.permission.configured ? "configured" : "not configured"})`,
     `Protected paths: ${checks.protectedPaths.readable ? checks.protectedPaths.reason : `unreadable (${checks.protectedPaths.reason})`}`,
     `Sandbox: ${checks.sandbox.enabled ? `on, ${checks.sandbox.verified ? "verified" : "not verified"}` : "off"} (${checks.sandbox.reason})`,
     `Daemon: ${checks.daemon.configuration}`,
+    ...checks.resources.notices.map((notice) => `Notice: ${notice}`),
   ].join("\n") + "\n";
 }

@@ -75,7 +75,7 @@ try {
 
   const paths = harnessPaths(home);
   assert.equal(JSON.parse(readFileSync(join(home, "sandbox.json"), "utf8")).enabled, false);
-  assert.equal(await bashTurn("LC_ALL=C ls", paths.workspace), "AGENTS.md\nMEMORY.md\nartifacts\nskills\n");
+  assert.equal(await bashTurn("LC_ALL=C ls", paths.workspace), "AGENTS.md\nartifacts\nskills\n");
   assert.equal(await bashTurn(`printenv ${secretName} || echo unset`, paths.workspace), "unset\n");
 
   rmSync(join(home, "sandbox.json"));

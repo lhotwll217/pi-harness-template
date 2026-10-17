@@ -1,4 +1,5 @@
-import { harnessPaths } from "@pi-template/contracts";
+import { writeFileSync } from "node:fs";
+import { harnessPaths, type HarnessPaths } from "@pi-template/contracts";
 import {
   AGENT_DEFINITION,
   definitionIds,
@@ -60,4 +61,9 @@ export function passingOnboardingDependencies(home?: string): OnboardingDependen
     readiness: async () => ({ ok: true, reason: "test readiness passed" }),
     platform: "darwin",
   };
+}
+
+/** Record the resource review a completed onboarding writes, so a session may load the agent definition. */
+export function acknowledgeAgentDefinition(paths: HarnessPaths, workspaceContext = false): void {
+  writeFileSync(paths.resourceApprovals, JSON.stringify({ acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION), workspaceContext }));
 }
