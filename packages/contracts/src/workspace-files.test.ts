@@ -1,4 +1,3 @@
-// Unit: the workspace path rule and the chat id rule, before any filesystem call.
 import assert from "node:assert/strict";
 import { isChatId } from "./chats";
 import { GatewayRouteError } from "./protocol";

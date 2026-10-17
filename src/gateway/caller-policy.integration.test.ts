@@ -1,5 +1,3 @@
-// Every Gateway route answered for each caller and setup state. The rows are literal statuses,
-// so a change to the declared caller policy, or to how it is enforced, shows up here.
 import assert from "node:assert/strict";
 import { request as httpRequest } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -98,7 +96,6 @@ const gateway = await startGateway({
 });
 
 type Caller = "owner" | "agent" | "no-token";
-/** Status only; an event stream is closed as soon as its head arrives. */
 function status(caller: Caller, method: string, path: string, body?: string): Promise<number> {
   return new Promise((resolve, reject) => {
     const headers: Record<string, string> = body ? { "content-type": "application/json" } : {};
@@ -115,8 +112,8 @@ function status(caller: Caller, method: string, path: string, body?: string): Pr
   });
 }
 
-// [method, path, body, owner before setup, agent before setup, owner after setup, agent after setup]
-type Row = [string, string, string | undefined, number, number, number, number];
+type Row = [method: string, path: string, body: string | undefined,
+  ownerBeforeSetup: number, agentBeforeSetup: number, ownerAfterSetup: number, agentAfterSetup: number];
 const ROWS: Row[] = [
   ["GET", "/health", undefined, 200, 200, 200, 200],
   ["GET", "/ready", undefined, 200, 200, 200, 200],

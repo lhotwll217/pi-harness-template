@@ -10,7 +10,6 @@ const textOf = (content: unknown): string => typeof content === "string"
   ? content.filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text as string).join("")
   : "";
 
-/** Pi's stop reason for the last reply in a turn; `toolUse` with no later reply means the turn never finished. */
 function statusOf(stopReason: unknown): ChatTurnStatus | "interrupted" {
   if (stopReason === "aborted") return "cancelled";
   if (stopReason === "error") return "failed";
@@ -18,11 +17,6 @@ function statusOf(stopReason: unknown): ChatTurnStatus | "interrupted" {
   return "completed";
 }
 
-/**
- * A chat's messages from Pi's: each user message, then one assistant message that folds the
- * replies and tool results up to the next user message. Thinking is dropped; a turn the daemon
- * did not finish, and that no longer runs, is `interrupted`.
- */
 export function projectChat(messages: readonly unknown[], running: boolean): ChatMessage[] {
   const projected: ChatMessage[] = [];
   let turn: AssistantChatMessage | undefined;

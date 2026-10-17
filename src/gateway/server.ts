@@ -6,6 +6,7 @@ import {
   DEFAULT_DAEMON_PORT,
   DatabaseQueryAction,
   GatewayRouteError,
+  MAX_REQUEST_BODY_CHARS,
   ScheduledPayloadKind,
   isChatId,
   type Chat,
@@ -138,7 +139,7 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
     request.setEncoding("utf8");
     request.on("data", (chunk: string) => {
       raw += chunk;
-      if (raw.length > 1_000_000) reject(new Error("request body too large"));
+      if (raw.length > MAX_REQUEST_BODY_CHARS) reject(new Error("request body too large"));
     });
     request.on("end", () => {
       try { resolve(raw ? JSON.parse(raw) : {}); } catch { reject(new Error("invalid JSON")); }
@@ -189,8 +190,6 @@ export interface CallerPolicy {
 
 const OPEN: CallerPolicy = { agent: "allow", setupGated: false };
 const GATED: CallerPolicy = { agent: "allow", setupGated: true };
-// The daemon writes chat transcripts and workspace files outside the sandbox and the agent's
-// path policy, as it runs command schedules; the agent has its own file tools.
 const OWNER_CHATS: CallerPolicy = {
   agent: { error: "agent callers cannot use chat routes", code: "owner_only" },
   setupGated: true,
@@ -216,7 +215,6 @@ interface Route {
   handle(context: RouteContext): Promise<void> | void;
 }
 
-/** `/notes/:id` matches one percent-decoded segment per `:name`. */
 function route(method: string, pattern: string, policy: CallerPolicy, handle: Route["handle"]): Route {
   const source = pattern.split("/").map((segment) => segment.startsWith(":") ? "([^/]+)" : segment).join("/");
   return { method, path: new RegExp(`^${source}$`), policy, handle };
@@ -329,7 +327,6 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       }
       const events = await options.chats.send(chatId(id!), body.text);
       response.writeHead(200, { "content-type": "application/x-ndjson", "cache-control": "no-cache" });
-      // A client that leaves stops only the writing; cancel stops the turn.
       for await (const event of events) {
         if (!response.destroyed) response.write(`${JSON.stringify(event)}\n`);
       }

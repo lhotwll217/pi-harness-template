@@ -34,19 +34,13 @@ export interface ChatServiceOptions {
   publish(event: DomainEvent): void;
 }
 
-/** Tools whose call may change workspace files; each finished call invalidates the workspace once. */
-const WORKSPACE_TOOLS = new Set(["write", "edit", "bash"]);
+const WORKSPACE_CHANGING_TOOLS = new Set(["write", "edit", "bash"]);
 
 const busy = (id: string) => new GatewayRouteError(409, "chat_busy", `chat ${id} is replying; cancel it or wait`);
 const notFound = (id: string) => new GatewayRouteError(404, "chat_not_found", `no chat ${id}`);
 const titleOf = (info: SessionInfo): string =>
   info.name ?? info.firstMessage.replace(/\s+/g, " ").trim().slice(0, CHAT_TITLE_MAX);
 
-/**
- * Chats over the Gateway. A chat is a Pi session in `<home>/transcripts/chats`, and the daemon is its
- * only writer: one turn per chat at a time, each in a fresh headless harness session, so every
- * session start check runs on every turn (docs/state-and-sessions.md#chats).
- */
 export function createChatService(options: ChatServiceOptions) {
   const paths = harnessPaths(options.home);
   const folder = paths.chatTranscripts;
@@ -92,7 +86,6 @@ export function createChatService(options: ChatServiceOptions) {
     return { ...base, ...(turn ? { turnId: turn.turnId } : {}), messages: projectChat(messages, turn !== undefined) };
   }
 
-  /** Every refusal is thrown before the returned stream starts, so the Gateway can answer it with a status. */
   async function send(id: string, text: string): Promise<AsyncIterable<ChatStreamEvent>> {
     if (turns.has(id)) throw busy(id);
     let settle!: () => void;
@@ -118,7 +111,6 @@ export function createChatService(options: ChatServiceOptions) {
     let seq = 0;
     const emit = (event: StreamEvent): void => { stream.push({ seq: seq++, ...event }); };
     let unsubscribe = (): void => undefined;
-    let started: Promise<void>;
     try {
       mkdirSync(folder, { recursive: true, mode: 0o700 });
       const file = transcriptOf(id);
@@ -136,7 +128,6 @@ export function createChatService(options: ChatServiceOptions) {
           trustPolicyVersion: ONBOARDING_VERSION,
           approvalPolicy: "deny-when-live-approval-is-unavailable",
         });
-        // Print mode has no UI context, so the permission extension denies what would ask the owner.
         await session.bindExtensions({ mode: "print" });
       } catch (error) {
         throw new GatewayRouteError(503, "session_refused", error instanceof Error ? error.message : String(error));
@@ -156,7 +147,7 @@ export function createChatService(options: ChatServiceOptions) {
         }
         if (event.type === "tool_execution_end") {
           emit({ type: "tool.finished", callId: event.toolCallId, isError: event.isError });
-          if (WORKSPACE_TOOLS.has(event.toolName)) options.publish({ kind: DomainEventKind.WorkspaceChanged });
+          if (WORKSPACE_CHANGING_TOOLS.has(event.toolName)) options.publish({ kind: DomainEventKind.WorkspaceChanged });
         }
       });
       const live = session;
@@ -167,7 +158,7 @@ export function createChatService(options: ChatServiceOptions) {
         expandPromptTemplates: false,
         preflightResult: (result) => { if (result === "started") accepted(); },
       });
-      started = Promise.race([acceptance, running.then(() => undefined)]);
+      const started = Promise.race([acceptance, running.then(() => undefined)]);
       try {
         await started;
       } catch (error) {
@@ -233,8 +224,7 @@ export function createChatService(options: ChatServiceOptions) {
     return await summary(id);
   }
 
-  /** Renames the transcript out of the listing and never unlinks it (Stitcher 224c4fe). */
-  function remove(id: string): void {
+  function archive(id: string): void {
     if (turns.has(id)) throw busy(id);
     const file = transcriptOf(id);
     if (!file) throw notFound(id);
@@ -242,7 +232,6 @@ export function createChatService(options: ChatServiceOptions) {
     changed(id);
   }
 
-  /** Cancels every running turn and waits for each to settle; the partial replies stay in their transcripts. */
   async function stop(): Promise<void> {
     const running = [...turns.values()];
     for (const turn of running) {
@@ -252,7 +241,7 @@ export function createChatService(options: ChatServiceOptions) {
     await Promise.all(running.map((turn) => turn.settled));
   }
 
-  return { list: summaries, get, send, cancel, rename, delete: remove, stop };
+  return { list: summaries, get, send, cancel, rename, delete: archive, stop };
 }
 
 export type ChatService = ReturnType<typeof createChatService>;

@@ -91,7 +91,7 @@ export type { DomainEvent, GatewayEvent } from "./events";
 
 // The wire contract: daemon identity, health, readiness, the database query surface, and
 // the typed Gateway API every client consumes.
-export { DAEMON_PROBE_TIMEOUT_MS, DEFAULT_DAEMON_PORT, DatabaseQueryAction, GatewayRouteError } from "./protocol";
+export { DAEMON_PROBE_TIMEOUT_MS, DEFAULT_DAEMON_PORT, DatabaseQueryAction, GatewayRouteError, MAX_REQUEST_BODY_CHARS } from "./protocol";
 export type {
   DaemonHealth,
   DaemonInfo,

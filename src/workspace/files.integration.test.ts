@@ -1,5 +1,3 @@
-// Workspace files: the listing hides the harness's own entries, every route stays inside the
-// workspace and follows no link, and each successful write is reported exactly once.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
@@ -66,7 +64,6 @@ try {
   writeFileSync(join(workspace, "big.txt"), "x".repeat(1_000_001));
   assert.deepEqual(await refusal(() => files.read("big.txt")), [413, "too_large"]);
 
-  // Writes: create with parents, overwrite on a matching revision, refuse a stale one.
   const created = await files.write("notes/today/hello.md", { content: "hello\n" });
   assert.equal(created.created, true);
   assert.equal(readFileSync(join(workspace, "notes", "today", "hello.md"), "utf8"), "hello\n");
@@ -96,7 +93,6 @@ try {
   assert.deepEqual(readdirSync(outside), ["secret.txt"]);
   assert.deepEqual(readdirSync(join(workspace, "notes", "today")), ["hello.md"], "no temporary file is left behind");
 
-  // Concurrent writes are serialized: each lands whole, and each is reported once.
   writes = 0;
   await Promise.all(Array.from({ length: 20 }, (_, index) => files.write("race.txt", { content: `${index}\n`.repeat(1000) })));
   assert.equal(writes, 20);

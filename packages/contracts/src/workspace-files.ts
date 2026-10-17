@@ -1,7 +1,4 @@
-// The owner's workspace files over the Gateway (docs/workspace.md#files-over-the-gateway):
-// wire shapes and the pure path rule every file route applies before touching the disk.
-
-import { GatewayRouteError } from "./protocol";
+import { GatewayRouteError, MAX_REQUEST_BODY_CHARS } from "./protocol";
 
 export interface WorkspaceEntry {
   /** Relative to the workspace, `/`-separated. */
@@ -38,13 +35,10 @@ export interface WorkspaceFileWriteResult {
   created: boolean;
 }
 
-/** The same bound as a skill walk (docs/workspace.md), for the same reason: a deep tree must not stall the daemon. */
 export const MAX_WORKSPACE_TREE_ENTRIES = 5_000;
-/** The Gateway's request body bound; a file larger than one request can carry is not served either. */
-export const MAX_WORKSPACE_FILE_CHARS = 1_000_000;
+export const MAX_WORKSPACE_FILE_CHARS = MAX_REQUEST_BODY_CHARS;
 
-/** Root entries the harness owns: AGENTS.md and skills/ steer the next session, artifacts/ holds agent outputs.
- * The file routes neither list nor serve them. */
+/** The file routes neither list nor serve these root entries. */
 export const RESERVED_WORKSPACE_ROOT_NAMES = Object.freeze(["AGENTS.md", "artifacts", "skills"] as const);
 
 // macOS volumes are case-insensitive and may store either Unicode normalization.

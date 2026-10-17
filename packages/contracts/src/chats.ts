@@ -1,6 +1,3 @@
-// Chats over the Gateway (docs/state-and-sessions.md#chats). A chat is a Pi session the daemon
-// alone writes; these are its wire shapes, projected from Pi's transcript entries.
-
 /** A Pi session id; the client mints one (a UUID) for a new chat. */
 export type ChatId = string;
 
@@ -8,7 +5,6 @@ export type ChatId = string;
 const CHAT_ID = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
 export const isChatId = (value: string): boolean => CHAT_ID.test(value);
 
-/** Stitcher bounds a chat title the same way (contracts chat.ts:272 at d55847f). */
 export const CHAT_TITLE_MAX = 200;
 
 export interface ChatSummary {

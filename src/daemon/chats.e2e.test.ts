@@ -1,6 +1,3 @@
-// Chats and workspace files through the real daemon and Gateway, with Pi's faux provider as the
-// model: streamed replies, list/rename/delete, cancel, one writer per chat, live events, the
-// session start checks on every turn, and shutdown mid-turn.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -95,7 +92,7 @@ async function listen(): Promise<void> {
       }
     }
   } catch {
-    // Aborted at the end of the test.
+    return;
   }
 }
 
@@ -137,7 +134,6 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 
-  // AC1, lane 2: a message over the Gateway streams the reply back.
   let mark = heard.length;
   faux.setResponses([fauxAssistantMessage("hi")]);
   const hi = await send("c1", "say hi");
@@ -148,13 +144,11 @@ try {
   const started = hi.events[0] as Extract<ChatStreamEvent, { type: "turn.started" }>;
   assert.equal(started.chatId, "c1");
   assert.deepEqual(hi.events.at(-1), { seq: 2, type: "turn.finished", status: "completed" });
-  // AC4: a send invalidates the chat twice, when the message is saved and when the turn ends.
   assert.deepEqual(await eventsUntilNote(mark), [
     { kind: GatewayEventKind.ChatChanged, chatId: "c1" },
     { kind: GatewayEventKind.ChatChanged, chatId: "c1" },
   ]);
 
-  // AC2, lanes 3 and 4: list, open, rename, delete.
   const listed = await call("GET", "/chats");
   assert.deepEqual(listed.body.map(({ id, title, messageCount, running }: any) => ({ id, title, messageCount, running })),
     [{ id: "c1", title: "say hi", messageCount: 2, running: false }]);
@@ -176,7 +170,6 @@ try {
   assert.match(chatFiles()[0]!, /_c1\.jsonl\.deleted-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-\d{3}Z$/);
   assert.equal((await call("DELETE", "/chats/c1")).status, 404);
 
-  // AC2, lane 5: cancel mid-reply keeps the partial reply.
   faux.setResponses([fauxAssistantMessage(LONG_REPLY)]);
   let cancelled: { status: number; body: any } | undefined;
   const long = await send("c2", "tell me a long story", async (event) => {
@@ -189,7 +182,6 @@ try {
   assert.ok(partial[1].parts[0].text.length > 0 && partial[1].parts[0].text.length < LONG_REPLY.length, "the partial reply is kept");
   assert.deepEqual((await call("POST", "/chats/c2/cancel", {})).body, { cancelled: false }, "cancel is a no-op when idle");
 
-  // AC3, lane 6: a second writer is refused while the first turn runs; the transcript stays whole.
   faux.setResponses([fauxAssistantMessage(LONG_REPLY)]);
   let second: Awaited<ReturnType<typeof send>> | undefined;
   let deleteDuring: { status: number; body: any } | undefined;
@@ -207,7 +199,6 @@ try {
     { role: "assistant", parts: [{ type: "text", text: LONG_REPLY }], status: "completed" },
   ]);
 
-  // AC4, lane 8: one workspace.changed per file write, and per file-changing tool call in a chat.
   mark = heard.length;
   const saved = await call("PUT", "/workspace/file?path=notes/today.md", { content: "# today\n" });
   assert.deepEqual([saved.status, saved.body.created], [200, true]);
@@ -228,7 +219,6 @@ try {
   assert.deepEqual((await call("GET", "/chats/c4")).body.messages[1].parts.map((part: any) => [part.type, part.status ?? ""]),
     [["tool", "done"], ["text", ""]]);
 
-  // The owner's CLI sends to a chat through the Gateway; Ctrl-C cancels the turn.
   faux.setResponses([fauxAssistantMessage("hi")]);
   assert.deepEqual(await cli(["prompt", "--chat", "c8", "say", "hi"]), { status: 0, stdout: "hi\n", stderr: "" });
   faux.setResponses([fauxAssistantMessage("hi")]);
@@ -242,7 +232,6 @@ try {
   assert.deepEqual([cancelledByCtrlC.status, cancelledByCtrlC.stderr], [1, '{"error":"the chat turn was cancelled"}\n']);
   assert.equal((await call("GET", "/chats/c8")).body.messages.at(-1).status, "cancelled");
 
-  // Ask mode: a headless chat has no one to ask, so a call that would ask is denied, as a tool result.
   savePermissionMode(home, "ask");
   faux.setResponses([
     fauxAssistantMessage(fauxToolCall("write", { path: "denied.md", content: "x" }), { stopReason: "toolUse" }),
@@ -253,7 +242,6 @@ try {
   assert.equal(existsSync(join(paths.workspace, "denied.md")), false);
   savePermissionMode(home, "allow");
 
-  // Every turn runs the session start checks: an unreadable protected_paths.json refuses the send and writes nothing.
   writeFileSync(paths.protectedPaths, "{ not json");
   const before = chatFiles();
   const refused = await send("c6", "hello");
@@ -262,7 +250,6 @@ try {
   assert.deepEqual(chatFiles(), before);
   rmSync(paths.protectedPaths);
 
-  // Stopping the daemon mid-turn cancels the turn and keeps the partial reply.
   faux.setResponses([fauxAssistantMessage(LONG_REPLY)]);
   let closing: Promise<void> | undefined;
   const interrupted = await send("c7", "long again", (event) => {

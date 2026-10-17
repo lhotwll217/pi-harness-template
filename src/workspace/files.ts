@@ -21,6 +21,8 @@ export interface WorkspaceFiles {
   write(path: string, input: WorkspaceFileWrite): Promise<WorkspaceFileWriteResult>;
 }
 
+const MAX_UTF8_BYTES_PER_CODE_POINT = 4;
+
 const revisionOf = (bytes: Uint8Array): string => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 
 const missing = (error: unknown): boolean => (error as NodeJS.ErrnoException).code === "ENOENT";
@@ -41,15 +43,12 @@ const linkRefusal = (path: string) =>
   new GatewayRouteError(400, "symlink_rejected", `${path} passes through a link; the file routes follow none`);
 
 /**
- * The owner's files under `<home>/workspace`. Every path passes the contracts path rule, then a
- * walk from the workspace's real path that refuses any link, so no route reaches outside it.
  * Node has no openat or renameat: a local process that swaps a checked folder for a link
  * between the walk and the rename can still redirect a write (docs/security.md).
  */
 export function createWorkspaceFiles(options: { root: string; onWrite: () => void }): WorkspaceFiles {
   let writes: Promise<unknown> = Promise.resolve();
 
-  /** The real folder holding the last segment, each folder checked with lstat; creates missing folders when asked. */
   async function parentOf(path: string, segments: string[], create: boolean): Promise<string> {
     let folder = await realpath(options.root);
     for (const segment of segments.slice(0, -1)) {
@@ -71,8 +70,7 @@ export function createWorkspaceFiles(options: { root: string; onWrite: () => voi
     if (!stats) return undefined;
     if (stats.isSymbolicLink()) throw linkRefusal(path);
     if (!stats.isFile()) throw new GatewayRouteError(400, "invalid_path", `${path} is not a file`);
-    // A UTF-8 file of more than 4 bytes per allowed character certainly decodes past the bound.
-    if (stats.size > 4 * MAX_WORKSPACE_FILE_CHARS) throw tooLarge(path);
+    if (stats.size > MAX_UTF8_BYTES_PER_CODE_POINT * MAX_WORKSPACE_FILE_CHARS) throw tooLarge(path);
     const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       return { bytes: await handle.readFile(), stats: await handle.stat() };
