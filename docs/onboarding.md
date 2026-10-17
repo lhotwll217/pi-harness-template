@@ -86,7 +86,8 @@ session (interactive, `pi-template prompt`, and scheduled) refuses to start,
 `pi-template doctor` reports not ready and lists the entries under
 `resources.unacknowledged`, and a rerun of onboarding without
 `--acknowledge-resources` stops. Each names the new entries and the command that
-acknowledges them.
+acknowledges them. A home that never recorded a resource review gets the same
+refusal, worded as no review yet, pointing at `pi-template onboard`.
 
 ## Agent-operated onboarding
 

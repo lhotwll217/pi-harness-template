@@ -134,8 +134,10 @@ export const unacknowledgedDefinitionIds = (acknowledged: readonly string[]): st
   definitionIds(AGENT_DEFINITION).filter((id) => !acknowledged.includes(id));
 
 export const unacknowledgedDefinitionMessage = (ids: readonly string[]): string =>
-  `the agent definition gained entries the resource review did not acknowledge: ${ids.join(", ")}; ` +
-  "review them with `pi-template onboard`, or accept them with `pi-template onboard --non-interactive --acknowledge-resources`";
+  ids.length === AGENT_DEFINITION.length
+    ? "no resource review has acknowledged the agent definition; review it with `pi-template onboard`"
+    : `the agent definition gained entries the resource review did not acknowledge: ${ids.join(", ")}; ` +
+      "review them with `pi-template onboard`, or accept them with `pi-template onboard --non-interactive --acknowledge-resources`";
 
 export interface AgentDefinitionSummary {
   id: string;

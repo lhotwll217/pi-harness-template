@@ -169,6 +169,10 @@ try {
     "the agent definition gained entries the resource review did not acknowledge: skill:writing-for-agents; " +
       "review them with `pi-template onboard`, or accept them with `pi-template onboard --non-interactive --acknowledge-resources`",
   ]);
+  rmSync(paths.resourceApprovals);
+  assert.deepEqual((await runDoctor({ home, providerModelVerifier: () => true })).checks.resources.notices, [
+    "no resource review has acknowledged the agent definition; review it with `pi-template onboard`",
+  ]);
   writeFileSync(paths.resourceApprovals, JSON.stringify({ acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION), workspaceContext: false }));
 
   writeFileSync(join(home, "sandbox.json"), JSON.stringify({ ...policy, enabled: false }));
