@@ -41,24 +41,22 @@ const TERMINAL_NOTE = {
   failed: "Reply did not finish.",
 } as const;
 
+const sendNewestMessageOnly = ({ messages }: { messages: HarnessUIMessage[] }) => ({ body: { messages: messages.slice(-1) } });
+
 export interface ChatAppProps {
   readonly chatId: ChatId;
   readonly title: string;
 }
 
-/** One chat. The shell remounts it per chat id, so nothing here outlives a switch. */
 export function ChatApp({ chatId, title }: ChatAppProps) {
   const [booting, setBooting] = useState(true);
   const [inlineError, setInlineError] = useState<string>();
-  // A turn this page did not start (another tab, or `pi-template prompt --chat`), with its id for Stop.
-  const [elsewhere, setElsewhere] = useState<{ readonly turnId?: string }>();
-  // The turn this page started, once the Gateway names it.
+  const [foreignTurn, setForeignTurn] = useState<{ readonly turnId?: string }>();
   const turnRef = useRef<string | undefined>(undefined);
 
   const transport = useMemo(() => new DefaultChatTransport<HarnessUIMessage>({
     api: chatMessagesRoute(chatId),
-    // The harness owns transcript history, so only the new user message travels with each turn.
-    prepareSendMessagesRequest: ({ messages: pending }) => ({ body: { messages: pending.slice(-1) } }),
+    prepareSendMessagesRequest: sendNewestMessageOnly,
   }), [chatId]);
 
   const { messages, setMessages, sendMessage, status, stop, error: chatError, clearError } = useChat<HarnessUIMessage>({
@@ -70,12 +68,12 @@ export function ChatApp({ chatId, title }: ChatAppProps) {
     onFinish() { turnRef.current = undefined; },
   });
   const transportBusy = status === "streaming" || status === "submitted";
-  const transportBusyRef = useRef(false);
-  useEffect(() => { transportBusyRef.current = transportBusy; }, [transportBusy]);
+  const streamingOwnReplyRef = useRef(false);
+  useEffect(() => { streamingOwnReplyRef.current = transportBusy; }, [transportBusy]);
 
   const adopt = useCallback((bootstrap: ChatBootstrap) => {
     setMessages(bootstrap.messages);
-    setElsewhere(bootstrap.running ? { ...(bootstrap.turnId ? { turnId: bootstrap.turnId } : {}) } : undefined);
+    setForeignTurn(bootstrap.running ? { ...(bootstrap.turnId ? { turnId: bootstrap.turnId } : {}) } : undefined);
   }, [setMessages]);
 
   const load = useCallback(async (quiet = false): Promise<void> => {
@@ -97,24 +95,22 @@ export function ChatApp({ chatId, title }: ChatAppProps) {
     return () => window.clearTimeout(timer);
   }, [load]);
 
-  // While this page streams a turn the transport already carries the truth; refetching would fight it.
   useGatewayEvents(useCallback((event: PageEvent) => {
-    if (transportBusyRef.current) return;
+    if (streamingOwnReplyRef.current) return;
     if (event.kind === "resync" || (event.kind === "chat.changed" && event.chatId === chatId)) void load(true);
   }, [chatId, load]));
 
   const submit = useCallback(({ text }: PromptInputMessage) => {
-    if (!text.trim() || transportBusy || elsewhere) return;
+    if (!text.trim() || transportBusy || foreignTurn) return;
     setInlineError(undefined);
     clearError();
     // Not awaited: sendMessage settles when the reply ends, and PromptInput clears the draft
     // only after this returns.
     void sendMessage({ id: `message-${crypto.randomUUID()}`, role: "user", metadata: {}, parts: [{ type: "text", text }] });
-  }, [clearError, elsewhere, sendMessage, transportBusy]);
+  }, [clearError, foreignTurn, sendMessage, transportBusy]);
 
-  /** Closing the stream is only a disconnect; the Gateway stops a turn only when asked to cancel it. */
   const stopReply = useCallback(async () => {
-    const turnId = transportBusy ? turnRef.current : elsewhere?.turnId;
+    const turnId = transportBusy ? turnRef.current : foreignTurn?.turnId;
     setInlineError(undefined);
     try {
       await cancelChat(chatId, turnId);
@@ -123,16 +119,15 @@ export function ChatApp({ chatId, title }: ChatAppProps) {
       setInlineError(error instanceof Error ? error.message : "Could not stop the reply.");
       await load(true);
     }
-  }, [chatId, elsewhere, load, stop, transportBusy]);
+  }, [chatId, foreignTurn, load, stop, transportBusy]);
 
-  const busy = transportBusy || Boolean(elsewhere);
+  const busy = transportBusy || Boolean(foreignTurn);
   // While a reply runs the submit button is Stop, so PromptInput's Enter handler would submit the
   // form anyway; submit refuses the turn and PromptInput then clears the draft the owner typed.
   const holdEnterWhileBusy = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (busy && event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) event.preventDefault();
   }, [busy]);
   const shownError = inlineError ?? chatError?.message;
-  // A running tool already shows its own spinner in its group.
   const lastMessage = messages.at(-1);
   const toolRunning = lastMessage?.role === "assistant"
     && lastMessage.parts.some((part) => part.type === "data-tool" && part.data.status === "running");
@@ -189,7 +184,7 @@ export function ChatApp({ chatId, title }: ChatAppProps) {
                       <MessageScrollerItem messageId="thinking">
                         <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground" role="status">
                           <Spinner className="size-3.5" />
-                          <span>{elsewhere ? RUNNING_ELSEWHERE : "Thinking…"}</span>
+                          <span>{foreignTurn ? RUNNING_ELSEWHERE : "Thinking…"}</span>
                         </div>
                       </MessageScrollerItem>
                     )}
@@ -212,14 +207,14 @@ export function ChatApp({ chatId, title }: ChatAppProps) {
             <PromptInputBody>
               <PromptInputTextarea
                 aria-label="Message the agent"
-                disabled={booting || Boolean(elsewhere)}
+                disabled={booting || Boolean(foreignTurn)}
                 onKeyDown={holdEnterWhileBusy}
-                placeholder={elsewhere ? RUNNING_ELSEWHERE : "Ask the agent…"}
+                placeholder={foreignTurn ? RUNNING_ELSEWHERE : "Ask the agent…"}
               />
             </PromptInputBody>
             <PromptInputFooter>
               <PromptInputTools />
-              <PromptInputSubmit disabled={booting} onStop={() => void stopReply()} status={elsewhere ? "streaming" : status} />
+              <PromptInputSubmit disabled={booting} onStop={() => void stopReply()} status={foreignTurn ? "streaming" : status} />
             </PromptInputFooter>
           </PromptInput>
         </div>

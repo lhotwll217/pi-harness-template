@@ -1,5 +1,3 @@
-// `npm start` as the owner runs it, against a checkout whose `pi-template` and web app are
-// stand-ins: the launcher script is the real one, copied beside them.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -15,8 +13,6 @@ mkdirSync(join(root, "scripts"));
 mkdirSync(join(root, "apps", "web"), { recursive: true });
 copyFileSync(join(repositoryRoot, "scripts", "start.mjs"), join(root, "scripts", "start.mjs"));
 
-// `status` answers what FAKE_STATUS names, and the first call leaves a detached stand-in daemon
-// behind, as the real CLI does, so the test can check Ctrl-C leaves it running.
 writeFileSync(join(root, "pi-template"), `#!/bin/sh
 if [ ! -f "${root}/daemon.pid" ]; then
   nohup sleep 120 >/dev/null 2>&1 &
@@ -72,7 +68,6 @@ async function stub(body: unknown): Promise<{ server: Server; port: number }> {
 }
 
 try {
-  // Ready: exactly one line on stdout, the app answers at it, and Ctrl-C stops only the web server.
   let url = "";
   const started = await launch({}, (stdout, child) => {
     if (!stdout.endsWith("\n") || url) return;
@@ -91,7 +86,6 @@ try {
   assert.equal(alive(webPid), false, "the web server this launch started stops on Ctrl-C");
   assert.equal(alive(daemonPid), true, "the daemon keeps running");
 
-  // An app already answering on the port is reused: the URL is printed and nothing is started.
   rmSync(join(root, "web.pid"));
   const running = await stub({ daemon: "ready" });
   const reused = await launch({ PI_TEMPLATE_WEB_PORT: String(running.port) });
@@ -100,7 +94,6 @@ try {
   assert.equal(reused.code, 0, reused.stderr);
   assert.equal(existsSync(join(root, "web.pid")), false);
 
-  // Something else on the port is named, not reused.
   const stranger = await stub({ hello: "world" });
   const refused = await launch({ PI_TEMPLATE_WEB_PORT: String(stranger.port) });
   stranger.server.close();
@@ -111,7 +104,6 @@ try {
     `pi-template: something on port ${stranger.port} is not this app (answered 200 with {"hello":"world"}). Stop it, or set PI_TEMPLATE_WEB_PORT to a free port.\n`,
   );
 
-  // An un-onboarded home names the command that fixes it.
   const setup = await launch({ FAKE_STATUS: "setup" });
   assert.equal(setup.code, 1);
   assert.equal(setup.stdout, "");
@@ -122,7 +114,7 @@ try {
   console.log("✓ npm start prints the app URL, reuses its own app, refuses a stranger, and Ctrl-C leaves the daemon");
 } finally {
   for (const file of ["web.pid", "daemon.pid"]) {
-    try { process.kill(Number(readFileSync(join(root, file), "utf8")), "SIGKILL"); } catch { /* not started or gone */ }
+    try { process.kill(Number(readFileSync(join(root, file), "utf8")), "SIGKILL"); } catch {}
   }
   rmSync(root, { recursive: true, force: true });
 }

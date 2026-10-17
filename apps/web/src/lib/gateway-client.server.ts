@@ -24,8 +24,7 @@ interface LocalDaemonInfo {
   readonly authToken: string;
 }
 
-/** Read on every request, so a restarted daemon with a new port or token needs no app restart. */
-function daemonInfo(): LocalDaemonInfo {
+function currentDaemonInfo(): LocalDaemonInfo {
   let value: unknown;
   try {
     value = JSON.parse(readFileSync(harnessPaths().daemonInfo, "utf8"));
@@ -39,14 +38,13 @@ function daemonInfo(): LocalDaemonInfo {
   return info as LocalDaemonInfo;
 }
 
-/** The Gateway answers `{ error, code }`; only a short string message is passed on. */
 function gatewayMessage(value: unknown, fallback: string): string {
   const error = value && typeof value === "object" ? (value as { error?: unknown }).error : undefined;
   return typeof error === "string" && error.trim() && error.length <= 500 ? error : fallback;
 }
 
 async function request(path: string, init: RequestInit = {}): Promise<Response> {
-  const info = daemonInfo();
+  const info = currentDaemonInfo();
   const headers = new Headers(init.headers);
   headers.set("authorization", `Bearer ${info.authToken}`);
   let response: Response;
@@ -133,7 +131,6 @@ export async function putWorkspaceFile(path: string, content: string, baseRevisi
   return await json<WorkspaceWriteResult>(filePath(path), withJson("PUT", baseRevision ? { content, baseRevision } : { content }));
 }
 
-/** The daemon's invalidation stream, forwarded verbatim: the route never parses or filters it. */
 export async function streamGatewayEvents(signal: AbortSignal): Promise<Response> {
   return await request("/events", { headers: { accept: "text/event-stream" }, signal });
 }
@@ -141,7 +138,7 @@ export async function streamGatewayEvents(signal: AbortSignal): Promise<Response
 /** `/ready` answers 200 when ready and 503 when not; anything else, or no answer, is down. */
 export async function daemonState(): Promise<DaemonState> {
   try {
-    const info = daemonInfo();
+    const info = currentDaemonInfo();
     const response = await fetch(`http://127.0.0.1:${info.port}/ready`, {
       headers: { authorization: `Bearer ${info.authToken}` },
       cache: "no-store",

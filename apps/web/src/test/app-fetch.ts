@@ -1,5 +1,3 @@
-// The browser's `fetch` for component tests: a same-origin `/api/...` call runs the app's real
-// route handler, which reaches the fake Gateway over loopback. Only the Gateway is a stand-in.
 import * as chat from "@/app/api/chats/[id]/route";
 import * as cancel from "@/app/api/chats/[id]/cancel/route";
 import * as messages from "@/app/api/chats/[id]/messages/route";
@@ -57,7 +55,7 @@ export class StubEventSource {
   addEventListener(name: string, listener: () => void): void {
     this.named.set(name, [...(this.named.get(name) ?? []), listener]);
   }
-  close(): void { /* the page closes it on unmount */ }
+  close(): void {}
   emit(event: unknown): void {
     this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(event) }));
   }
@@ -67,7 +65,7 @@ export class StubEventSource {
 }
 
 export class StubResizeObserver {
-  observe(): void { /* layout is not measured in jsdom */ }
-  unobserve(): void { /* no-op */ }
-  disconnect(): void { /* no-op */ }
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
 }

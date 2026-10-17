@@ -11,7 +11,6 @@ const MAX_LINE = 1_000_000;
 
 const isString = (value: unknown): value is string => typeof value === "string";
 
-/** A structural check of one NDJSON line against the Gateway's chat stream event union. */
 export function parseChatStreamEvent(value: unknown): ChatStreamEvent {
   if (!value || typeof value !== "object") throw new GatewayStreamError();
   const event = value as Record<string, unknown>;

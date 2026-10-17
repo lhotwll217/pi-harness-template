@@ -17,15 +17,12 @@ import { fetchWorkspaceTree, writeWorkspaceFile } from "@/lib/workspace-client";
 import { nextAvailableName, pathName } from "@/lib/workspace-paths";
 import { treeRowKey, type TreeRowId } from "@/lib/workspace-tree";
 
-/** What the main pane shows. The chat variant carries no data because ChatApp stays mounted. */
 export type MainPane = { readonly kind: "chat" } | { readonly kind: "file"; readonly path: string };
 
 const SIDEBAR_PREFERENCE_KEY = "pi-template.workspace.sidebar";
-/** Both sections start open, so a file the agent writes shows up without a click. */
 const OPEN_ON_LOAD: readonly TreeRowId[] = [{ kind: "files" }, { kind: "chats" }];
 const NEW_CHAT_TITLE = "New chat";
 
-/** What the banner says, and the command that fixes it. */
 const BANNERS = {
   down: { text: "The harness is unreachable. Start it with", command: "./pi-template status" },
   setup: { text: "Setup is incomplete. Run", command: "./pi-template onboard" },
@@ -59,8 +56,7 @@ export function WorkspaceShell() {
   const [daemon, setDaemon] = useState<DaemonState>();
   const [tree, setTree] = useState<WorkspaceTree>();
   const [stored, setStored] = useState<readonly ChatSummary[]>();
-  // Chats minted here that the Gateway has not stored yet: it writes nothing before the first message.
-  const [minted, setMinted] = useState<readonly ChatSummary[]>([]);
+  const [unstoredChats, setUnstoredChats] = useState<readonly ChatSummary[]>([]);
   const [openChatId, setOpenChatId] = useState<ChatId>();
   const [treeError, setTreeError] = useState<string>();
   const [chatsError, setChatsError] = useState<string>();
@@ -111,14 +107,13 @@ export function WorkspaceShell() {
     try {
       const next = await fetchChats();
       setStored(next);
-      setMinted((current) => current.filter((chat) => !next.some((candidate) => candidate.id === chat.id)));
+      setUnstoredChats((current) => current.filter((chat) => !next.some((candidate) => candidate.id === chat.id)));
       setChatsError(undefined);
     } catch (error: unknown) {
       setChatsError(error instanceof Error ? error.message : "The app could not list the chats.");
     }
   }, []);
 
-  /** The one place a possibly-missed change lands: a reconnect, window focus, and tab visibility. */
   const resync = useCallback(() => {
     void refreshDaemon();
     void refreshTree();
@@ -138,8 +133,6 @@ export function WorkspaceShell() {
   const handlers = useRef({ refreshChats, refreshTree, refreshDaemon, publish });
   useEffect(() => { handlers.current = { refreshChats, refreshTree, refreshDaemon, publish }; }, [publish, refreshChats, refreshDaemon, refreshTree]);
 
-  // The page's one EventSource. The app route answers an unreachable daemon with a `daemon`
-  // frame and closes, so the browser keeps reconnecting and the banner clears on its own.
   useEffect(() => {
     let opened = false;
     const source = new EventSource("/api/events");
@@ -172,8 +165,8 @@ export function WorkspaceShell() {
   }, []);
 
   const chats = useMemo(
-    () => (stored ? [...minted.filter((chat) => !stored.some((candidate) => candidate.id === chat.id)), ...stored] : undefined),
-    [minted, stored],
+    () => (stored ? [...unstoredChats.filter((chat) => !stored.some((candidate) => candidate.id === chat.id)), ...stored] : undefined),
+    [unstoredChats, stored],
   );
 
   const openPane = useCallback((next: MainPane) => {
@@ -183,13 +176,12 @@ export function WorkspaceShell() {
 
   const startChat = useCallback(() => {
     const id = crypto.randomUUID();
-    setMinted((current) => [localChat(id), ...current]);
+    setUnstoredChats((current) => [localChat(id), ...current]);
     setOpenChatId(id);
     setFocused({ kind: "chat", chatId: id });
     openPane({ kind: "chat" });
   }, [openPane]);
 
-  // The first list decides what opens: the newest chat, or a new one when there are none.
   useEffect(() => {
     if (openChatId || !stored) return;
     const timer = window.setTimeout(() => {
@@ -214,7 +206,6 @@ export function WorkspaceShell() {
     }
   }, []);
 
-  /** Deleting the open chat opens the newest one left, or a new chat. */
   const removeChat = useCallback(async (id: ChatId) => {
     try {
       await deleteChat(id);
@@ -226,10 +217,10 @@ export function WorkspaceShell() {
     const remaining = (stored ?? []).filter((chat) => chat.id !== id);
     setStored(remaining);
     if (id !== openChatId) return;
-    const next = minted[0] ?? remaining[0];
+    const next = unstoredChats[0] ?? remaining[0];
     if (next) switchChat(next.id);
     else startChat();
-  }, [minted, openChatId, startChat, stored, switchChat]);
+  }, [unstoredChats, openChatId, startChat, stored, switchChat]);
 
   const createFile = useCallback(async () => {
     const taken = (tree?.entries ?? []).filter((entry) => !entry.path.includes("/")).map((entry) => entry.path);
@@ -285,7 +276,7 @@ export function WorkspaceShell() {
       .map((entry) => pathName(entry.path));
   }, [pane, tree]);
 
-  const localIds = useMemo(() => new Set(minted.map((chat) => chat.id)), [minted]);
+  const localIds = useMemo(() => new Set(unstoredChats.map((chat) => chat.id)), [unstoredChats]);
   const openChat = chats?.find((chat) => chat.id === openChatId);
 
   const sidebar = (

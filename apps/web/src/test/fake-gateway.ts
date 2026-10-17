@@ -1,7 +1,3 @@
-// A loopback stand-in for the daemon's Gateway, faithful to its chat and workspace-file route
-// contracts: owner bearer token, `{ error, code }` refusals, NDJSON reply streams, and `/events`
-// invalidation frames. It writes `daemon.json` into a temporary harness home, so the app's route
-// handlers find it exactly as they find the real daemon.
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -159,7 +155,6 @@ export async function startFakeGateway(): Promise<FakeGateway> {
   });
 }
 
-/** A request as the local browser sends it to the app. */
 export function localRequest(path: string, init: RequestInit & { origin?: string } = {}): Request {
   const headers = new Headers(init.headers);
   headers.set("host", "127.0.0.1:47812");

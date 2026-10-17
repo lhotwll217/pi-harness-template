@@ -48,8 +48,6 @@ export function FileEditor({ path, invalidationToken, siblingNames, onBackToChat
   const pendingRef = useRef(false);
   const firstReadRef = useRef(true);
 
-  // A save reads the draft between renders, so each action runs against the ref as it is
-  // dispatched and React's copy follows from the same state.
   const apply = useCallback((action: EditorAction) => {
     stateRef.current = editorReducer(stateRef.current, action);
     dispatch(action);
@@ -90,8 +88,6 @@ export function FileEditor({ path, invalidationToken, siblingNames, onBackToChat
   }, [apply]);
 
   const save = useCallback(async (): Promise<void> => {
-    // A write is already out: queue the newest draft onto it and wait for that write too, so a
-    // caller leaving the pane never races the bytes on disk.
     while (writeRef.current) {
       pendingRef.current = true;
       await writeRef.current;
@@ -114,9 +110,6 @@ export function FileEditor({ path, invalidationToken, siblingNames, onBackToChat
     }
   }, [writeDraft]);
 
-  // One debounce for every keystroke; a write already in flight leaves the draft queued for
-  // the next pass, which `saveTick` schedules as soon as that write settles. A failed write
-  // leaves the draft savable, so the same window retries it.
   useEffect(() => {
     const kind = state.status.kind;
     if ((kind !== "dirty" && kind !== "error") || writeRef.current) return;
@@ -124,7 +117,6 @@ export function FileEditor({ path, invalidationToken, siblingNames, onBackToChat
     return () => window.clearTimeout(timer);
   }, [save, saveTick, state.draft, state.status]);
 
-  // A pane switch unmounts the editor, so the last debounce window is flushed on the way out.
   const flushRef = useRef<() => void>(() => undefined);
   useEffect(() => { flushRef.current = () => { void save(); }; }, [save]);
   useEffect(() => () => flushRef.current(), []);
@@ -201,7 +193,6 @@ export function FileEditor({ path, invalidationToken, siblingNames, onBackToChat
 
       <Textarea
         aria-label="File text"
-        // Before the first read lands a keystroke would be overwritten by it.
         className="min-h-0 flex-1 resize-none rounded-none border-0 bg-transparent px-4 py-4 font-mono text-sm leading-6 shadow-none focus-visible:ring-0 sm:px-6"
         disabled={!editable}
         onBlur={() => void save()}

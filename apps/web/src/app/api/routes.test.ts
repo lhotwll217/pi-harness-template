@@ -31,7 +31,6 @@ const send = (text: string, init: { origin?: string } = {}) => messages.POST(loc
   ...init,
 }), routeParams("c1"));
 
-/** The UI message stream as the SSE frames `useChat` reads, minus the framing. */
 async function streamParts(response: Response): Promise<unknown[]> {
   const text = await response.text();
   return text.split("\n\n").filter((frame) => frame.startsWith("data: ") && frame !== "data: [DONE]")
@@ -106,7 +105,6 @@ describe("POST /api/chats/:id/messages", () => {
   });
 });
 
-/** The assistant message `useChat` would hold once the stream ends. */
 async function lastMessage(response: Response) {
   let last: { parts: unknown[] } = { parts: [] };
   const parts = await streamParts(response);

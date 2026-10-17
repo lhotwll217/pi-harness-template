@@ -31,7 +31,6 @@ export function chatToBootstrap(chat: Chat): ChatBootstrap {
   };
 }
 
-/** A chat id the Gateway has not seen yet: the client minted it and nothing is persisted. */
 export function emptyBootstrap(chatId: string): ChatBootstrap {
   return { chatId, messages: [], running: false };
 }

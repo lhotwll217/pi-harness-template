@@ -16,7 +16,6 @@ export function ownerSafeMessage(body: unknown, fallback: string): string {
   return typeof message === "string" && message.trim() && message.length <= 500 ? message : fallback;
 }
 
-/** One fetch shape for every same-origin route: no-store, and `{ error: { message } }` on failure. */
 export async function callLocalRoute<T>(path: string, fallback: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {

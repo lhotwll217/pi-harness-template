@@ -58,9 +58,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return { ...state, draft: action.file.content, status: { kind: "clean", revision: action.file.revision } };
     case "edited": {
       if (state.draft === action.draft) return state;
-      // Typing is not a conflict resolution, and it cannot resurrect a deleted file.
-      const locked = status.kind === "conflict" || status.kind === "missing" || status.kind === "loading" || status.kind === "unreadable";
-      const next: EditorStatus = locked ? status : { kind: "dirty", revision: baseRevision(status) as string };
+      const draftFrozen = status.kind === "conflict" || status.kind === "missing" || status.kind === "loading" || status.kind === "unreadable";
+      const next: EditorStatus = draftFrozen ? status : { kind: "dirty", revision: baseRevision(status) as string };
       return { ...state, draft: action.draft, status: next };
     }
     case "save-started":
@@ -69,7 +68,6 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         : state;
     case "save-applied":
       if (status.kind === "saving") return { ...state, status: { kind: "clean", revision: action.revision } };
-      // The owner typed while the write was in flight: keep the edit and save again.
       if (status.kind === "dirty") return { ...state, status: { kind: "dirty", revision: action.revision } };
       return state;
     case "save-conflicted":

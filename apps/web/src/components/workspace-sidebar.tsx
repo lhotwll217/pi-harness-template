@@ -50,8 +50,7 @@ import {
 } from "@/lib/workspace-tree";
 import { cn } from "@/lib/utils";
 
-/** The Gateway's bound on a chat title. */
-const TITLE_LIMIT = 200;
+const GATEWAY_TITLE_LIMIT = 200;
 
 export interface WorkspaceSidebarProps {
   readonly tree?: WorkspaceTree;
@@ -97,7 +96,6 @@ export function WorkspaceSidebar({
   const rows = useMemo(() => flattenVisible(tree, expanded, chats, localChats), [chats, expanded, localChats, tree]);
   const cursor = focused ?? rows[0]?.id;
 
-  // The roving tabindex owns focus: move the DOM focus whenever the cursor moves inside the tree.
   useEffect(() => {
     if (!cursor || !rowsRef.current?.contains(document.activeElement)) return;
     rowsRef.current.querySelector<HTMLElement>(`[data-row-key="${CSS.escape(treeRowKey(cursor))}"]`)?.focus();
@@ -174,12 +172,11 @@ export function WorkspaceSidebar({
             <DialogTitle>Rename chat</DialogTitle>
             <DialogDescription>Give this chat a name of your own.</DialogDescription>
           </DialogHeader>
-          {/* A real form, so Enter submits the way it does in every other name field. */}
           <form onSubmit={(event) => { event.preventDefault(); if (chatRenameReady) commitChatRename(); }}>
             <Input
               aria-label="Chat name"
               autoFocus
-              maxLength={TITLE_LIMIT}
+              maxLength={GATEWAY_TITLE_LIMIT}
               onChange={(event) => setChatRenaming((current) => (current ? { ...current, title: event.target.value } : current))}
               value={chatRenaming?.title ?? ""}
             />
@@ -218,7 +215,6 @@ interface SidebarRowProps {
   readonly row: TreeRow;
   readonly activeKey: string;
   readonly cursorKey?: string;
-  /** Section actions rendered after the label, always visible. */
   readonly trailing?: ReactNode;
   readonly onActivate: () => void;
   readonly onFocusRow: (id: TreeRowId) => void;

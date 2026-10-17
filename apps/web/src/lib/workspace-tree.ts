@@ -1,7 +1,6 @@
 import type { ChatId, ChatSummary, WorkspaceEntry, WorkspaceTree } from "./gateway-contracts";
 import { pathName, pathParent } from "./workspace-paths";
 
-/** One identity for every focusable row, so the sidebar navigates one list with one cursor. */
 export type TreeRowId =
   | { readonly kind: "chats" }
   | { readonly kind: "chat"; readonly chatId: ChatId }
@@ -38,7 +37,6 @@ export function sameTreeRow(a: TreeRowId | undefined, b: TreeRowId | undefined):
   return a !== undefined && b !== undefined && treeRowKey(a) === treeRowKey(b);
 }
 
-/** Every ancestor folder of `path` is expanded, so its row is on screen. */
 function ancestorsExpanded(path: string, expanded: ReadonlySet<string>): boolean {
   for (let parent = pathParent(path); parent !== undefined; parent = pathParent(parent)) {
     if (!expanded.has(treeRowKey({ kind: "entry", path: parent }))) return false;
@@ -121,7 +119,6 @@ function typeahead(rows: readonly TreeRow[], from: number, key: string): TreeInt
   return undefined;
 }
 
-/** The whole keyboard contract as one pure function over the visible rows. */
 export function treeKeyIntent(rows: readonly TreeRow[], focused: TreeRowId | undefined, key: string): TreeIntent | undefined {
   if (rows.length === 0) return undefined;
   const index = indexOfRow(rows, focused);

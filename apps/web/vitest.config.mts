@@ -3,8 +3,7 @@ import { defineConfig } from "vitest/config";
 
 // Vite does not read tsconfig `paths`, so the `@/` alias the app is written in has to be
 // restated here for tests that import components and route handlers. `server-only` is Next's
-// build-time guard and resolves only inside Next, so tests load an empty module for it. Files
-// that need a DOM ask for it with an `@vitest-environment jsdom` docblock.
+// build-time guard and resolves only inside Next, so tests load an empty module for it.
 export default defineConfig({
   resolve: {
     alias: {

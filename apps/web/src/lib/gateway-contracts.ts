@@ -1,7 +1,3 @@
-// The Gateway's chat and workspace-file wire shapes (WP21), restated as types until
-// @pi-template/contracts exports them. Every app module imports them from here, so the
-// switch to the contracts package is this one file.
-
 export type ChatId = string;
 
 export interface ChatSummary {

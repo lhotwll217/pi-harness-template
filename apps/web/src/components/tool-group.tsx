@@ -13,7 +13,6 @@ function StatusIcon({ status }: { readonly status: ToolCall["status"] }) {
   return <XIcon className="size-3.5 shrink-0 text-destructive" />;
 }
 
-/** What the call acted on: the command it ran or the path it touched. */
 function Command({ text }: { readonly text: string }) {
   return <span className="min-w-0 truncate font-mono text-muted-foreground/70" title={text}>{text}</span>;
 }
@@ -41,7 +40,6 @@ function GroupLabel({ calls }: { readonly calls: readonly ToolCall[] }) {
   );
 }
 
-/** One collapsible row for a run of consecutive tool calls. */
 export function ToolGroup({ calls }: { readonly calls: readonly ToolCall[] }) {
   const [open, setOpen] = useState(false);
   return (

@@ -84,7 +84,6 @@ describe("WorkspaceShell chats", () => {
     await user.click(await screen.findByRole("button", { name: "Delete" }));
 
     await waitFor(() => expect(chatLabels()).toEqual(["Files", "Chats", "Greeting"]));
-    // Deleting the open chat opens the newest one left.
     expect(await within(thread()).findByText("Hello there.")).toBeDefined();
     expect(document.querySelector('[data-slot="workspace-rail"]')).toBe(rail);
     expect(calls.filter((call) => call.method !== "GET")).toEqual([
@@ -146,10 +145,19 @@ describe("WorkspaceShell chats", () => {
     gateway.transcripts.set("c2", { ...gateway.chats[0]!, turnId: "t5", messages: [{ role: "user", text: "from the CLI" }] });
     renderShell();
 
-    const composer = await screen.findByRole("textbox", { name: "Message the agent" });
-    await waitFor(() => expect((composer as HTMLTextAreaElement).disabled).toBe(true));
+    expect(await within(thread()).findByText("from the CLI")).toBeDefined();
     expect(within(thread()).getByText("A reply is running in this chat.")).toBeDefined();
-    expect(within(thread()).getByText("from the CLI")).toBeDefined();
+    const composer = screen.getByRole("textbox", { name: "Message the agent" }) as HTMLTextAreaElement;
+    expect(composer.disabled).toBe(true);
+
+    gateway.transcripts.set("c2", { ...gateway.chats[0]!, running: false, messages: [
+      { role: "user", text: "from the CLI" },
+      { role: "assistant", parts: [{ type: "text", text: "done" }], status: "completed" },
+    ] });
+    events().emit({ kind: "chat.changed", chatId: "c2" });
+
+    expect(await within(thread()).findByText("done")).toBeDefined();
+    expect(composer.disabled).toBe(false);
   });
 });
 

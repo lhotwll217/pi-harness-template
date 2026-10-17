@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-// `npm start`: make sure the daemon is up, start the web app on loopback, and print its URL.
-//
 // stdout carries one line, `pi-template: app ready at http://127.0.0.1:<port>`, so a script or
 // an agent can read the URL; the web server's own output goes to stderr. Ctrl-C stops only the
 // web server this launch started. The daemon belongs to the CLI and keeps running.
@@ -31,8 +29,7 @@ async function runCapture(command, args, options) {
   });
 }
 
-/** `pi-template status` starts the daemon when none is running; this reads its verdict. */
-async function ensureDaemon(env) {
+async function startDaemonViaStatus(env) {
   const result = await runCapture(join(repositoryRoot, "pi-template"), ["status"], { cwd: repositoryRoot, env });
   let status;
   try {
@@ -58,7 +55,6 @@ async function freePort() {
   return port;
 }
 
-/** `PI_TEMPLATE_WEB_PORT`, default 47812; `0` picks a free loopback port, as `PI_TEMPLATE_PORT=0` does for the daemon. */
 async function webPort(env) {
   const raw = env.PI_TEMPLATE_WEB_PORT?.trim();
   if (!raw) return DEFAULT_WEB_PORT;
@@ -69,7 +65,6 @@ async function webPort(env) {
   return port === 0 ? await freePort() : port;
 }
 
-/** The status, and the parsed body, of one answer; undefined when nothing answered. */
 async function probe(url) {
   let response;
   try {
@@ -84,7 +79,6 @@ async function probe(url) {
   }
 }
 
-/** `/api/status` answers in this app's own shape: `{ daemon: "ready" | "setup" | "down" }`. */
 const isAppStatus = (answer) => answer?.status === 200 && ["ready", "setup", "down"].includes(answer.body?.daemon);
 
 function describeAnswer(answer) {
@@ -113,9 +107,9 @@ let stopping = false;
 /** The web server runs as its own process group, so one signal reaches npm, Next, and its workers. */
 async function stopWeb() {
   if (!web || webExit) return;
-  try { process.kill(-web.pid, "SIGTERM"); } catch { /* already gone */ }
+  try { process.kill(-web.pid, "SIGTERM"); } catch {}
   const exited = new Promise((done) => web.once("exit", done));
-  const forced = sleep(5_000).then(() => { try { process.kill(-web.pid, "SIGKILL"); } catch { /* already gone */ } });
+  const forced = sleep(5_000).then(() => { try { process.kill(-web.pid, "SIGKILL"); } catch {} });
   await Promise.race([exited, forced]);
 }
 
@@ -129,7 +123,7 @@ process.once("SIGTERM", cancel);
 
 async function main() {
   const env = { ...process.env };
-  await ensureDaemon(env);
+  await startDaemonViaStatus(env);
   const port = await webPort(env);
   const url = `http://127.0.0.1:${port}`;
   const ready = `pi-template: app ready at ${url}\n`;
