@@ -62,6 +62,9 @@ const naming = [
   "pi\\-template status",
   "a=pi-template; $a status",
   "ls\npi-template status",
+  "Pi-Template status",
+  "/abs/PI-TEMPLATE schedule run 1",
+  "ls; PI_TEMPLATE_AGENT=0 Pi-Template schedule add --every 1d -- true",
 ];
 for (const command of naming) assert.equal(namesAgentCli(command), true, command);
 for (const command of ["ls", "ls -la workspace", "cat docs/pi-template.md", "git status", "echo template"]) {
@@ -69,4 +72,4 @@ for (const command of ["ls", "ls -la workspace", "cat docs/pi-template.md", "git
 }
 
 process.stdout.write("ok — the agent CLI splitter accepts plain pi-template argv and refuses every shell construct; " +
-  "any word ending in pi-template names the CLI\n");
+  "any word ending in pi-template, in any case, names the CLI\n");

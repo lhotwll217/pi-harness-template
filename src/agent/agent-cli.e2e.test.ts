@@ -281,24 +281,32 @@ try {
       "ls workspace && NODE_OPTIONS='--import=data:text/javascript,import(`node:fs`).then((fs)=>fs.writeFileSync(`" + marker + "`,``))' pi-template notes list",
       `PI_TEMPLATE_AGENT=0 ${checkoutRoot}/pi-template schedule add --every 1d --name spoofed -- true`,
       "ls workspace; PI_TEMPLATE_AGENT=0 pi-template schedule add --every 1d --name spoofed -- true",
+      "ls workspace; PI_TEMPLATE_AGENT=0 Pi-Template schedule add --every 1d --name spoofed -- true",
+      `PI_TEMPLATE_AGENT=0 ${checkoutRoot}/PI-TEMPLATE schedule run ${ownerCommand.id}`,
       "pi-template notes list",
     ]);
     assert.equal(spoofed.results[0], "keep.txt\n", label);
-    assert.deepEqual(spoofed.results.slice(1, 6), [
+    assert.deepEqual(spoofed.results.slice(1, 8), [
       refusal("ask", "its first word is not pi-template"),
       refusal("ask", "its first word is not pi-template"),
       refusal("ask", "it has & outside quotes"),
       refusal("ask", "its first word is not pi-template"),
       refusal("ask", "it has ; outside quotes"),
+      refusal("ask", "it has ; outside quotes"),
+      refusal("ask", "its first word is not pi-template"),
     ], label);
-    assert.equal((JSON.parse(spoofed.results[6]!) as unknown[]).length, 4, label);
-    // Only the owner's ls and the two spellings no generated rule matches prompted; the owner said yes to each.
+    assert.equal((JSON.parse(spoofed.results[8]!) as unknown[]).length, 4, label);
+    // Only the owner's ls and the spellings no generated rule matches prompted; the owner said yes to each.
     assert.deepEqual(spoofed.prompts.map((prompt) => prompt.replace(/\s+/g, " ")), [
       "Permission Required tool : bash rule : * command : ls workspace",
       `Permission Required tool : bash rule : * command : env PI_TEMPLATE_AGENT=0 pi-template schedule run ${ownerCommand.id} ` +
         `runs : pi-template schedule run ${ownerCommand.id}`,
       `Permission Required tool : bash rule : * command : ${checkoutRoot}/pi-template schedule add --every 1d --name spoofed -- true ` +
         `full command : PI_TEMPLATE_AGENT=0 ${checkoutRoot}/pi-template schedule add --every 1d --name spoofed -- true`,
+      "Permission Required tool : bash rule : * command : Pi-Template schedule add --every 1d --name spoofed -- true " +
+        "full command : ls workspace; PI_TEMPLATE_AGENT=0 Pi-Template schedule add --every 1d --name spoofed -- true",
+      `Permission Required tool : bash rule : * command : ${checkoutRoot}/PI-TEMPLATE schedule run ${ownerCommand.id} ` +
+        `full command : PI_TEMPLATE_AGENT=0 ${checkoutRoot}/PI-TEMPLATE schedule run ${ownerCommand.id}`,
     ], label);
     assert.equal(existsSync(marker), false, label);
     assert.equal((await owner.listSchedules()).some(({ name }) => name === "spoofed"), false, label);

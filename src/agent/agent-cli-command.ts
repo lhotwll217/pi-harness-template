@@ -41,10 +41,11 @@ export function agentCliArgv(command: string): AgentCliCommand {
   return first === "pi-template" ? { argv } : { refused: "its first word is not pi-template" };
 }
 
-/** Conservative: true when any word, quotes and backslashes removed, ends in `pi-template`,
- * wherever it sits (after `VAR=`, `env`, a path, or inside a chain or substitution). */
+/** Conservative: true when any word, quotes and backslashes removed, ends in `pi-template` in any
+ * case, wherever it sits (after `VAR=`, `env`, a path, or inside a chain or substitution). A
+ * case-insensitive filesystem, macOS's default, resolves `Pi-Template` to the launcher. */
 export const namesAgentCli = (command: string): boolean =>
-  command.replace(/['"\\]/g, "").split(/[^A-Za-z0-9_\-./]+/).some((word) => word.endsWith("pi-template"));
+  command.replace(/['"\\]/g, "").toLowerCase().split(/[^a-z0-9_\-./]+/).some((word) => word.endsWith("pi-template"));
 
 export const agentCliRefusal = (mode: string, reason: string): string =>
   `Refused in ${mode} mode: the agent's bash runs only pi-template <command> [arguments] as plain words, and ${reason}. ` +
