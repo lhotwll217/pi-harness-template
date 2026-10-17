@@ -90,7 +90,9 @@ caller the CLI:
   and with one that does not answer within a second it exits 1 with a hint to
   tell the owner;
 - refuses the owner's commands, `onboard`, `daemon`, `prompt`, and bare
-  `pi-template`, with exit 2 and `{"error":"<command> is the owner's command",...}`;
+  `pi-template`, with exit 2 and `{"error":"<command> is the owner's command",...}`,
+  judging the command commander resolves rather than the first word, and refuses
+  a leading `--` the same way;
 - returns `schedule run`'s started run at once instead of waiting for it, since
   one run happens at a time and a scheduled agent that waited would wait on
   itself.

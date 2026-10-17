@@ -131,6 +131,7 @@ async function agentCli(args: readonly string[], agentHome: string) {
     const child = spawn(join(checkoutRoot, "pi-template"), args, {
       cwd: root,
       env: { PATH: process.env.PATH, HOME: process.env.HOME, PI_TEMPLATE_HOME: agentHome, PI_TEMPLATE_AGENT: "1" },
+      timeout: 15_000,
     });
     let stdout = "";
     let stderr = "";
@@ -181,7 +182,14 @@ try {
     stderr: '{"error":"the pi-template daemon did not answer within 1 s","hint":"tell the owner the daemon is not answering; the agent never restarts it"}\n',
   });
   await new Promise<void>((resolveClose) => { hung.close(() => resolveClose()); for (const socket of hungSockets) socket.destroy(); });
-  for (const [args, command] of [[["onboard", "--permission", "allow"], "pi-template onboard"], [["daemon"], "pi-template daemon"], [[], "pi-template with no command"]] as const) {
+  for (const [args, command] of [
+    [["--", "daemon"], "pi-template with a leading --"],
+    [["--", "prompt", "hi"], "pi-template with a leading --"],
+    [["onboard", "--permission", "allow"], "pi-template onboard"],
+    [["daemon"], "pi-template daemon"],
+    [["prompt", "hi"], "pi-template prompt"],
+    [[], "pi-template with no command"],
+  ] as const) {
     assert.deepEqual(await agentCli(args, absentHome), {
       status: 2,
       stdout: "",

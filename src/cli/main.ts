@@ -7,7 +7,7 @@ const HELP_CODES = new Set(["commander.helpDisplayed", "commander.version"]);
 
 try {
   const agentCaller = isAgentCaller() ? await import("./agent-caller") : undefined;
-  const ownerOnly = agentCaller?.ownerOnlyCommand(process.argv.slice(2));
+  const ownerOnly = agentCaller?.ownerOnlyCall(process.argv.slice(2));
   if (agentCaller && ownerOnly) {
     process.stderr.write(`${JSON.stringify(agentCaller.ownerOnlyRefusal(ownerOnly))}\n`);
     process.exitCode = 2;
@@ -15,7 +15,9 @@ try {
     const { runEntry } = await import("./entry");
     process.exitCode = await runEntry();
   } else {
-    await harnessProgram().parseAsync(process.argv);
+    const program = harnessProgram();
+    agentCaller?.refuseOwnerCommands(program);
+    await program.parseAsync(process.argv);
   }
 } catch (error) {
   if (error instanceof CommanderError) {

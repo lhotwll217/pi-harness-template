@@ -89,8 +89,9 @@ decision ([`agentCliArgv` and `namesAgentCli`](../src/agent/agent-cli-command.ts
 2. Any other command with a word ending in `pi-template`, quotes and
    backslashes removed, is refused with a message naming the mode: after a
    `VAR=`, `env`, `command`, or a path, or inside a chain, subshell, or
-   substitution. The check is deliberately broad, so `cat notes/pi-template`
-   is refused too.
+   substitution. The match ignores case, since macOS's case-insensitive
+   filesystem resolves `Pi-Template` to the launcher. The check is
+   deliberately broad, so `cat notes/pi-template` is refused too.
 3. Anything else runs in a shell in `ask`, with the `allow` environment, once
    the `*` rule has asked the owner; a headless run, with no one to ask, is
    denied. `read-only` refuses it.
