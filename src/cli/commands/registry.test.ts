@@ -79,6 +79,11 @@ try {
     error: "missing required argument 'sql'",
     hint: "Usage: pi-template db query [options] <sql>. `pi-template db query --help` shows its flags and examples.",
   });
+  usageError(["db", "query", "--frob", "SELECT 1"], {
+    error: "too many arguments for 'query'. Expected 1 argument but got 2.",
+    hint: "Usage: pi-template db query [options] <sql>. `pi-template db query --help` shows its flags and examples.",
+  });
+  assert.equal(piTemplate("db", "query", "-h").stdout, pages.find(({ command }) => command === "pi-template db query")!.help);
   usageError(["docs", "lst"], { error: "unknown command 'lst' (Did you mean list?)", hint: "`pi-template docs --help` lists its verbs." });
   usageError(["docs", "list", "--frob"], {
     error: "unknown option '--frob'",

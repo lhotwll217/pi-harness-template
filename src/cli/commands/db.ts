@@ -58,5 +58,5 @@ export function addDb(program: Command): void {
     const result = await client.queryDatabase({ action: DatabaseQueryAction.Query, sql: sql as string }) as QueryResult;
     await emit(result.truncated ? { ...result, hint: TRUNCATED_HINT } : result);
     return 0;
-  }));
+  })).allowUnknownOption();
 }

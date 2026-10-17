@@ -49,7 +49,8 @@ typed in three ways: a `--` is dropped when it is the first word, and in
 `prompt` anywhere; `-h` or `--help` prints help when it is the first word, and
 in `prompt` anywhere before a `--`; and `prompt` reads `--json` anywhere as its
 flag. `schedule add` runs the command after `--` exactly as given, refuses any
-other stray word, and refuses a flag given twice.
+other stray word, and refuses a flag given twice. `db query` reads an argument
+that opens with a dash, such as a `-- comment`, as its SQL, except `-h` or `--help`.
 
 ## Help is the guidance
 
