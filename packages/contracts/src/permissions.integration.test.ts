@@ -16,13 +16,18 @@ try {
   mkdirSync(protectedDir, { recursive: true });
   writeFileSync(paths.protectedPaths, JSON.stringify({ paths: [protectedDir], repos: [] }));
 
-  // read-only (default): reads allow, changes and bounded state changes deny.
+  const allow = savePermissionMode(home);
+  assert.equal(allow.permission["*"], "allow");
+  assert.equal((allow.permission.bash as PiPermissionPatternMap)["*"], "allow");
+  assert.equal((allow.permission.edit as PiPermissionPatternMap)["*"], "allow");
+
   const readOnly = savePermissionMode(home, "read-only");
   assert.equal((readOnly.permission.read as PiPermissionPatternMap)["*"], "allow");
   assert.equal((readOnly.permission.query_database as PiPermissionPatternMap)["*"], "allow");
   assert.equal((readOnly.permission.edit as PiPermissionPatternMap)["*"], "deny");
   assert.equal((readOnly.permission.save_note as PiPermissionPatternMap)["*"], "deny");
   assert.equal(readOnly.permission["*"], "deny");
+  assert.equal((readOnly.permission.bash as PiPermissionPatternMap)["*"], "deny");
 
   // Protected paths become generated deny rules for the tree and its contents.
   const pathRules = readOnly.permission.path as PiPermissionPatternMap;

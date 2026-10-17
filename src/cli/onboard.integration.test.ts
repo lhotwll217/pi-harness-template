@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { OAuthAuth } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { harnessPaths } from "@pi-template/contracts";
+import { AGENT_DEFINITION, definitionIds } from "../agent";
 import { passingOnboardingDependencies } from "../../test/helpers/onboarding";
 import { onboard, type CliOnboardingDependencies } from "./onboard";
 
@@ -101,7 +102,8 @@ try {
   assert.match(transcript, /tool:save_note.*Persist the notes worked example/s);
   assert.match(transcript, /extension:permission-system.*Apply the reviewed Pi permission policy/s);
   assert.match(transcript, /Skill policy: bundled/);
-  assert.match(transcript, /Permission mode: read-only/);
+  assert.match(transcript, /^ {2}Permission mode: allow$/m);
+  assert.match(transcript, /^ {2}Sandbox: off, bash runs with your permissions \(rerun onboarding with --sandbox to turn it on\)$/m);
   assert.ok(transcript.includes(importedPaths.workspaceInstructions));
   assert.ok(transcript.includes(importedPaths.workspaceMemory));
   assert.ok(transcript.includes(`Sandbox allowed read roots: ${process.cwd()}`));
@@ -119,16 +121,19 @@ try {
   assert.deepEqual(JSON.parse(readFileSync(importedPaths.piModels, "utf8")), JSON.parse(modelsBytes));
   assert.deepEqual(JSON.parse(readFileSync(importedPaths.protectedPaths, "utf8")), { paths: [], repos: [] });
   assert.deepEqual(JSON.parse(readFileSync(join(importedHome, "resource-approvals.json"), "utf8")), {
+    acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION),
     workspaceContext: true,
   });
   const reviewedSettings = JSON.parse(readFileSync(importedPaths.settings, "utf8"));
-  assert.equal(reviewedSettings.permissionMode, "read-only");
+  assert.equal(reviewedSettings.permissionMode, "allow");
   assert.deepEqual(reviewedSettings.skillPolicy, { mode: "bundled", allowlist: [] });
   assert.equal(reviewedSettings.alwaysOn, "declined");
   const reviewedSandbox = JSON.parse(readFileSync(join(importedHome, "sandbox.json"), "utf8"));
   assert.deepEqual(reviewedSandbox.filesystem.allowedReadRoots, [process.cwd()]);
   assert.deepEqual(reviewedSandbox.filesystem.allowedWriteRoots, [process.cwd()]);
   assert.deepEqual(reviewedSandbox.network, { mode: "deny", allowedDomains: [] });
+  assert.equal(reviewedSandbox.enabled, false);
+  assert.equal(existsSync(join(importedHome, "sandbox-verification.json")), false, "an off sandbox is not probed");
   assert.equal(readFileSync(standaloneAuth, "utf8"), authBytes);
   assert.equal(readFileSync(standaloneSettings, "utf8"), settingsBytes);
   assert.equal(readFileSync(standaloneModels, "utf8"), modelsBytes);
@@ -224,7 +229,7 @@ try {
   assert.equal(customInteraction.questions().length, 8);
   assert.equal(customInteraction.questions()[3], "Model id [imported-model]: ");
   assert.equal(customInteraction.questions()[4], "Acknowledge this exact agent definition? [y/N] ");
-  assert.equal(customInteraction.questions()[5], "Permission mode [read-only/ask/allow]: ");
+  assert.equal(customInteraction.questions()[5], "Permission mode [allow/ask/read-only]: ");
   assert.equal(customInteraction.questions()[6], "Approve workspace AGENTS.md and MEMORY.md? [y/N] ");
   assert.equal(customInteraction.questions()[7], "Daemon service [declined/installed]: ");
   assert.deepEqual(JSON.parse(readFileSync(harnessPaths(customHome).protectedPaths, "utf8")), {
@@ -233,6 +238,65 @@ try {
   });
   assert.equal(JSON.parse(readFileSync(harnessPaths(customHome).settings, "utf8")).permissionMode, "ask");
   assert.equal(JSON.parse(readFileSync(join(customHome, "resource-approvals.json"), "utf8")).workspaceContext, false);
+
+  const customFiles = ["settings.json", "protected_paths.json", "resource-approvals.json", "sandbox.json"];
+  const recordedFiles = (home: string) => customFiles.map((file) => JSON.parse(readFileSync(join(home, file), "utf8")));
+  const beforeCustomRerun = recordedFiles(customHome);
+  const customRerun = scriptedInteraction(["", "", ""]);
+  assert.equal((await onboard([], {
+    ...passingOnboardingDependencies(customHome),
+    interactiveIO: customRerun.io,
+    standalonePiAuthPath: standaloneAuth,
+  })).complete, true);
+  assert.equal(customRerun.questions()[1], "Protected paths (comma-separated, none to clear) [/sensitive]: ");
+  assert.match(customRerun.transcript(), /^ {2}Permission mode: ask$/m);
+  assert.deepEqual(recordedFiles(customHome), beforeCustomRerun);
+
+  const customDependencies = (io: CliOnboardingDependencies["interactiveIO"]): CliOnboardingDependencies => ({
+    ...passingOnboardingDependencies(customHome), interactiveIO: io, standalonePiAuthPath: standaloneAuth,
+  });
+  const customProtectedPath = harnessPaths(customHome).protectedPaths;
+  const damagedProtected = '{"paths":["/sensitive"],}\n';
+  const protectedProblem = `protected paths are not valid JSON at ${customProtectedPath}`;
+  writeFileSync(customProtectedPath, damagedProtected);
+  const blankOverDamagedPaths = scriptedInteraction(["", ""]);
+  await assert.rejects(onboard([], customDependencies(blankOverDamagedPaths.io)), {
+    name: "CliUsageError",
+    message: `${protectedProblem}; enter the protected paths, or none`,
+  });
+  assert.equal(blankOverDamagedPaths.questions()[1], "Protected paths (comma-separated, none for none; the recorded list is damaged): ");
+  assert.equal(readFileSync(customProtectedPath, "utf8"), damagedProtected);
+  const replacedPaths = scriptedInteraction(["", "/sensitive", ""]);
+  assert.equal((await onboard([], customDependencies(replacedPaths.io))).complete, true);
+  assert.match(replacedPaths.transcript(), new RegExp(`^ {2}Damaged recorded file, replaced by these answers: ${protectedProblem}$`, "m"));
+  assert.deepEqual(recordedFiles(customHome), beforeCustomRerun);
+
+  const customSettingsPath = harnessPaths(customHome).settings;
+  const damagedSettings = '{"permissionMode":"ask",\n';
+  const settingsProblem = `settings are not valid JSON at ${customSettingsPath}`;
+  writeFileSync(customSettingsPath, damagedSettings);
+  const blankOverDamagedSettings = scriptedInteraction(["", "", ""]);
+  await assert.rejects(onboard([], customDependencies(blankOverDamagedSettings.io)), {
+    name: "CliUsageError",
+    message: `${settingsProblem}; answer one of allow, ask, read-only`,
+  });
+  assert.match(blankOverDamagedSettings.transcript(), new RegExp(`^${settingsProblem}; choose the answers it recorded again\\.$`, "m"));
+  assert.equal(blankOverDamagedSettings.questions()[2], "Permission mode, required (allow/ask/read-only): ");
+  assert.equal(readFileSync(customSettingsPath, "utf8"), damagedSettings);
+  const blankServiceOverDamagedSettings = scriptedInteraction(["", "", "ask", ""]);
+  await assert.rejects(onboard([], customDependencies(blankServiceOverDamagedSettings.io)), {
+    name: "CliUsageError",
+    message: `${settingsProblem}; answer one of declined, installed`,
+  });
+  assert.equal(blankServiceOverDamagedSettings.questions()[3], "Daemon service, required (declined/installed): ");
+  assert.equal(readFileSync(customSettingsPath, "utf8"), damagedSettings);
+  const replacedSettings = scriptedInteraction(["", "", "ask", "declined", ""]);
+  assert.equal((await onboard([], customDependencies(replacedSettings.io))).complete, true);
+  assert.match(replacedSettings.transcript(), new RegExp(`^ {2}Damaged recorded file, replaced by these answers: ${settingsProblem}$`, "m"));
+  assert.match(replacedSettings.transcript(), /^ {2}Permission mode: ask$/m);
+  assert.match(replacedSettings.transcript(), /^ {2}Service: declined$/m);
+  assert.equal(JSON.parse(readFileSync(customSettingsPath, "utf8")).permissionMode, "ask");
+  assert.equal(JSON.parse(readFileSync(customSettingsPath, "utf8")).alwaysOn, "declined");
 
   const flagsHome = join(root, "flags-home");
   let flagsModel: { provider: string; model: string } | undefined;
@@ -249,8 +313,85 @@ try {
     "--permission", "read-only",
     "--service", "declined",
     "--acknowledge-resources",
+    "--protected-path", "/flags-private",
+    "--sandbox",
   ], flagsDependencies);
   assert.equal(flagsResult.complete, true);
+  const flagsSandbox = () => JSON.parse(readFileSync(join(flagsHome, "sandbox.json"), "utf8"));
+  assert.equal(flagsSandbox().enabled, true);
+  assert.equal(JSON.parse(readFileSync(join(flagsHome, "sandbox-verification.json"), "utf8")).ok, true);
+
+  const flagFiles = () => [
+    "settings.json", "protected_paths.json", "resource-approvals.json", "sandbox.json", "pi/settings.json",
+  ].map((file) => JSON.parse(readFileSync(join(flagsHome, file), "utf8")));
+  const beforeRerun = flagFiles();
+  assert.equal((await onboard(["--non-interactive"], flagsDependencies)).complete, true);
+  assert.deepEqual(flagFiles(), beforeRerun);
+
+  assert.equal((await onboard(["--non-interactive", "--permission", "ask"], flagsDependencies)).complete, true);
+  const [settingsAfter, ...restAfter] = flagFiles();
+  const [settingsBefore, ...restBefore] = beforeRerun;
+  assert.deepEqual(settingsAfter, { ...settingsBefore, permissionMode: "ask" });
+  assert.deepEqual(restAfter, restBefore);
+
+  const flagsProtectedPath = harnessPaths(flagsHome).protectedPaths;
+  for (const damaged of ['{"paths":["/flags-private"],}\n', '{"paths":"/flags-private","repos":[]}\n']) {
+    writeFileSync(flagsProtectedPath, damaged);
+    const problem = damaged.includes(",}")
+      ? `protected paths are not valid JSON at ${flagsProtectedPath}`
+      : `protected paths must list paths and repos as strings at ${flagsProtectedPath}`;
+    await assert.rejects(onboard(["--non-interactive"], flagsDependencies), {
+      name: "CliUsageError",
+      message: `${problem}; fix it, or rerun with --protected-path to replace it`,
+    });
+    assert.equal(readFileSync(flagsProtectedPath, "utf8"), damaged);
+  }
+  assert.equal((await onboard(["--non-interactive", "--protected-path", "/flags-private"], flagsDependencies)).complete, true);
+  assert.deepEqual(flagFiles(), [settingsAfter, ...restBefore]);
+
+  const flagsSandboxPath = join(flagsHome, "sandbox.json");
+  const verificationBytes = readFileSync(join(flagsHome, "sandbox-verification.json"), "utf8");
+  const { process: _process, enabled: _enabled, ...legacyWithoutProcess } = flagsSandbox();
+  const damagedSandboxes = [
+    readFileSync(flagsSandboxPath, "utf8").replace(/\}\s*$/, ",}\n"),
+    JSON.stringify(legacyWithoutProcess),
+    JSON.stringify({ enabled: true, filesystem: {}, process: { allowSubprocesses: true }, network: {} }),
+    JSON.stringify({ ...flagsSandbox(), network: { mode: "open", allowedDomains: [] } }),
+    JSON.stringify({ ...flagsSandbox(), enabled: "yes" }),
+    JSON.stringify({ ...flagsSandbox(), filesystem: { ...flagsSandbox().filesystem, allowedWriteRoots: "/" } }),
+    JSON.stringify({ ...flagsSandbox(), process: { allowSubprocesses: "true" } }),
+  ];
+  for (const damaged of damagedSandboxes) {
+    writeFileSync(flagsSandboxPath, damaged);
+    const stopped = {
+      name: "CliUsageError",
+      message: `sandbox policy is invalid under ${flagsHome}; fix it, or rerun with --sandbox or --sandbox-off to replace it`,
+    };
+    await assert.rejects(onboard(["--non-interactive"], flagsDependencies), stopped);
+    const untouched = scriptedInteraction([]);
+    await assert.rejects(onboard([], { ...flagsDependencies, interactiveIO: untouched.io }), stopped);
+    assert.deepEqual(untouched.questions(), []);
+    assert.equal(readFileSync(flagsSandboxPath, "utf8"), damaged);
+    assert.equal(readFileSync(join(flagsHome, "sandbox-verification.json"), "utf8"), verificationBytes);
+  }
+
+  assert.equal((await onboard(["--non-interactive", "--sandbox-off"], flagsDependencies)).complete, true);
+  assert.equal(flagsSandbox().enabled, false);
+  assert.equal(existsSync(join(flagsHome, "sandbox-verification.json")), false);
+
+  const flagsSettingsPath = harnessPaths(flagsHome).settings;
+  writeFileSync(flagsSettingsPath, JSON.stringify({ ...JSON.parse(readFileSync(flagsSettingsPath, "utf8")), permissionMode: "bogus" }));
+  await assert.rejects(onboard(["--non-interactive"], flagsDependencies), {
+    name: "CliUsageError",
+    message: `settings record an invalid permission mode "bogus" at ${flagsSettingsPath}; fix it, or rerun with --permission to replace it`,
+  });
+  assert.equal(JSON.parse(readFileSync(flagsSettingsPath, "utf8")).permissionMode, "bogus");
+  assert.equal((await onboard(["--non-interactive", "--permission", "ask"], flagsDependencies)).complete, true);
+  assert.equal(JSON.parse(readFileSync(flagsSettingsPath, "utf8")).permissionMode, "ask");
+  await assert.rejects(onboard(["--non-interactive", "--sandbox", "--sandbox-off"], flagsDependencies), {
+    name: "CliUsageError",
+    message: "choose one of --sandbox or --sandbox-off",
+  });
   assert.deepEqual(flagsModel, { provider: "fixture-provider", model: "explicit-model" });
   assert.deepEqual(JSON.parse(readFileSync(harnessPaths(flagsHome).piSettings, "utf8")), {
     defaultProvider: "fixture-provider",
@@ -259,6 +400,13 @@ try {
     enabledModels: ["fixture-provider/imported-model", "fixture-provider/explicit-model"],
   });
   assert.equal(readFileSync(standaloneSettings, "utf8"), settingsBytes);
+
+  const importedDefaultHome = join(root, "imported-default-home");
+  assert.equal((await onboard([
+    "--non-interactive", "--auth-file", standaloneAuth, "--service", "declined", "--acknowledge-resources",
+  ], passingOnboardingDependencies(importedDefaultHome))).complete, true);
+  assert.equal(JSON.parse(readFileSync(harnessPaths(importedDefaultHome).piSettings, "utf8")).defaultModel, "imported-model");
+  assert.equal(JSON.parse(readFileSync(harnessPaths(importedDefaultHome).settings, "utf8")).permissionMode, "allow");
 
   const manualHome = join(root, "manual-home");
   const manualInteraction = scriptedInteraction([

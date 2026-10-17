@@ -9,16 +9,29 @@ import {
   type Credential,
 } from "@earendil-works/pi-ai";
 import { getAgentDir, ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { harnessPaths, isPermissionMode, type PermissionMode, type SkillPolicy } from "@pi-template/contracts";
+import {
+  DEFAULT_PERMISSION_MODE,
+  harnessPaths,
+  isPermissionMode,
+  unreadablePermissionMode,
+  unreadableProtectedPaths,
+  type PermissionMode,
+  type SkillPolicy,
+} from "@pi-template/contracts";
 import {
   AGENT_DEFINITION,
   definitionIds,
   agentDefinitionSummary,
+  homeInWriteRootsProblem,
+  OnboardingStageError,
+  readSandboxPolicy,
   readStandaloneCredentials,
+  recordedAnswers,
   runOnboarding,
   type OnboardingAnswers,
   type OnboardingDependencies,
   type OnboardingResult,
+  type SandboxPolicy,
 } from "../agent";
 import { CliUsageError } from "./args";
 
@@ -27,6 +40,7 @@ interface OnboardFlags {
   noBrowser: boolean;
   acknowledgeResources: boolean;
   approveWorkspaceContext: boolean;
+  sandboxEnabled: boolean | undefined;
   values: Map<string, string>;
   repeated: Map<string, string[]>;
 }
@@ -61,6 +75,18 @@ interface InteractiveAuthSelection {
   model: string;
 }
 
+/** Why each recorded file the interactive review must not take a default from is damaged. */
+interface DamagedRecords {
+  protectedPaths?: string;
+  settings?: string;
+}
+
+interface SandboxFlags {
+  enabled?: boolean;
+  readRoots?: string[];
+  writeRoots?: string[];
+}
+
 type ReviewedSetup = OnboardingAnswers & {
   auth: NonNullable<OnboardingAnswers["auth"]>;
   model: NonNullable<OnboardingAnswers["model"]>;
@@ -86,12 +112,19 @@ function parseFlags(argv: readonly string[]): OnboardFlags {
   let noBrowser = process.env.PI_TEMPLATE_NO_BROWSER === "1";
   let acknowledgeResources = false;
   let approveWorkspaceContext = false;
+  let sandboxEnabled: boolean | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     if (flag === "--no-browser") { noBrowser = true; continue; }
     if (flag === "--non-interactive") { nonInteractive = true; continue; }
     if (flag === "--acknowledge-resources") { acknowledgeResources = true; continue; }
     if (flag === "--approve-workspace-context") { approveWorkspaceContext = true; continue; }
+    if (flag === "--sandbox" || flag === "--sandbox-off") {
+      const enabled = flag === "--sandbox";
+      if (sandboxEnabled === !enabled) throw new CliUsageError("choose one of --sandbox or --sandbox-off");
+      sandboxEnabled = enabled;
+      continue;
+    }
     if (!VALUES.has(flag) && !REPEATED.has(flag)) throw new CliUsageError(`unknown onboard option: ${flag}`);
     const value = argv[++index];
     if (!value || value.startsWith("--")) throw new CliUsageError(`${flag} needs a value`);
@@ -99,7 +132,15 @@ function parseFlags(argv: readonly string[]): OnboardFlags {
     else if (values.has(flag)) throw new CliUsageError(`${flag} may be provided only once`);
     else values.set(flag, value);
   }
-  return { nonInteractive, noBrowser, acknowledgeResources, approveWorkspaceContext, values, repeated };
+  return { nonInteractive, noBrowser, acknowledgeResources, approveWorkspaceContext, sandboxEnabled, values, repeated };
+}
+
+function sandboxFlags(flags: OnboardFlags): SandboxFlags {
+  return {
+    enabled: flags.sandboxEnabled,
+    readRoots: flags.repeated.get("--sandbox-read")?.map((path) => resolve(path)),
+    writeRoots: flags.repeated.get("--sandbox-write")?.map((path) => resolve(path)),
+  };
 }
 
 function skillPolicy(mode: string, allowlist: string[]): SkillPolicy {
@@ -129,7 +170,7 @@ function importAnswer(source: PiImportSource): NonNullable<OnboardingAnswers["au
   };
 }
 
-function answersFromFlags(flags: OnboardFlags): OnboardingAnswers {
+function answersFromFlags(flags: OnboardFlags, recorded: OnboardingAnswers): OnboardingAnswers {
   const provider = flags.values.get("--provider");
   const authFile = flags.values.get("--auth-file");
   const apiKey = flags.values.get("--api-key");
@@ -152,9 +193,13 @@ function answersFromFlags(flags: OnboardFlags): OnboardingAnswers {
   if (service === "installed" && (!serviceExecutable || !serviceWorkingDirectory)) {
     throw new CliUsageError("--service installed requires --executable and --working-directory");
   }
-  const readRoots = (flags.repeated.get("--sandbox-read") ?? [process.cwd()]).map((path) => resolve(path));
-  const writeRoots = (flags.repeated.get("--sandbox-write") ?? [process.cwd()]).map((path) => resolve(path));
-  const domains = flags.repeated.get("--network-domain") ?? [];
+  const recordedPolicy = recorded.sandbox?.policy;
+  const sandbox = sandboxFlags(flags);
+  const readRoots = sandbox.readRoots ?? recordedPolicy?.filesystem.allowedReadRoots ?? [resolve(process.cwd())];
+  const writeRoots = sandbox.writeRoots ?? recordedPolicy?.filesystem.allowedWriteRoots ?? [resolve(process.cwd())];
+  const domains = flags.repeated.get("--network-domain");
+  const workspaceSkills = flags.values.get("--workspace-skills");
+  const skills = flags.repeated.get("--skill");
   return {
     auth: authFile
       ? importAnswer(piImportSource(authFile))
@@ -164,19 +209,32 @@ function answersFromFlags(flags: OnboardFlags): OnboardingAnswers {
     model: provider && model ? { provider, model } : undefined,
     resources: flags.acknowledgeResources ? {
       acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION),
-      skillPolicy: skillPolicy(flags.values.get("--workspace-skills") ?? "bundled", flags.repeated.get("--skill") ?? []),
-      approveWorkspaceContext: flags.approveWorkspaceContext,
+      skillPolicy: workspaceSkills !== undefined || skills !== undefined
+        ? skillPolicy(workspaceSkills ?? "bundled", skills ?? [])
+        : recorded.resources?.skillPolicy ?? skillPolicy("bundled", []),
+      approveWorkspaceContext: flags.approveWorkspaceContext || (recorded.resources?.approveWorkspaceContext ?? false),
     } : undefined,
-    capabilities: permission && isPermissionMode(permission) ? { permissionMode: permission } : undefined,
+    capabilities: {
+      permissionMode: permission && isPermissionMode(permission)
+        ? permission
+        : recorded.capabilities?.permissionMode ?? DEFAULT_PERMISSION_MODE,
+    },
     protectedPaths: {
-      paths: (flags.repeated.get("--protected-path") ?? []).map((path) => resolve(path)),
-      repos: flags.repeated.get("--protected-repo") ?? [],
+      paths: flags.repeated.get("--protected-path")?.map((path) => resolve(path)) ?? recorded.protectedPaths?.paths ?? [],
+      repos: flags.repeated.get("--protected-repo") ?? recorded.protectedPaths?.repos ?? [],
     },
     sandbox: {
       policy: {
-        filesystem: { allowedReadRoots: readRoots, allowedWriteRoots: writeRoots, deniedReadRoots: [] },
-        process: { allowSubprocesses: true },
-        network: { mode: domains.length ? "allowlist" : "deny", allowedDomains: domains },
+        enabled: sandbox.enabled ?? recordedPolicy?.enabled ?? false,
+        filesystem: {
+          allowedReadRoots: readRoots,
+          allowedWriteRoots: writeRoots,
+          deniedReadRoots: recordedPolicy?.filesystem.deniedReadRoots ?? [],
+        },
+        process: recordedPolicy?.process ?? { allowSubprocesses: true },
+        network: domains
+          ? { mode: "allowlist", allowedDomains: domains }
+          : recordedPolicy?.network ?? { mode: "deny", allowedDomains: [] },
       },
     },
     service: service === undefined
@@ -387,35 +445,52 @@ function protectedPaths(raw: string): string[] {
   return raw.split(",").map((path) => path.trim()).filter(Boolean).map((path) => resolve(path));
 }
 
+function reviewedSandboxPolicy(recorded: OnboardingAnswers, sandbox: SandboxFlags): SandboxPolicy {
+  const root = resolve(process.cwd());
+  const policy = recorded.sandbox?.policy ?? {
+    enabled: false,
+    filesystem: { allowedReadRoots: [root], allowedWriteRoots: [root], deniedReadRoots: [] },
+    process: { allowSubprocesses: true },
+    network: { mode: "deny", allowedDomains: [] },
+  };
+  return {
+    ...policy,
+    enabled: sandbox.enabled ?? policy.enabled,
+    filesystem: {
+      ...policy.filesystem,
+      allowedReadRoots: sandbox.readRoots ?? policy.filesystem.allowedReadRoots,
+      allowedWriteRoots: sandbox.writeRoots ?? policy.filesystem.allowedWriteRoots,
+    },
+  };
+}
+
 function reviewDefaults(
-  home: string | undefined,
   auth: InteractiveAuthSelection,
   protectedPathValues: string[],
+  recorded: OnboardingAnswers,
+  sandbox: SandboxFlags,
 ): ReviewedSetup {
-  const paths = harnessPaths(home);
-  const root = resolve(process.cwd());
   return {
     auth: auth.answer,
     model: { provider: auth.provider, model: auth.model },
     resources: {
       acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION),
-      skillPolicy: { mode: "bundled", allowlist: [] },
-      approveWorkspaceContext: true,
+      skillPolicy: recorded.resources?.skillPolicy ?? { mode: "bundled", allowlist: [] },
+      approveWorkspaceContext: recorded.resources?.approveWorkspaceContext ?? true,
     },
-    capabilities: { permissionMode: "read-only" },
-    protectedPaths: { paths: protectedPathValues, repos: [] },
-    sandbox: {
-      policy: {
-        filesystem: { allowedReadRoots: [root], allowedWriteRoots: [root], deniedReadRoots: [] },
-        process: { allowSubprocesses: true },
-        network: { mode: "deny", allowedDomains: [] },
-      },
-    },
-    service: { choice: "declined" },
+    capabilities: recorded.capabilities ?? { permissionMode: DEFAULT_PERMISSION_MODE },
+    protectedPaths: { paths: protectedPathValues, repos: recorded.protectedPaths?.repos ?? [] },
+    sandbox: { policy: reviewedSandboxPolicy(recorded, sandbox) },
+    service: recorded.service ?? { choice: "declined" },
   };
 }
 
-function writeReview(io: InteractiveOnboardingIO, answers: ReviewedSetup, home: string | undefined): void {
+function writeReview(
+  io: InteractiveOnboardingIO,
+  answers: ReviewedSetup,
+  home: string | undefined,
+  damaged: DamagedRecords,
+): void {
   const paths = harnessPaths(home);
   io.write("Setup review:\n");
   io.write(`  Provider: ${answers.model.provider}\n`);
@@ -424,16 +499,52 @@ function writeReview(io: InteractiveOnboardingIO, answers: ReviewedSetup, home: 
   for (const resource of agentDefinitionSummary()) {
     io.write(`    ${resource.id} — ${resource.description}\n`);
   }
-  io.write("  Skill policy: bundled\n");
-  io.write("  Permission mode: read-only\n");
+  const { skillPolicy } = answers.resources;
+  io.write(`  Skill policy: ${skillPolicy.mode}${skillPolicy.allowlist.length ? ` (${skillPolicy.allowlist.join(", ")})` : ""}\n`);
+  io.write(`  Permission mode: ${answers.capabilities.permissionMode}\n`);
   io.write(`  Protected paths: ${answers.protectedPaths.paths.join(", ") || "none"}\n`);
   io.write("  Workspace files to approve:\n");
   io.write(`    ${paths.workspaceInstructions}\n`);
   io.write(`    ${paths.workspaceMemory}\n`);
-  io.write(`  Sandbox allowed read roots: ${answers.sandbox.policy.filesystem.allowedReadRoots.join(", ")}\n`);
-  io.write(`  Sandbox allowed write roots: ${answers.sandbox.policy.filesystem.allowedWriteRoots.join(", ")}\n`);
-  io.write("  Network: deny\n");
-  io.write("  Service: declined\n");
+  const { policy } = answers.sandbox;
+  io.write(policy.enabled
+    ? "  Sandbox: on\n"
+    : "  Sandbox: off, bash runs with your permissions (rerun onboarding with --sandbox to turn it on)\n");
+  io.write(`  Sandbox allowed read roots: ${policy.filesystem.allowedReadRoots.join(", ")}\n`);
+  io.write(`  Sandbox allowed write roots: ${policy.filesystem.allowedWriteRoots.join(", ")}\n`);
+  io.write(`  Network: ${policy.network.mode}${policy.network.allowedDomains.length ? ` (${policy.network.allowedDomains.join(", ")})` : ""}\n`);
+  io.write(`  Service: ${answers.service.choice}\n`);
+  for (const problem of [damaged.protectedPaths, damaged.settings]) {
+    if (problem) io.write(`  Damaged recorded file, replaced by these answers: ${problem}\n`);
+  }
+}
+
+async function requiredChoice<T extends string>(
+  io: InteractiveOnboardingIO,
+  prompt: string,
+  problem: string,
+  choices: readonly T[],
+): Promise<T> {
+  const answer = (await io.question(prompt)).trim();
+  if (!(choices as readonly string[]).includes(answer)) {
+    throw new CliUsageError(`${problem}; answer one of ${choices.join(", ")}`);
+  }
+  return answer as T;
+}
+
+async function installedService(
+  io: InteractiveOnboardingIO,
+  keepsInstall: boolean,
+): Promise<NonNullable<OnboardingAnswers["service"]>> {
+  const executable = (await io.question(
+    `Absolute pi-template executable path${keepsInstall ? " (blank keeps the installed service)" : ""}: `,
+  )).trim();
+  if (keepsInstall && !executable) return { choice: "installed" };
+  return {
+    choice: "installed",
+    executable: resolve(executable),
+    workingDirectory: resolve((await io.question("Daemon working directory: ")).trim()),
+  };
 }
 
 async function customizedAnswers(
@@ -448,24 +559,21 @@ async function customizedAnswers(
   }
   const acknowledge = await io.question("Acknowledge this exact agent definition? [y/N] ");
   if (!isAffirmativeAnswer(acknowledge)) throw new CliUsageError("agent definition was not acknowledged");
-  const permissionRaw = (await io.question("Permission mode [read-only/ask/allow]: ")).trim() || "read-only";
+  const permissionRaw = (await io.question("Permission mode [allow/ask/read-only]: ")).trim() ||
+    defaults.capabilities.permissionMode;
   if (!isPermissionMode(permissionRaw)) throw new CliUsageError("permission mode must be ask, allow, or read-only");
   const workspaceContext = await io.question("Approve workspace AGENTS.md and MEMORY.md? [y/N] ");
-  const serviceRaw = (await io.question("Daemon service [declined/installed]: ")).trim() || "declined";
+  const serviceRaw = (await io.question("Daemon service [declined/installed]: ")).trim() || defaults.service.choice;
   if (serviceRaw !== "declined" && serviceRaw !== "installed") throw new CliUsageError("service choice must be declined or installed");
   const service = serviceRaw === "declined"
     ? { choice: "declined" as const }
-    : {
-        choice: "installed" as const,
-        executable: resolve((await io.question("Absolute pi-template executable path: ")).trim()),
-        workingDirectory: resolve((await io.question("Daemon working directory: ")).trim()),
-      };
+    : await installedService(io, defaults.service.choice === "installed");
   return {
     ...defaults,
     model: { provider: defaults.model.provider, model },
     resources: {
       acknowledgedDefinitionIds: definitionIds(AGENT_DEFINITION),
-      skillPolicy: { mode: "bundled", allowlist: [] },
+      skillPolicy: defaults.resources.skillPolicy,
       approveWorkspaceContext: isAffirmativeAnswer(workspaceContext),
     },
     capabilities: { permissionMode: permissionRaw as PermissionMode },
@@ -479,15 +587,62 @@ async function interactiveAnswers(
   home: string | undefined,
   preferDeviceCode: boolean,
   createRuntime: CreateModelRuntime,
+  recorded: OnboardingAnswers,
+  sandbox: SandboxFlags,
+  damaged: DamagedRecords,
 ): Promise<OnboardingAnswers> {
   const auth = await interactiveAuth(io, source, preferDeviceCode, createRuntime);
-  const protectedRaw = (await io.question("Protected paths (comma-separated, blank for none): ")).trim();
-  const defaults = reviewDefaults(home, auth, protectedPaths(protectedRaw));
-  writeReview(io, defaults, home);
+  const recordedPaths = recorded.protectedPaths?.paths;
+  const protectedRaw = (await io.question(damaged.protectedPaths
+    ? "Protected paths (comma-separated, none for none; the recorded list is damaged): "
+    : recordedPaths
+    ? `Protected paths (comma-separated, none to clear) [${recordedPaths.join(", ") || "none"}]: `
+    : "Protected paths (comma-separated, blank for none): ")).trim();
+  if (damaged.protectedPaths && !protectedRaw) {
+    throw new CliUsageError(`${damaged.protectedPaths}; enter the protected paths, or none`);
+  }
+  const protectedPathValues = recordedPaths && !protectedRaw
+    ? recordedPaths
+    : protectedRaw.toLowerCase() === "none" ? [] : protectedPaths(protectedRaw);
+  let replaced = recorded;
+  if (damaged.settings) {
+    io.write(`${damaged.settings}; choose the answers it recorded again.\n`);
+    const permissionMode = await requiredChoice(
+      io, "Permission mode, required (allow/ask/read-only): ", damaged.settings, ["allow", "ask", "read-only"] as const,
+    );
+    replaced = { ...replaced, capabilities: { permissionMode } };
+    if (!recorded.service) {
+      const choice = await requiredChoice(
+        io, "Daemon service, required (declined/installed): ", damaged.settings, ["declined", "installed"] as const,
+      );
+      replaced = { ...replaced, service: choice === "declined" ? { choice } : await installedService(io, false) };
+    }
+  }
+  const defaults = reviewDefaults(auth, protectedPathValues, replaced, sandbox);
+  writeReview(io, defaults, home, damaged);
   const acceptance = await io.question("Accept this setup? [Y/n] ");
   if (isDefaultYesAnswer(acceptance)) return defaults;
   if (isNegativeAnswer(acceptance)) return await customizedAnswers(io, defaults);
   throw new CliUsageError("answer y or n to accept this setup");
+}
+
+function assertRecordedSandboxReadable(home: string, sandboxEnabled: boolean | undefined): void {
+  if (sandboxEnabled !== undefined) return;
+  try {
+    readSandboxPolicy(home);
+  } catch (error) {
+    throw new CliUsageError(`${(error as Error).message}; fix it, or rerun with --sandbox or --sandbox-off to replace it`);
+  }
+}
+
+function assertRecordedProtectedPathsReadable(home: string, flags: OnboardFlags): void {
+  const problem = flags.repeated.has("--protected-path") ? undefined : unreadableProtectedPaths(home);
+  if (problem) throw new CliUsageError(`${problem}; fix it, or rerun with --protected-path to replace it`);
+}
+
+function assertRecordedPermissionReadable(home: string, permission: string | undefined): void {
+  const problem = permission === undefined ? unreadablePermissionMode(home) : undefined;
+  if (problem) throw new CliUsageError(`${problem}; fix it, or rerun with --permission to replace it`);
 }
 
 export async function onboard(
@@ -501,7 +656,14 @@ export async function onboard(
     createModelRuntime = (options) => ModelRuntime.create(options),
     ...machineDependencies
   } = dependencies;
-  if (flags.nonInteractive) return await runOnboarding(answersFromFlags(flags), machineDependencies);
+  const home = harnessPaths(machineDependencies.home).home;
+  assertRecordedSandboxReadable(home, flags.sandboxEnabled);
+  const recorded = recordedAnswers(home);
+  if (flags.nonInteractive) {
+    assertRecordedPermissionReadable(home, flags.values.get("--permission"));
+    assertRecordedProtectedPathsReadable(home, flags);
+    return await runOnboarding(answersFromFlags(flags, recorded), machineDependencies);
+  }
 
   const rl = interactiveIO ? undefined : readline.createInterface({ input: process.stdin, output: process.stdout });
   const io: InteractiveOnboardingIO = interactiveIO ?? {
@@ -510,10 +672,15 @@ export async function onboard(
     flushPendingQuestion: () => rl!.write("\n"),
   };
   try {
+    const writeRootProblem = homeInWriteRootsProblem(home, reviewedSandboxPolicy(recorded, sandboxFlags(flags)));
+    if (writeRootProblem) throw new OnboardingStageError("sandbox", writeRootProblem);
     const destinationAuthPath = resolve(harnessPaths(machineDependencies.home).piAuth);
     const standaloneSource = piImportSource(standalonePiAuthPath ?? join(getAgentDir(), "auth.json"));
     const source = standaloneSource.authPath === destinationAuthPath ? undefined : standaloneSource;
-    const answers = await interactiveAnswers(io, source, machineDependencies.home, flags.noBrowser, createModelRuntime);
+    const answers = await interactiveAnswers(
+      io, source, machineDependencies.home, flags.noBrowser, createModelRuntime, recorded, sandboxFlags(flags),
+      { protectedPaths: unreadableProtectedPaths(home), settings: unreadablePermissionMode(home) },
+    );
     return await runOnboarding(answers, machineDependencies);
   } finally {
     rl?.close();

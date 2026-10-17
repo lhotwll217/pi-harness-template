@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -15,12 +16,14 @@ import {
   ONBOARDING_VERSION,
   ensureHarnessWorkspace,
   harnessPaths,
+  isPermissionMode,
   loadHarnessSettings,
   loadProtectedPaths,
   nextOnboardingStage,
   reconcilePermissionSettings,
   saveHarnessSettings,
   savePermissionMode,
+  unreadableProtectedPaths,
   type HarnessPaths,
   type OnboardingMarker,
   type OnboardingProgress,
@@ -32,7 +35,15 @@ import {
 import { createLaunchdServiceAdapter, type DaemonServiceAdapter } from "../daemon/ensure";
 import { runDoctor } from "./doctor";
 import { AGENT_DEFINITION, definitionIds } from "./agent-definition";
-import { createSandboxAdapter, type SandboxAdapter, type SandboxPolicy, type SandboxVerification } from "./sandbox";
+import {
+  createSandboxAdapter,
+  homeInWriteRootsProblem,
+  readSandboxPolicy,
+  sandboxPolicyPath,
+  type SandboxAdapter,
+  type SandboxPolicy,
+  type SandboxVerification,
+} from "./sandbox";
 
 type JsonObject = Record<string, unknown>;
 
@@ -180,17 +191,83 @@ function verifyHome(paths: HarnessPaths): boolean {
     [paths.workspaceInstructions, paths.workspaceMemory].every((path) => existsSync(path) && statSync(path).isFile());
 }
 
+/** The answers onboarding wrote to a home; an answer it never wrote is undefined, never a default. */
+export function recordedAnswers(home?: string): OnboardingAnswers {
+  const paths = harnessPaths(home);
+  const settings = readObject(paths.settings);
+  const approvals = readObject(paths.resourceApprovals);
+  const acknowledged = approvals.acknowledgedDefinitionIds;
+  let sandbox: SandboxPolicy | undefined;
+  try {
+    sandbox = readSandboxPolicy(paths.home);
+  } catch {
+    sandbox = undefined;
+  }
+  return {
+    model: selectedModel(paths),
+    resources: typeof approvals.workspaceContext === "boolean"
+      ? {
+          acknowledgedDefinitionIds: Array.isArray(acknowledged)
+            ? acknowledged.filter((id): id is string => typeof id === "string")
+            : [],
+          skillPolicy: loadHarnessSettings(paths.home).skillPolicy,
+          approveWorkspaceContext: approvals.workspaceContext,
+        }
+      : undefined,
+    capabilities: isPermissionMode(settings.permissionMode) ? { permissionMode: settings.permissionMode } : undefined,
+    protectedPaths: existsSync(paths.protectedPaths) && !unreadableProtectedPaths(paths.home)
+      ? loadProtectedPaths(paths.home)
+      : undefined,
+    sandbox: sandbox ? { policy: sandbox } : undefined,
+    service: settings.alwaysOn === "installed" || settings.alwaysOn === "declined"
+      ? { choice: settings.alwaysOn }
+      : undefined,
+  };
+}
+
+const ANSWERED_STAGES = {
+  resources: "resources",
+  capabilities: "capabilities",
+  "protected-paths": "protectedPaths",
+  sandbox: "sandbox",
+  service: "service",
+} as const satisfies Partial<Record<OnboardingStage, keyof OnboardingAnswers>>;
+
 function requireAnswer<T>(stage: OnboardingStage, answer: T | undefined): T {
   if (answer === undefined) throw new OnboardingStageError(stage, "explicit owner input is required");
   return answer;
 }
 
-/** Versioned, resumable setup. A stage timestamp is durable only after its predicate passes. */
+function assertRerunCanFinish(answers: OnboardingAnswers, hasCredentials: () => boolean): void {
+  if (!answers.auth && !hasCredentials()) {
+    throw new OnboardingStageError("auth", "no usable provider credentials are configured");
+  }
+  requireAnswer("model", answers.model);
+  for (const [stage, key] of Object.entries(ANSWERED_STAGES) as [OnboardingStage, keyof OnboardingAnswers][]) {
+    requireAnswer(stage, answers[key]);
+  }
+  if (!sameJson(answers.resources!.acknowledgedDefinitionIds, definitionIds(AGENT_DEFINITION))) {
+    throw new OnboardingStageError("resources", "resource review must acknowledge the exact agent definition");
+  }
+}
+
+/** Versioned, resumable setup. A stage timestamp is durable only after its predicate passes.
+ * On a completed home every stage runs again; an omitted answer keeps the recorded one. */
 export async function runOnboarding(
-  answers: OnboardingAnswers,
+  explicitAnswers: OnboardingAnswers,
   dependencies: OnboardingDependencies = {},
 ): Promise<OnboardingResult> {
   const paths = harnessPaths(dependencies.home);
+  const recorded = recordedAnswers(paths.home);
+  const answers: OnboardingAnswers = {
+    auth: explicitAnswers.auth,
+    model: explicitAnswers.model ?? recorded.model,
+    resources: explicitAnswers.resources ?? recorded.resources,
+    capabilities: explicitAnswers.capabilities ?? recorded.capabilities,
+    protectedPaths: explicitAnswers.protectedPaths ?? recorded.protectedPaths,
+    sandbox: explicitAnswers.sandbox ?? recorded.sandbox,
+    service: explicitAnswers.service ?? recorded.service,
+  };
   const now = dependencies.now ?? (() => new Date().toISOString());
   const authVerifier = dependencies.authVerifier ?? defaultAuthVerifier;
   const modelVerifier = dependencies.modelVerifier ?? (async (ownedPaths, selection) => {
@@ -203,6 +280,8 @@ export async function runOnboarding(
     const report = await runDoctor({ home });
     return { ok: report.ok, reason: report.ok ? "doctor passed" : "one or more doctor checks failed" };
   });
+  const writeRootProblem = answers.sandbox && homeInWriteRootsProblem(paths.home, answers.sandbox.policy);
+  if (writeRootProblem) throw new OnboardingStageError("sandbox", writeRootProblem);
   let progress = currentProgress(paths.onboardingProgress);
   const existingMarker = readObject(paths.onboardingMarker) as Partial<OnboardingMarker>;
   if (
@@ -210,7 +289,10 @@ export async function runOnboarding(
     typeof existingMarker.completedAt === "string" &&
     ONBOARDING_STAGES.every((stage) => !!progress.stages[stage])
   ) {
-    return { complete: true, progress, marker: existingMarker as OnboardingMarker };
+    assertRerunCanFinish(answers, () => authVerifier(paths));
+    rmSync(paths.onboardingMarker, { force: true });
+    progress = { version: ONBOARDING_VERSION, stages: {} };
+    writeJsonAtomic(paths.onboardingProgress, progress);
   }
   let sandboxResult: SandboxVerification | undefined;
   let readinessResult: { ok: boolean; reason: string } | undefined;
@@ -271,12 +353,13 @@ export async function runOnboarding(
             throw new Error("resource review must acknowledge the exact agent definition");
           }
           saveHarnessSettings(paths.home, { skillPolicy: answer.skillPolicy });
-          writeJsonAtomic(resolve(paths.home, "resource-approvals.json"), {
+          writeJsonAtomic(paths.resourceApprovals, {
+            acknowledgedDefinitionIds: answer.acknowledgedDefinitionIds,
             workspaceContext: answer.approveWorkspaceContext,
           });
           if (
             !sameJson(loadHarnessSettings(paths.home).skillPolicy, answer.skillPolicy) ||
-            readObject(resolve(paths.home, "resource-approvals.json")).workspaceContext !== answer.approveWorkspaceContext
+            readObject(paths.resourceApprovals).workspaceContext !== answer.approveWorkspaceContext
           ) {
             throw new Error("approved workspace resource policy was not persisted");
           }
@@ -321,9 +404,13 @@ export async function runOnboarding(
                   denied === allowed || denied.startsWith(allowed + sep))),
             },
           };
-          writeJsonAtomic(resolve(paths.home, "sandbox.json"), policy);
+          writeJsonAtomic(sandboxPolicyPath(paths.home), policy);
+          if (!policy.enabled) {
+            rmSync(paths.sandboxVerification, { force: true });
+            break;
+          }
           sandboxResult = await sandbox.verify(policy);
-          writeJsonAtomic(resolve(paths.home, "sandbox-verification.json"), {
+          writeJsonAtomic(paths.sandboxVerification, {
             ...sandboxResult,
             verifiedAt: now(),
           });
@@ -335,14 +422,18 @@ export async function runOnboarding(
           if ((dependencies.platform ?? process.platform) !== "darwin" && answer.choice === "installed") {
             throw new Error("always-on service installation is not supported on this platform");
           }
-          const configuration = answer.choice === "installed"
-            ? {
-                home: paths.home,
-                executable: requireAnswer(stage, answer.executable),
-                workingDirectory: requireAnswer(stage, answer.workingDirectory),
-              }
-            : undefined;
-          await service.configure(answer.choice, configuration);
+          const keepsInstall = answer.choice === "installed" && answer.executable === undefined &&
+            loadHarnessSettings(paths.home).alwaysOn === "installed";
+          if (!keepsInstall) {
+            const configuration = answer.choice === "installed"
+              ? {
+                  home: paths.home,
+                  executable: requireAnswer(stage, answer.executable),
+                  workingDirectory: requireAnswer(stage, answer.workingDirectory),
+                }
+              : undefined;
+            await service.configure(answer.choice, configuration);
+          }
           saveHarnessSettings(paths.home, { alwaysOn: answer.choice });
           if (!await service.verify(answer.choice) || loadHarnessSettings(paths.home).alwaysOn !== answer.choice) {
             throw new Error("daemon service choice could not be verified");

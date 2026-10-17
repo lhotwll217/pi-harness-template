@@ -29,13 +29,46 @@ interactive commands, the daemon, and headless scheduled work.
    workspace-provided resources eligible for loading.
 5. Choose a capability and approval posture.
 6. Review protected paths and data boundaries.
-7. Configure and verify operating-system sandbox enforcement separately from permissions.
+7. Record the operating-system sandbox choice, off unless the owner opts in, and
+   verify enforcement when it is on.
 8. Install or configure the daemon service if the selected platform supports it.
 9. Run model-free readiness checks.
 10. Write a completed-version marker only after every required stage succeeds.
 
 Each stage must be safe to repeat. Resuming setup starts from durable stage state,
 not from guesses about partially created files.
+
+A rerun on a completed home runs every stage again. Each answer it does not
+replace keeps the value the home records: an omitted flag, or a prompt left at
+its default. The completion marker is withdrawn only after the rerun has every
+answer it needs, and is written again when the last stage passes, so a rerun
+that fails a stage leaves setup incomplete. Homes onboarded before the
+agent-definition acknowledgment was recorded must acknowledge it once more.
+
+A rerun never falls back to a default that could widen access when a recorded
+answer cannot be read; it stops, or asks, before anything is written. A
+`sandbox.json` that does not parse, or lacks any part of its policy (the three
+filesystem root lists, `process.allowSubprocesses`, and a network mode of `deny`
+or `allowlist` with its domain list), stops the rerun until `--sandbox` or
+`--sandbox-off` replaces it. A non-interactive rerun stops when `settings.json`
+does not parse or records an unknown permission mode, until `--permission`
+replaces it, and when `protected_paths.json` does not parse or lists anything
+but strings, until `--protected-path` replaces it. An interactive rerun over
+either of those two files names the damage, asks for its answers with no
+default (the protected paths; the permission mode, and the service choice when
+settings no longer record it), and lists the damaged file in the review.
+Non-interactive onboarding without `--permission` takes the recorded mode, or
+`allow` on a new home.
+
+With the sandbox on, onboarding refuses, before anything is written, a write
+root that contains the harness home, whether given with `--sandbox-write`, taken
+from the working directory, or kept from the recorded `sandbox.json`, and a
+write root with glob characters, a leading `~`, a relative spelling, or a
+symlink on its spelling whose target does not exist; the
+message names the root and the home. Interactive onboarding checks before it
+asks for authentication. Both modes honor `--sandbox-read` and
+`--sandbox-write`. The rule and its reason are in
+[security](security.md#write-roots-stay-outside-the-harness-home).
 
 ## Fail-closed rule
 
@@ -64,8 +97,9 @@ allow it**, and it is a trade the owner makes deliberately:
   that visibility.
 
 Onboarding is never reduced to a switch: an agent that drives it still goes
-through every stage, and the sandbox stage still runs its real enforcement
-probe and fails closed. Automation changes *who operates the flow*, never
+through every stage, and the sandbox stage, when the owner opted in
+([the sandbox is opt-in](security.md#the-sandbox-is-opt-in)), still runs its
+real enforcement probe and fails closed. Automation changes *who operates the flow*, never
 *whether the verification happens*.
 
 ### The login handoff (`--no-browser`)
@@ -121,7 +155,8 @@ Owner Operator's pattern — never a subcommand the owner must discover:
   workspace approval, sandbox defaults, and service — is shown together and
   accepted with a single confirmation. Declining the summary drops into
   per-question customization. Consolidation never skips a stage predicate or
-  the sandbox probe; it only consolidates the asking.
+  the probe of an opted-in sandbox; it only consolidates the asking. The review
+  defaults to permission mode `allow` and the sandbox off.
 
 ## Decided
 
@@ -131,9 +166,10 @@ Owner Operator's pattern — never a subcommand the owner must discover:
 - Provider login and credential import follow the entry behavior above:
   toolkit-owned OAuth flows plus guided import, resolving what a product must
   support before onboarding can complete.
-- Sandbox enforcement (stage 7) is verified through the adopted
+- Sandbox enforcement (stage 7), when the owner opts in with `--sandbox`, is
+  verified through the adopted
   [sandbox adapter](security.md#sandbox-adapter-boundary); there is no
-  complete-with-warning path.
+  complete-with-warning path. A new home records the sandbox off.
 - macOS (launchd) is the first always-on service platform, ported from Owner
   Operator's daemon management; other platforms follow.
 

@@ -14,6 +14,7 @@ try {
   writeFileSync(allowedFile, "allowed\n");
   writeFileSync(canaryFile, "must not be readable\n");
   const result = await createSandboxAdapter().verify({
+    enabled: true,
     filesystem: {
       allowedReadRoots: [allowedRoot],
       allowedWriteRoots: [],

@@ -31,6 +31,28 @@ export function loadProtectedPaths(home: string): ProtectedPaths {
   }
 }
 
+/** Why protected_paths.json cannot supply the owner's lists; undefined when it records them or is missing. */
+export function unreadableProtectedPaths(home: string): string | undefined {
+  const path = join(home, "protected_paths.json");
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    return (error as NodeJS.ErrnoException)?.code === "ENOENT" ? undefined : `protected paths are unreadable at ${path}`;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return `protected paths are not valid JSON at ${path}`;
+  }
+  const strings = (list: unknown) => list === undefined || (Array.isArray(list) && list.every((item) => typeof item === "string"));
+  const record = value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+  return record && strings(record.paths) && strings(record.repos)
+    ? undefined
+    : `protected paths must list paths and repos as strings at ${path}`;
+}
+
 const fold = (s: unknown) => String(s ?? "").toLowerCase();
 
 /** Lexical and filesystem-resolved identities for one protected path. */
