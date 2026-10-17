@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import type { Message } from "@earendil-works/pi-ai";
+import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import {
   AgentToolId,
   DEFAULT_TOOL_POSTURE,
@@ -26,6 +27,7 @@ import { seedFauxProviderHome } from "../../test/helpers/faux-provider";
 import { acknowledgeAgentDefinition } from "../../test/helpers/onboarding";
 import { toolResultFromTurn } from "../../test/helpers/tool-turn";
 import { createScheduledPromptRunner } from "./prompt-runner";
+import { createHarnessSession } from "./runtime";
 import { checkoutRoot, createSandboxAdapter } from "./sandbox";
 
 // A unix socket path holds at most 103 bytes on macOS, and the temporary directory is long.
@@ -87,6 +89,43 @@ async function agentTurn(commands: readonly string[], answer: (results: string[]
 
 const countAnswer = ([listed]: string[]) => `There are ${(JSON.parse(listed!) as unknown[]).length} notes saved.`;
 
+interface OwnerTurn {
+  results: string[];
+  prompts: string[];
+}
+
+/** One interactive session whose owner answers "Yes, for this session" to the first prompt and "Yes" to every later one. */
+async function ownerTurn(commands: readonly string[]): Promise<OwnerTurn> {
+  const turn: OwnerTurn = { results: [], prompts: [] };
+  faux.setResponses([
+    ...commands.map((command, index) => (context: { messages: Message[] }) => {
+      if (index > 0) turn.results.push(textOf(context.messages.at(-1)));
+      return fauxAssistantMessage(fauxToolCall("bash", { command }), { stopReason: "toolUse" });
+    }),
+    (context: { messages: Message[] }) => {
+      turn.results.push(textOf(context.messages.at(-1)));
+      return fauxAssistantMessage("done");
+    },
+  ]);
+  const created = await createHarnessSession({ home, cwd, model: faux.getModel(), ephemeral: true });
+  // Pi's no-op UI with a select that answers; "rpc" makes the permission extension ask through select.
+  const owner: ExtensionUIContext = {
+    ...created.session.extensionRunner.getUIContext(),
+    select: async (title, options) => {
+      turn.prompts.push(title);
+      return turn.prompts.length === 1 ? options[1] : options[0];
+    },
+  };
+  try {
+    await created.session.bindExtensions({ uiContext: owner, mode: "rpc" });
+    await created.session.prompt("Use bash.");
+  } finally {
+    await created.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    created.session.dispose();
+  }
+  return turn;
+}
+
 async function agentCli(args: readonly string[], agentHome: string) {
   return await new Promise<{ status: number | null; stdout: string; stderr: string }>((resolveRun, reject) => {
     const child = spawn(join(checkoutRoot, "pi-template"), args, {
@@ -108,6 +147,7 @@ const COMMAND_SCHEDULE_REFUSAL = '{"status":403,"error":"agent callers cannot cr
   '"hint":"the owner runs pi-template schedule add -- <argv>"}';
 const refusal = (mode: string, reason: string) => `Refused in ${mode} mode: the agent's bash runs only pi-template <command> [arguments] ` +
   `as plain words, and ${reason}. Quote arguments with '...' or "..."; variables, redirects, pipes, globs, and chained commands are refused.`;
+const NO_APPROVER = "[pi-permission-system] This 'bash' call (rule '*') requires approval, but no interactive UI is available.";
 const sandboxPolicy = (enabled: boolean) => JSON.stringify({
   enabled,
   filesystem: { allowedReadRoots: [cwd], allowedWriteRoots: [cwd], deniedReadRoots: [] },
@@ -232,8 +272,44 @@ try {
     assert.equal((await owner.listSchedules()).some(({ name }) => name === "spoofed"), false, label);
     assert.deepEqual(daemon!.state.listRuns(ownerCommand.id), [], label);
   };
+  const assertOwnerApprovalsHold = async (label: string): Promise<void> => {
+    savePermissionMode(home, "ask");
+    const spoofed = await ownerTurn([
+      "ls workspace",
+      "X=1 pi-template notes list",
+      `env PI_TEMPLATE_AGENT=0 pi-template schedule run ${ownerCommand.id}`,
+      "ls workspace && NODE_OPTIONS='--import=data:text/javascript,import(`node:fs`).then((fs)=>fs.writeFileSync(`" + marker + "`,``))' pi-template notes list",
+      `PI_TEMPLATE_AGENT=0 ${checkoutRoot}/pi-template schedule add --every 1d --name spoofed -- true`,
+      "ls workspace; PI_TEMPLATE_AGENT=0 pi-template schedule add --every 1d --name spoofed -- true",
+      "pi-template notes list",
+    ]);
+    assert.equal(spoofed.results[0], "keep.txt\n", label);
+    assert.deepEqual(spoofed.results.slice(1, 6), [
+      refusal("ask", "its first word is not pi-template"),
+      refusal("ask", "its first word is not pi-template"),
+      refusal("ask", "it has & outside quotes"),
+      refusal("ask", "its first word is not pi-template"),
+      refusal("ask", "it has ; outside quotes"),
+    ], label);
+    assert.equal((JSON.parse(spoofed.results[6]!) as unknown[]).length, 4, label);
+    // Only the owner's ls and the two spellings no generated rule matches prompted; the owner said yes to each.
+    assert.deepEqual(spoofed.prompts.map((prompt) => prompt.replace(/\s+/g, " ")), [
+      "Permission Required tool : bash rule : * command : ls workspace",
+      `Permission Required tool : bash rule : * command : env PI_TEMPLATE_AGENT=0 pi-template schedule run ${ownerCommand.id} ` +
+        `runs : pi-template schedule run ${ownerCommand.id}`,
+      `Permission Required tool : bash rule : * command : ${checkoutRoot}/pi-template schedule add --every 1d --name spoofed -- true ` +
+        `full command : PI_TEMPLATE_AGENT=0 ${checkoutRoot}/pi-template schedule add --every 1d --name spoofed -- true`,
+    ], label);
+    assert.equal(existsSync(marker), false, label);
+    assert.equal((await owner.listSchedules()).some(({ name }) => name === "spoofed"), false, label);
+    assert.deepEqual(daemon!.state.listRuns(ownerCommand.id), [], label);
+  };
   await assertSpoofsRefused("read-only", "read-only, sandbox off");
   await assertSpoofsRefused("ask", "headless ask, sandbox off");
+  await assertOwnerApprovalsHold("interactive ask, sandbox off");
+  savePermissionMode(home, "ask");
+  const headlessLs = await agentTurn(["ls workspace"], ([result]) => result!);
+  assert.equal(headlessLs.results[0], NO_APPROVER);
   const redirected = await agentTurn(["pi-template notes list > notes.json"], ([result]) => result!);
   assert.equal(redirected.results[0], "[pi-permission-system] This 'path_write' call for tool 'bash' for path 'notes.json' (rule '*') requires approval, but no interactive UI is available.");
   assert.equal(existsSync(join(cwd, "notes.json")), false);
@@ -261,7 +337,7 @@ try {
     signal: new AbortController().signal,
   };
   assert.equal((await createScheduledPromptRunner({ home, readiness: () => true })(headless)).exitCode, 0);
-  assert.equal(chained, "[pi-permission-system] Denied by policy: 'bash' (rule '*').");
+  assert.equal(chained, "[pi-permission-system] This 'path' call for tool 'bash' for path 'workspace' (rule '*') requires approval, but no interactive UI is available.");
   assert.equal(readFileSync(join(cwd, "workspace", "keep.txt"), "utf8"), "kept\n");
   savePermissionMode(home, "allow");
 
@@ -304,6 +380,7 @@ try {
     assert.match(sandboxed.results[2]!, /Command exited with code (7|56)$/);
     await assertSpoofsRefused("read-only", "read-only, sandbox on");
     await assertSpoofsRefused("ask", "headless ask, sandbox on");
+    await assertOwnerApprovalsHold("interactive ask, sandbox on");
     savePermissionMode(home, "allow");
     writeFileSync(paths.sandboxPolicy, sandboxPolicy(false));
   }
@@ -318,7 +395,7 @@ try {
   assert.equal(existsSync(paths.agentSocket), false);
   assert.equal(existsSync(join(dirname(paths.daemonInfo), "logs", "daemon.log")), false, "nothing tried to start a daemon");
 
-  process.stdout.write("ok — the agent counts, saves, and schedules through pi-template in bash; owner denies, read-only, " +
+  process.stdout.write("ok — the agent counts, saves, and schedules through pi-template in bash; owner denies, read-only, interactive ask with owner approvals, " +
     "headless ask, command-schedule authority, the sandbox, a retired tool's schedule, doctor, and a stopped daemon all hold\n");
 } finally {
   if (daemon) await daemon.close();

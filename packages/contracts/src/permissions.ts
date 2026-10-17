@@ -133,8 +133,7 @@ function permissionPolicy(
   for (const surface of READ_SURFACES) next[surface] = withDefault(existing[surface], "allow");
   for (const surface of CHANGE_SURFACES) next[surface] = withDefault(existing[surface], action);
   next.external_directory = withDefault(existing.external_directory, "allow");
-  // Outside allow mode the bash tool refuses everything but the agent's CLI, so asking would be moot.
-  next.bash = withAgentCliRules(withDefault(existing.bash, mode === "allow" ? "allow" : "deny"));
+  next.bash = withAgentCliRules(withDefault(existing.bash, action));
   const pathWrite = pathWriteRules(existing.path_write, mode);
   if (pathWrite) next.path_write = pathWrite;
   else delete next.path_write;

@@ -32,7 +32,7 @@ import {
   unacknowledgedDefinitionIds,
   unacknowledgedDefinitionMessage,
 } from "./agent-definition";
-import { agentCliArgv, agentCliRefusal, shellWords } from "./agent-cli-command";
+import { agentCliArgv, agentCliRefusal, namesAgentCli, shellWords } from "./agent-cli-command";
 import {
   agentCliEnvironment,
   agentCommandEnvironment,
@@ -491,21 +491,29 @@ function bashExecutor(home: string, sandbox: SandboxAdapter): BashOperations["ex
   };
 }
 
-/** In allow mode bash is the owner's shell. Elsewhere it runs only the agent's CLI, with argv and a fixed environment. */
+/**
+ * In allow mode bash is the owner's shell. Elsewhere a plain `pi-template` call runs with argv and a
+ * fixed environment, and any other command naming the CLI is refused: the permission decision cannot
+ * vouch for it, since an owner's session approval of `ls` also passes `ls; X=0 pi-template …`.
+ * In ask the remaining commands reach the shell, the owner having approved each; read-only refuses them.
+ */
 function bashOperations(home: string, sandbox: SandboxAdapter): BashOperations {
   const exec = bashExecutor(home, sandbox);
   return {
     exec: async (command, cwd, execution) => {
       const mode = loadHarnessSettings(home).permissionMode;
-      if (mode === "allow") {
-        return await exec(command, cwd, { ...execution, env: agentCommandEnvironment(execution.env ?? process.env, home) });
-      }
+      const shell = async () =>
+        await exec(command, cwd, { ...execution, env: agentCommandEnvironment(execution.env ?? process.env, home) });
+      if (mode === "allow") return await shell();
       const parsed = agentCliArgv(command);
-      if ("refused" in parsed) throw new Error(agentCliRefusal(mode, parsed.refused));
-      return await exec(shellWords([join(checkoutRoot, "pi-template"), ...parsed.argv]), cwd, {
-        ...execution,
-        env: agentCliEnvironment(home),
-      });
+      if ("argv" in parsed) {
+        return await exec(shellWords([join(checkoutRoot, "pi-template"), ...parsed.argv]), cwd, {
+          ...execution,
+          env: agentCliEnvironment(home),
+        });
+      }
+      if (mode === "ask" && !namesAgentCli(command)) return await shell();
+      throw new Error(agentCliRefusal(mode, parsed.refused));
     },
   };
 }

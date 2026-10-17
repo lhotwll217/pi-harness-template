@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { agentCliArgv } from "./agent-cli-command";
+import { agentCliArgv, namesAgentCli } from "./agent-cli-command";
 
 const accepted: Array<[string, string[]]> = [
   ["pi-template notes list", ["notes", "list"]],
@@ -43,4 +43,30 @@ const refused: Array<[string, string]> = [
 ];
 for (const [command, reason] of refused) assert.deepEqual(agentCliArgv(command), { refused: reason }, command);
 
-process.stdout.write("ok — the agent CLI splitter accepts plain pi-template argv and refuses every shell construct\n");
+const naming = [
+  "pi-template notes list",
+  "X=1 pi-template notes list",
+  "env pi-template status",
+  "command pi-template status",
+  "exec pi-template status",
+  "/abs/path/pi-template notes list",
+  "./pi-template notes list",
+  "ls && NODE_OPTIONS=--require=x pi-template notes list",
+  "ls; PI_TEMPLATE_AGENT=0 pi-template schedule add --every 1d -- true",
+  "(pi-template status)",
+  "echo $(pi-template status)",
+  "echo `pi-template status`",
+  "ls|pi-template notes list",
+  "p'i'-template status",
+  'p"i-templat"e status',
+  "pi\\-template status",
+  "a=pi-template; $a status",
+  "ls\npi-template status",
+];
+for (const command of naming) assert.equal(namesAgentCli(command), true, command);
+for (const command of ["ls", "ls -la workspace", "cat docs/pi-template.md", "git status", "echo template"]) {
+  assert.equal(namesAgentCli(command), false, command);
+}
+
+process.stdout.write("ok — the agent CLI splitter accepts plain pi-template argv and refuses every shell construct; " +
+  "any word ending in pi-template names the CLI\n");
