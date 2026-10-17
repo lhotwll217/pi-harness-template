@@ -15,6 +15,7 @@ import {
   Scheduler,
   SchedulerLifecycle,
   SchedulerShutdownPolicy,
+  COMMAND_TERMINATION_GRACE_MS,
   type SchedulerTimer,
   type SchedulerTimerHandle,
 } from "./scheduler";
@@ -70,10 +71,13 @@ async function flushWork(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-async function waitForFile(path: string): Promise<void> {
+async function waitForFile(path: string, withinMs = Number.POSITIVE_INFINITY): Promise<boolean> {
+  const deadline = Date.now() + withinMs;
   while (!existsSync(path)) {
+    if (Date.now() >= deadline) return false;
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
+  return true;
 }
 
 async function waitForRunStatus(scheduleId: string, status: ScheduleRunStatus): Promise<void> {
@@ -343,12 +347,18 @@ try {
   await timer.advanceBy(1_000);
   assert.equal(state.listRuns(timedCommand.id)[0].status, ScheduleRunStatus.Running);
   assert.equal(processExists(pids.parent), true);
+  // The manual timer would fire the SIGKILL escalation with no wall-clock grace,
+  // so give the child the real grace to handle SIGTERM before advancing.
+  assert.equal(
+    await waitForFile(childTerminatedFile, COMMAND_TERMINATION_GRACE_MS),
+    true,
+    "timeout signals the command's child process group",
+  );
   await flushWork();
   await timer.advanceBy(1_000);
   await waitForRunStatus(timedCommand.id, ScheduleRunStatus.Failed);
   assert.match(state.listRuns(timedCommand.id)[0].error ?? "", /timed out/i);
   assert.equal(state.listRuns(timedCommand.id)[0].stdoutTail, "process group ready");
-  assert.equal(existsSync(childTerminatedFile), true, "timeout signals the command's child process group");
   assert.equal(processExists(pids.parent), false, "the process group leader exits before completion is recorded");
 
   const shutdownGate = createGate("drain on shutdown");
