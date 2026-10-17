@@ -6,6 +6,7 @@ read_when:
   - Authoring owner instructions or workspace skills
   - Vendoring a skill into the harness or debugging why a skill did not load
   - Designing the bundled identity prompt or adding a bundled resource
+  - Serving or editing workspace files over the Gateway
 ---
 
 # Workspace
@@ -47,6 +48,27 @@ content only after explicit approval during onboarding, per the
 `AGENTS.md` is the only workspace file loaded into the session context. Any
 other file, a `MEMORY.md` left by an older harness included, is an ordinary
 owner file the agent reads only when asked.
+
+## Files over the Gateway
+
+The Gateway serves the owner's workspace files to clients such as a chat app
+(`src/workspace/files.ts`):
+
+- `GET /workspace/tree` lists files and folders depth-first, folders first.
+  It leaves out the root `AGENTS.md`, `skills/`, and `artifacts/`, compared
+  without regard to case, any name starting with `.`, and links; it stops at
+  5,000 entries with `truncated: true`.
+- `GET /workspace/file?path=` returns UTF-8 text with a `sha256:` revision.
+- `PUT /workspace/file?path=` writes atomically through a temporary file,
+  creating missing folders. With `baseRevision` it refuses a file that changed
+  since (409 `file_changed`); without one it creates or overwrites.
+
+Every path is relative to the workspace. An empty, absolute, `..`, or hidden
+path answers 400 `invalid_path`, a path through a link 400 `symlink_rejected`,
+and the three root entries above 403 `reserved_path`; deeper folders with those
+names are ordinary owner files. `AGENTS.md` and `skills/` change what the next
+session loads, so they stay out of reach of a client. `artifacts/` is hidden
+too, as Stitcher hid it; a client has no artifact view yet.
 
 ## Skills
 

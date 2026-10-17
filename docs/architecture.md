@@ -62,7 +62,8 @@ These are conceptual seams, not approved package paths:
 |---|---|---|
 | Contracts | Shared types, pure rules, wire shapes, configuration boundaries | Database, network, timers, processes, model calls |
 | State | Durable schema, transactions, migrations, projections, post-commit events | Timers, transport, model calls |
-| Pi runtime | Explicit resource loading, agent sessions, tools, skills, permissions integration | Global timers, direct durable-state writes |
+| Pi runtime | Explicit resource loading, agent sessions, Gateway chats, tools, skills, permissions integration | Global timers, direct durable-state writes |
+| Workspace files | Reading, writing, and listing the owner's files inside the workspace | Harness entries, links, anything outside the workspace |
 | Scheduler | Trigger evaluation, execution policy, isolated runs, run history through State | Gateway transport, private database access |
 | Gateway | Authenticated loopback protocol and client translation | Durable ownership, child processes, timers, model behavior |
 | Daemon | Composition, readiness, discovery, process and shutdown lifecycle | Product decisions or duplicated domain rules |
@@ -182,6 +183,7 @@ src/
   state/       durable store, events, read-only query surface (implemented)
   agent/       owned Pi runtime, onboarding, sandbox adapter, tools (implemented)
   scheduler/   triggers, queue, and isolated execution (implemented)
+  workspace/   the owner's workspace files over the Gateway (implemented)
   gateway/     authenticated loopback transport, routes, and client (implemented)
   daemon/      composition, lifecycle, and service management (implemented)
   cli/         the pi-template executable and interactive session (implemented)
