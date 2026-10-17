@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GatewayRouteError } from "@pi-template/contracts";
@@ -97,6 +97,55 @@ try {
   await Promise.all(Array.from({ length: 20 }, (_, index) => files.write("race.txt", { content: `${index}\n`.repeat(1000) })));
   assert.equal(writes, 20);
   assert.match(readFileSync(join(workspace, "race.txt"), "utf8"), /^(\d+)\n(?:\1\n){999}$/);
+
+  const LONG_S = "\u017f";
+  const KELVIN = "\u212a";
+  const lookalikes = [`AGENT${LONG_S}.md`, `agent${LONG_S}.md`, `${LONG_S}kills/s/SKILL.md`, `${LONG_S}kills/new.md`,
+    `s${KELVIN}ills/new.md`, `artifact${LONG_S}/report.html`, `artifact${LONG_S}/new.md`, `${LONG_S}KILLS/new.md`];
+  assert.deepEqual(await Promise.all(lookalikes.map((path) => refusal(() => files.read(path)))), Array(8).fill([403, "reserved_path"]));
+  assert.deepEqual(await Promise.all(lookalikes.map((path) => refusal(() => files.write(path, { content: "overwrite\n" })))),
+    Array(8).fill([403, "reserved_path"]));
+  assert.equal(readFileSync(join(workspace, "AGENTS.md"), "utf8"), "steer\n");
+  assert.deepEqual(readdirSync(join(workspace, "skills")).sort(), ["s"]);
+  assert.deepEqual(readdirSync(join(workspace, "artifacts")), ["report.html"]);
+
+  linkSync(join(workspace, "AGENTS.md"), join(workspace, "steer.md"));
+  assert.deepEqual(await refusal(() => files.read("steer.md")), [403, "reserved_path"], "a hard link to AGENTS.md is AGENTS.md");
+  assert.deepEqual(await refusal(() => files.write("steer.md", { content: "x" })), [403, "reserved_path"]);
+  assert.ok(!(await files.tree()).entries.some((entry) => entry.path === "steer.md"), "the tree hides it too");
+  rmSync(join(workspace, "steer.md"));
+
+  const bare = join(root, "bare");
+  const bareFiles = createWorkspaceFiles({ root: bare, onWrite: () => undefined });
+  mkdirSync(bare);
+  assert.deepEqual(await refusal(() => bareFiles.write(`AGENT${LONG_S}.md`, { content: "x" })), [403, "reserved_path"],
+    "a lookalike is refused while the reserved entry does not exist");
+  assert.deepEqual(await refusal(() => bareFiles.write(`${LONG_S}kills/a.md`, { content: "x" })), [403, "reserved_path"]);
+  assert.deepEqual(readdirSync(bare), []);
+
+  for (const path of ["cafe\u0301.md", "AGENTS.md.bak", "skillset/a.md", "my-artifacts/a.md", "notes/skills/a.md", "notes/AGENTS.md"]) {
+    assert.equal((await files.write(path, { content: `${path}\n` })).created, true, path);
+    assert.equal((await files.read(path)).content, `${path}\n`);
+  }
+
+  const before = readdirSync(workspace).sort();
+  const deep = Array.from({ length: 110 }, () => "a".repeat(48)).join("/");
+  assert.deepEqual(await refusal(() => files.write(`${deep}/x.md`, { content: "x" })), [400, "invalid_path"]);
+  assert.deepEqual(await refusal(() => files.read(`${deep}/x.md`)), [400, "invalid_path"]);
+  assert.deepEqual(await refusal(() => files.write(`${"b".repeat(256)}.md`, { content: "x" })), [400, "invalid_path"]);
+  assert.deepEqual(readdirSync(workspace).sort(), before, "a refused path leaves no folders behind");
+  const longest = `${"c".repeat(252)}.md`;
+  assert.equal((await files.write(longest, { content: "x" })).created, true, "a 255-byte name fits beside its temporary file");
+
+  mkdirSync(join(workspace, "locked"));
+  chmodSync(join(workspace, "locked"), 0o500);
+  try {
+    const denied = await files.write("locked/new.md", { content: "x" }).then(() => undefined, (error: unknown) => error);
+    assert.ok(denied instanceof GatewayRouteError, String(denied));
+    assert.deepEqual([denied.status, denied.code, denied.message], [500, "filesystem_error", "locked/new.md: EACCES"]);
+  } finally {
+    chmodSync(join(workspace, "locked"), 0o700);
+  }
 
   process.stdout.write("ok — the workspace tree hides harness entries, links, and dot-names; file routes refuse escapes and stale revisions\n");
 } finally {

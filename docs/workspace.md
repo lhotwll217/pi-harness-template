@@ -55,17 +55,30 @@ The Gateway serves the owner's workspace files to clients such as a chat app
 (`src/workspace/files.ts`):
 
 - `GET /workspace/tree` lists files and folders depth-first, folders first.
-  It leaves out the root `AGENTS.md`, `skills/`, and `artifacts/`, compared
-  without regard to case, any name starting with `.`, and links; it stops at
-  5,000 entries with `truncated: true`.
+  It leaves out the root `AGENTS.md`, `skills/`, and `artifacts/`, any name
+  starting with `.`, and links; it stops at 5,000 entries with
+  `truncated: true`.
 - `GET /workspace/file?path=` returns UTF-8 text with a `sha256:` revision.
 - `PUT /workspace/file?path=` writes atomically through a temporary file,
   creating missing folders. With `baseRevision` it refuses a file that changed
-  since (409 `file_changed`); without one it creates or overwrites.
+  since (409 `file_changed`); without one it creates or overwrites. Content
+  over 1,000,000 characters answers 413 `too_large`, and a refused write
+  removes the folders it created.
 
 Every path is relative to the workspace. An empty, absolute, `..`, or hidden
-path answers 400 `invalid_path`, a path through a link 400 `symlink_rejected`,
-and the three root entries above 403 `reserved_path`; deeper folders with those
+path, a name over 255 UTF-8 bytes, or a path longer than macOS allows (1,023
+bytes from the filesystem root) answers 400 `invalid_path`; a path through a
+link 400 `symlink_rejected`; any other filesystem error 500 `filesystem_error`
+with the workspace path and the error code, never the absolute path.
+
+The three root entries above stay out of the tree and answer 403
+`reserved_path`, decided twice. The
+path rule refuses a root name that matches one after Unicode case folding, so
+`AGENTſ.md` (long s) and `sKills` (Kelvin sign) are refused like `agents.md`.
+The filesystem then decides: a root name whose entry has the same device and
+inode as a reserved entry is that entry, whatever its spelling, including a
+hard link; a new root name is created empty or as a folder first, compared,
+and removed if it turned out to be a reserved entry. Deeper folders with those
 names are ordinary owner files. `AGENTS.md` and `skills/` change what the next
 session loads, so they stay out of reach of a client. `artifacts/` is hidden
 too, as Stitcher hid it; a client has no artifact view yet.

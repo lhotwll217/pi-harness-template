@@ -41,15 +41,20 @@ export const MAX_WORKSPACE_FILE_CHARS = MAX_REQUEST_BODY_CHARS;
 /** The file routes neither list nor serve these root entries. */
 export const RESERVED_WORKSPACE_ROOT_NAMES = Object.freeze(["AGENTS.md", "artifacts", "skills"] as const);
 
-// macOS volumes are case-insensitive and may store either Unicode normalization.
-const fold = (name: string): string => name.normalize("NFC").toLowerCase();
+/** NAME_MAX on APFS and ext4. */
+const MAX_WORKSPACE_NAME_BYTES = 255;
+
+// APFS compares names normalization- and case-insensitively with Unicode case folding, which maps
+// U+017F LONG S to "s"; toLowerCase alone does not. The server also refuses by filesystem identity.
+const fold = (name: string): string => name.normalize("NFC").toUpperCase().toLowerCase();
 const RESERVED = new Set(RESERVED_WORKSPACE_ROOT_NAMES.map(fold));
 
 export const isReservedWorkspaceRootName = (name: string): boolean => RESERVED.has(fold(name));
 
 /**
  * The segments of a workspace-relative path, or a refusal: 400 `invalid_path` for an empty or
- * absolute path, a NUL or backslash, an empty, `.`, or `..` segment, or a hidden name; 403
+ * absolute path, a NUL or backslash, an empty, `.`, or `..` segment, a hidden name, or a name longer
+ * than MAX_WORKSPACE_NAME_BYTES; 403
  * `reserved_path` under a reserved root entry.
  */
 export function parseWorkspacePath(raw: string): string[] {
@@ -61,6 +66,9 @@ export function parseWorkspacePath(raw: string): string[] {
   for (const segment of segments) {
     if (segment === "" || segment === "." || segment === "..") throw invalid("holds an empty, '.', or '..' segment");
     if (segment.startsWith(".")) throw invalid("names a hidden entry");
+    if (new TextEncoder().encode(segment).length > MAX_WORKSPACE_NAME_BYTES) {
+      throw invalid(`holds a name longer than ${MAX_WORKSPACE_NAME_BYTES} UTF-8 bytes`);
+    }
   }
   if (isReservedWorkspaceRootName(segments[0]!)) {
     throw new GatewayRouteError(403, "reserved_path", `${segments[0]} belongs to the harness; the file routes do not serve it`);

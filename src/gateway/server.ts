@@ -7,6 +7,7 @@ import {
   DatabaseQueryAction,
   GatewayRouteError,
   MAX_REQUEST_BODY_CHARS,
+  MAX_WORKSPACE_FILE_CHARS,
   ScheduledPayloadKind,
   isChatId,
   type Chat,
@@ -133,15 +134,26 @@ const SETUP_REQUIRED = {
   },
 } as const;
 
-async function readBody(request: IncomingMessage): Promise<unknown> {
+// JSON writes a control character as a six-character \u escape (RFC 8259 section 7), so a file
+// at the size limit still fits; the rest holds the keys and the base revision.
+const MAX_WORKSPACE_WRITE_BODY_CHARS = 6 * MAX_WORKSPACE_FILE_CHARS + 1_024;
+
+async function readBody(request: IncomingMessage, limit = MAX_REQUEST_BODY_CHARS): Promise<unknown> {
   return await new Promise((resolve, reject) => {
     let raw = "";
+    let overflowed = false;
     request.setEncoding("utf8");
     request.on("data", (chunk: string) => {
+      if (overflowed) return;
       raw += chunk;
-      if (raw.length > MAX_REQUEST_BODY_CHARS) reject(new Error("request body too large"));
+      if (raw.length > limit) {
+        overflowed = true;
+        raw = "";
+        reject(new GatewayRouteError(413, "too_large", `the request body is longer than ${limit} characters`));
+      }
     });
     request.on("end", () => {
+      if (overflowed) return;
       try { resolve(raw ? JSON.parse(raw) : {}); } catch { reject(new Error("invalid JSON")); }
     });
     request.on("error", reject);
@@ -353,7 +365,8 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
     route("GET", "/workspace/file", OWNER_FILES, async ({ url, respond }) =>
       respond(200, await options.workspace.read(url.searchParams.get("path") ?? ""))),
     route("PUT", "/workspace/file", OWNER_FILES, async ({ url, request, respond }) =>
-      respond(200, await options.workspace.write(url.searchParams.get("path") ?? "", await readBody(request) as WorkspaceFileWrite))),
+      respond(200, await options.workspace.write(url.searchParams.get("path") ?? "",
+        await readBody(request, MAX_WORKSPACE_WRITE_BODY_CHARS) as WorkspaceFileWrite))),
   ];
 
   const handle = async (caller: Caller, request: IncomingMessage, response: ServerResponse): Promise<void> => {
@@ -390,7 +403,17 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
     }
   };
 
-  const server: Server = createServer((request, response) => void handle("owner", request, response));
+  let closing = false;
+  const listeners: Server[] = [];
+  /** A keep-alive connection whose response ends after close() began would hold close() open until it times out. */
+  const serve = (caller: Caller) => (request: IncomingMessage, response: ServerResponse): void => {
+    response.once("close", () => {
+      if (closing) setImmediate(() => { for (const listener of listeners) listener.closeIdleConnections(); });
+    });
+    void handle(caller, request, response);
+  };
+  const server: Server = createServer(serve("owner"));
+  listeners.push(server);
   let port: number;
   try {
     port = await new Promise<number>((resolve, reject) => {
@@ -405,18 +428,20 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
     throw error;
   }
   const agent = options.agentSocket
-    ? await listenAgentSocket(options.agentSocket, (request, response) => void handle("agent", request, response))
+    ? await listenAgentSocket(options.agentSocket, serve("agent"))
     : undefined;
+  if (agent?.server) listeners.push(agent.server);
 
   return {
     host: "127.0.0.1",
     port,
     ...(agent?.problem ? { agentSocketProblem: agent.problem } : {}),
     async close() {
+      closing = true;
       unsubscribe();
       for (const stream of streams) stream.end();
       streams.clear();
-      await Promise.all([server, ...(agent?.server ? [agent.server] : [])].map((listener) =>
+      await Promise.all(listeners.map((listener) =>
         new Promise<void>((resolve, reject) => listener.close((error) => error ? reject(error) : resolve()))));
       agent?.remove();
     },

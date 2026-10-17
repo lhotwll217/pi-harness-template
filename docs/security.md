@@ -177,7 +177,10 @@ with `lstat` and refuse every link, then write through an `O_EXCL|O_NOFOLLOW`
 temporary file and a rename. Node has no `openat` or `renameat`, so a local
 process that swaps a checked folder for a link between the walk and the rename
 can still redirect a write; with owner-only routes, that means agent `bash`
-racing the owner's save.
+racing the owner's save. The reserved root entries are refused by device and
+inode as well as by name ([workspace](workspace.md#files-over-the-gateway)),
+since a case-insensitive volume reaches `AGENTS.md` through spellings no string
+rule lists.
 
 ## Explicit resource loading
 

@@ -28,7 +28,13 @@ assert.deepEqual(
   ["AGENTS.md", "agents.md", "Skills/x/SKILL.md", "artifacts", "ARTIFACTS/report.html", "skills"].map(refusal),
   Array(6).fill(RESERVED),
 );
-assert.deepEqual(refusal("Agents.md".normalize("NFD")), RESERVED);
+assert.deepEqual(
+  ["AGENT\u017f.md", "\u017fkills/a.md", "artifact\u017f/a.md", "s\u212aills"].map(refusal),
+  Array(4).fill(RESERVED),
+  "case folding a filesystem applies, beyond toLowerCase: long s and the Kelvin sign",
+);
+assert.deepEqual([`${"n".repeat(255)}`, `a/${"\u00e9".repeat(127)}`].map(refusal), ["accepted", "accepted"]);
+assert.deepEqual([`${"n".repeat(256)}`, `a/${"\u00e9".repeat(128)}`].map(refusal), [INVALID, INVALID], "a name is at most 255 UTF-8 bytes");
 assert.deepEqual(refusal(new URLSearchParams("path=%2e%2e/x").get("path")!), INVALID, "a percent-encoded .. decodes once, then is refused");
 
 assert.deepEqual(
