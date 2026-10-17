@@ -60,6 +60,19 @@ try {
   assert.equal(unreadablePermissionMode(home), undefined);
 
   assert.throws(() => saveHarnessSettings(home, { alwaysOn: "maybe" as never }));
+
+  // An empty PI_TEMPLATE_HOME is unset, never the current directory.
+  const previous = { HOME: process.env.HOME, PI_TEMPLATE_HOME: process.env.PI_TEMPLATE_HOME };
+  process.env.HOME = home;
+  process.env.PI_TEMPLATE_HOME = "";
+  try {
+    assert.equal(harnessPaths().home, join(home, ".pi-template"));
+  } finally {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
 } finally {
   rmSync(home, { recursive: true, force: true });
 }

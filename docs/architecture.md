@@ -224,7 +224,7 @@ reopened:
 ## Decided
 
 - Naming: executable `pi-template`, packages `@pi-template/*`, harness home
-  `~/.pi-template/`.
+  `~/.pi-template/`, or `PI_TEMPLATE_HOME` when it is set and not empty.
 - Every CLI command traverses the Gateway; there is no direct-filesystem CLI
   path. Model-free docs routes are served before onboarding completes under the
   fail-closed rule's diagnostics exception.

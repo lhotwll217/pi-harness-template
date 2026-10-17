@@ -30,7 +30,7 @@ const FAIL_CLOSED_PERMISSION_MODE: PermissionMode = "read-only";
 const SKILL_MODES = new Set(["bundled", "all-workspace", "allowlist"]);
 const TOOL_NAMES = new Set(DEFAULT_TOOL_POSTURE);
 const PERMISSION_MODES = new Set<string>(["ask", "allow", "read-only"]);
-const defaultHome = () => process.env.PI_TEMPLATE_HOME ?? join(homedir(), ".pi-template");
+const defaultHome = () => process.env.PI_TEMPLATE_HOME || join(homedir(), ".pi-template");
 
 export interface HarnessPaths {
   home: string;

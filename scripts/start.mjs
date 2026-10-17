@@ -144,7 +144,7 @@ async function main() {
       );
     }
     // The default home of harnessPaths() in @pi-template/contracts/harness-home.
-    const home = env.PI_TEMPLATE_HOME ?? join(homedir(), ".pi-template");
+    const home = env.PI_TEMPLATE_HOME || join(homedir(), ".pi-template");
     if (existing.body.home !== home) {
       throw new LaunchError(
         `the app on port ${port} serves ${existing.body.home}, not ${home}. Stop it, or set PI_TEMPLATE_WEB_PORT to a free port.`,
