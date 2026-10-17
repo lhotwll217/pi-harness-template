@@ -118,7 +118,9 @@ plainly; this is a limit of the permission extension, not normalized here.
 **Authority.** The daemon serves the agent on a second Gateway listener, the
 unix socket `agent.sock` in the harness home (mode `0600`), and grants every
 request there agent authority, decided by the listener and never by anything
-the client sends. A socket rather than loopback TCP, because sandbox-runtime
+the client sends. Each route declares its caller policy in one table in
+`src/gateway/server.ts`: whether an agent caller may call it, and whether it
+waits for onboarding; the owner may call every route. A socket rather than loopback TCP, because sandbox-runtime
 0.0.65 admits one unix socket by path but opens loopback only as every port at
 once. An agent caller may use every route except creating a command
 schedule, changing a schedule to or from one, and running one: the daemon runs

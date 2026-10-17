@@ -136,14 +136,52 @@ function listenPort(override: number | undefined): number {
   return configured;
 }
 
-function routeId(pathname: string, family: string): string | undefined {
-  const match = new RegExp(`^/${family}/([^/]+)$`).exec(pathname);
-  if (!match) return undefined;
-  try { return decodeURIComponent(match[1]); } catch { return undefined; }
-}
-
 function isLookupError(value: DocsDocument | DocsLookupError): value is DocsLookupError {
   return "code" in value;
+}
+
+/** A caller on the agent socket is allowed, or refused with this 403 body. */
+export type AgentPolicy = "allow" | { error: string; hint?: string; code?: string };
+
+/**
+ * Who may call a route. The owner (loopback TCP with the bearer token) may call every route;
+ * `agent` decides for callers on the agent socket; a setup-gated route answers 428 until
+ * onboarding completes. A route's handler still decides on the request body, as the command
+ * schedule refusal does.
+ */
+export interface CallerPolicy {
+  agent: AgentPolicy;
+  setupGated: boolean;
+}
+
+const OPEN: CallerPolicy = { agent: "allow", setupGated: false };
+const GATED: CallerPolicy = { agent: "allow", setupGated: true };
+
+interface RouteContext {
+  caller: Caller;
+  request: IncomingMessage;
+  response: ServerResponse;
+  params: string[];
+  respond(status: number, body: unknown): void;
+}
+
+interface Route {
+  method: string;
+  path: RegExp;
+  policy: CallerPolicy;
+  handle(context: RouteContext): Promise<void> | void;
+}
+
+/** `/notes/:id` matches one percent-decoded segment per `:name`. */
+function route(method: string, pattern: string, policy: CallerPolicy, handle: Route["handle"]): Route {
+  const source = pattern.split("/").map((segment) => segment.startsWith(":") ? "([^/]+)" : segment).join("/");
+  return { method, path: new RegExp(`^${source}$`), policy, handle };
+}
+
+function routeParams(route: Route, pathname: string): string[] | undefined {
+  const match = route.path.exec(pathname);
+  if (!match) return undefined;
+  try { return match.slice(1).map(decodeURIComponent); } catch { return undefined; }
 }
 
 /** Loopback and agent-socket transports: behavior is supplied through injected module interfaces. */
@@ -153,6 +191,92 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
     const frame = `data: ${JSON.stringify(event)}\n\n`;
     for (const stream of streams) stream.write(frame);
   });
+
+  const routes: Route[] = [
+    route("GET", "/health", OPEN, ({ respond }) => respond(200, options.health())),
+    route("GET", "/ready", OPEN, ({ respond }) => {
+      const readiness = options.ready();
+      respond(readiness.ready ? 200 : 503, readiness);
+    }),
+    route("GET", "/events", OPEN, ({ request, response }) => {
+      response.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+      });
+      response.write(":ready\n\n");
+      streams.add(response);
+      request.on("close", () => streams.delete(response));
+    }),
+    route("GET", "/doctor", OPEN, async ({ respond }) => respond(200, await options.diagnostics.doctor())),
+
+    route("GET", "/docs", OPEN, async ({ respond }) => respond(200, await options.docs.list())),
+    route("POST", "/docs/query", OPEN, async ({ request, respond }) => {
+      const body = await readBody(request) as { question?: unknown };
+      if (typeof body.question !== "string" || !body.question.trim()) {
+        return respond(400, { error: "question must be a non-empty string" });
+      }
+      respond(200, await options.docs.query(body.question));
+    }),
+    route("GET", "/docs/:id", OPEN, async ({ params: [id], respond }) => {
+      const document = await options.docs.read(id!);
+      respond(isLookupError(document) ? 404 : 200, document);
+    }),
+
+    route("GET", "/notes", GATED, async ({ respond }) => respond(200, await options.notes.list())),
+    route("POST", "/notes", GATED, async ({ request, respond }) => {
+      const body = await readBody(request) as { body?: unknown };
+      if (typeof body.body !== "string" || !body.body.trim()) {
+        return respond(400, { error: "body must be a non-empty string" });
+      }
+      respond(201, await options.notes.create({ body: body.body }));
+    }),
+    route("DELETE", "/notes/:id", GATED, async ({ params: [id], respond }) => {
+      const deleted = await options.notes.delete(id!);
+      deleted ? respond(200, { ok: true }) : respond(404, { error: "no such note" });
+    }),
+
+    route("GET", "/schedules", GATED, async ({ respond }) => respond(200, await options.schedules.list())),
+    route("POST", "/schedules", GATED, async ({ caller, request, respond }) => {
+      const body = await readBody(request);
+      if (caller === "agent" && isCommandPayload(body)) return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
+      respond(201, await options.schedules.create(body as ScheduleCreateInput));
+    }),
+    route("POST", "/schedules/:id/run", GATED, async ({ caller, params: [id], respond }) =>
+      respond(202, await options.schedules.run(id!, agentAuthorization(caller)))),
+    route("PUT", "/schedules/:id", GATED, async ({ caller, params: [id], request, respond }) => {
+      const body = await readBody(request);
+      if (caller === "agent" && isCommandPayload(body)) return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
+      respond(200, await options.schedules.update(id!, body as ScheduleCreateInput, agentAuthorization(caller)));
+    }),
+    route("DELETE", "/schedules/:id", GATED, async ({ params: [id], respond }) => {
+      const deleted = await options.schedules.delete(id!);
+      deleted ? respond(200, { ok: true }) : respond(404, { error: "no such schedule" });
+    }),
+    route("GET", "/schedule-runs/:id", GATED, async ({ params: [id], respond }) => {
+      const run = await options.schedules.runById(id!);
+      run ? respond(200, run) : respond(404, { error: "no such schedule run" });
+    }),
+
+    route("POST", "/query-database", GATED, async ({ request, respond }) => {
+      const query = await readBody(request) as Record<string, unknown>;
+      try {
+        if (query.action === DatabaseQueryAction.ListTables) return respond(200, options.query.listTables());
+        if (query.action === DatabaseQueryAction.DescribeTable && typeof query.table === "string") {
+          return respond(200, options.query.describeTable(query.table));
+        }
+        if (query.action === DatabaseQueryAction.Query && typeof query.sql === "string") {
+          return respond(200, await options.query.runQuery(query.sql));
+        }
+      } catch (error) {
+        if (!(error instanceof Error)) throw error;
+        const { hint, closest } = error as { hint?: string; closest?: string[] };
+        return respond(400, { error: error.message, hint, closest });
+      }
+      respond(400, { error: "invalid database query request" });
+    }),
+  ];
+
   const handle = async (caller: Caller, request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const respond = (status: number, body: unknown): void => {
       response.writeHead(status, { "content-type": "application/json" });
@@ -165,104 +289,19 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
         return respond(401, { error: "unauthorized" });
       }
 
-      const url = new URL(request.url ?? "/", "http://127.0.0.1");
-      const route = `${request.method} ${url.pathname}`;
-      if (route === "GET /health") return respond(200, options.health());
-      if (route === "GET /ready") {
-        const readiness = options.ready();
-        return respond(readiness.ready ? 200 : 503, readiness);
+      const { pathname } = new URL(request.url ?? "/", "http://127.0.0.1");
+      const atPath = routes.flatMap((candidate) => {
+        const params = routeParams(candidate, pathname);
+        return params ? [{ route: candidate, params }] : [];
+      });
+      if (atPath.some(({ route }) => route.policy.setupGated) && options.ready().setupRequired) {
+        return respond(428, SETUP_REQUIRED);
       }
-      if (route === "GET /events") {
-        response.writeHead(200, {
-          "content-type": "text/event-stream",
-          "cache-control": "no-cache",
-          connection: "keep-alive",
-        });
-        response.write(":ready\n\n");
-        streams.add(response);
-        request.on("close", () => streams.delete(response));
-        return;
-      }
-      if (route === "GET /doctor") return respond(200, await options.diagnostics.doctor());
-
-      if (route === "GET /docs") return respond(200, await options.docs.list());
-      if (route === "POST /docs/query") {
-        const body = await readBody(request) as { question?: unknown };
-        if (typeof body.question !== "string" || !body.question.trim()) {
-          return respond(400, { error: "question must be a non-empty string" });
-        }
-        return respond(200, await options.docs.query(body.question));
-      }
-      const docsId = routeId(url.pathname, "docs");
-      if (request.method === "GET" && docsId !== undefined) {
-        const document = await options.docs.read(docsId);
-        return isLookupError(document) ? respond(404, document) : respond(200, document);
-      }
-
-      const gatedRoute = url.pathname === "/notes" || url.pathname.startsWith("/notes/") ||
-        url.pathname === "/schedules" || url.pathname.startsWith("/schedules/") ||
-        url.pathname.startsWith("/schedule-runs/") || url.pathname === "/query-database";
-      if (gatedRoute && options.ready().setupRequired) return respond(428, SETUP_REQUIRED);
-
-      if (route === "GET /notes") return respond(200, await options.notes.list());
-      if (route === "POST /notes") {
-        const body = await readBody(request) as { body?: unknown };
-        if (typeof body.body !== "string" || !body.body.trim()) {
-          return respond(400, { error: "body must be a non-empty string" });
-        }
-        return respond(201, await options.notes.create({ body: body.body }));
-      }
-      const noteId = routeId(url.pathname, "notes");
-      if (request.method === "DELETE" && noteId !== undefined) {
-        const deleted = await options.notes.delete(noteId);
-        return deleted ? respond(200, { ok: true }) : respond(404, { error: "no such note" });
-      }
-
-      if (route === "GET /schedules") return respond(200, await options.schedules.list());
-      if (route === "POST /schedules") {
-        const body = await readBody(request);
-        if (caller === "agent" && isCommandPayload(body)) return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
-        return respond(201, await options.schedules.create(body as ScheduleCreateInput));
-      }
-      const runMatch = /^\/schedules\/([^/]+)\/run$/.exec(url.pathname);
-      if (request.method === "POST" && runMatch) {
-        return respond(202, await options.schedules.run(decodeURIComponent(runMatch[1]), agentAuthorization(caller)));
-      }
-      const scheduleId = routeId(url.pathname, "schedules");
-      if (request.method === "PUT" && scheduleId !== undefined) {
-        const body = await readBody(request);
-        if (caller === "agent" && isCommandPayload(body)) return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
-        return respond(200, await options.schedules.update(scheduleId, body as ScheduleCreateInput, agentAuthorization(caller)));
-      }
-      if (request.method === "DELETE" && scheduleId !== undefined) {
-        const deleted = await options.schedules.delete(scheduleId);
-        return deleted ? respond(200, { ok: true }) : respond(404, { error: "no such schedule" });
-      }
-      const runId = routeId(url.pathname, "schedule-runs");
-      if (request.method === "GET" && runId !== undefined) {
-        const run = await options.schedules.runById(runId);
-        return run ? respond(200, run) : respond(404, { error: "no such schedule run" });
-      }
-
-      if (route === "POST /query-database") {
-        const query = await readBody(request) as Record<string, unknown>;
-        try {
-          if (query.action === DatabaseQueryAction.ListTables) return respond(200, options.query.listTables());
-          if (query.action === DatabaseQueryAction.DescribeTable && typeof query.table === "string") {
-            return respond(200, options.query.describeTable(query.table));
-          }
-          if (query.action === DatabaseQueryAction.Query && typeof query.sql === "string") {
-            return respond(200, await options.query.runQuery(query.sql));
-          }
-        } catch (error) {
-          if (!(error instanceof Error)) throw error;
-          const { hint, closest } = error as { hint?: string; closest?: string[] };
-          return respond(400, { error: error.message, hint, closest });
-        }
-        return respond(400, { error: "invalid database query request" });
-      }
-
-      return respond(404, { error: "unknown route" });
+      const matched = atPath.find(({ route }) => route.method === request.method);
+      if (!matched) return respond(404, { error: "unknown route" });
+      const { agent } = matched.route.policy;
+      if (caller === "agent" && agent !== "allow") return respond(403, agent);
+      return await matched.route.handle({ caller, request, response, params: matched.params, respond });
     } catch (error) {
       if (error instanceof CommandScheduleRefused) return respond(403, AGENT_COMMAND_SCHEDULE_REFUSAL);
       return respond(400, { error: error instanceof Error ? error.message : String(error) });
