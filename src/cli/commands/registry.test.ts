@@ -44,6 +44,10 @@ try {
     assert.equal(printed.stdout, pages.find(({ command }) => command === path)!.help, `${path} page is what the terminal prints`);
   }
 
+  const helpCommand = piTemplate("help", "daemon");
+  assert.equal(helpCommand.status, 0, helpCommand.stderr);
+  assert.equal(helpCommand.stdout, pages.find(({ command }) => command === "pi-template daemon")!.help);
+
   const verb = piTemplate("docs", "read", "--help");
   assert.equal(verb.status, 0, verb.stderr);
   assert.equal(verb.stdout, [
