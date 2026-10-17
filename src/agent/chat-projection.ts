@@ -1,7 +1,7 @@
 import type { ChatMessage, ChatPart, ChatTurnStatus } from "@pi-template/contracts";
 
 type PiMessage = { role?: unknown; content?: unknown; stopReason?: unknown; errorMessage?: unknown;
-  toolCallId?: unknown; isError?: unknown };
+  toolCallId?: unknown; isError?: unknown; timestamp?: unknown };
 type AssistantChatMessage = Extract<ChatMessage, { role: "assistant" }>;
 
 const textOf = (content: unknown): string => typeof content === "string"
@@ -17,14 +17,17 @@ function statusOf(stopReason: unknown): ChatTurnStatus | "interrupted" {
   return "completed";
 }
 
-export function projectChat(messages: readonly unknown[], running: boolean): ChatMessage[] {
+/** `cancelledTurns` holds the user message timestamps of turns the owner cancelled. */
+export function projectChat(messages: readonly unknown[], running: boolean, cancelledTurns?: ReadonlySet<unknown>): ChatMessage[] {
   const projected: ChatMessage[] = [];
   let turn: AssistantChatMessage | undefined;
   let lastStop: unknown;
+  let cancelled = false;
   const close = (): void => {
     if (!turn) return;
     const status = statusOf(lastStop);
-    turn.status = status;
+    turn.status = cancelled && status === "failed" ? "cancelled" : status;
+    if (turn.status === "cancelled") delete turn.error;
     lastStop = undefined;
     for (const part of turn.parts) if (part.type === "tool" && part.status === "running") part.status = "error";
     turn = undefined;
@@ -34,6 +37,7 @@ export function projectChat(messages: readonly unknown[], running: boolean): Cha
       close();
       if (projected.at(-1)?.role === "user") projected.push({ role: "assistant", parts: [], status: "interrupted" });
       projected.push({ role: "user", text: textOf(raw.content) });
+      cancelled = cancelledTurns?.has(raw.timestamp) ?? false;
       continue;
     }
     if (raw?.role !== "assistant" && raw?.role !== "toolResult") continue;

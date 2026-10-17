@@ -35,9 +35,13 @@ export interface ChatServiceOptions {
 }
 
 const WORKSPACE_CHANGING_TOOLS = new Set(["write", "edit", "bash"]);
+/** Marks a turn the owner cancelled, by its user message's timestamp; Pi may store such a turn as an error. */
+const TURN_CANCELLED = "pi-template-turn-cancelled";
 
 const busy = (id: string) => new GatewayRouteError(409, "chat_busy", `chat ${id} is replying; cancel it or wait`);
 const notFound = (id: string) => new GatewayRouteError(404, "chat_not_found", `no chat ${id}`);
+const refused = (error: unknown) =>
+  new GatewayRouteError(503, "session_refused", error instanceof Error ? error.message : String(error));
 const titleOf = (info: SessionInfo): string =>
   info.name ?? info.firstMessage.replace(/\s+/g, " ").trim().slice(0, CHAT_TITLE_MAX);
 
@@ -45,6 +49,7 @@ export function createChatService(options: ChatServiceOptions) {
   const paths = harnessPaths(options.home);
   const folder = paths.chatTranscripts;
   const turns = new Map<string, Turn>();
+  let stopping = false;
   const changed = (chatId: string): void => options.publish({ kind: DomainEventKind.ChatChanged, chatId });
 
   /** Pi names a transcript `<timestamp>_<id>.jsonl`; the timestamp holds no `_`. */
@@ -55,7 +60,13 @@ export function createChatService(options: ChatServiceOptions) {
     return name && join(folder, name);
   }
 
-  const storedMessages = (file: string): unknown[] => SessionManager.open(file, folder, paths.workspace).buildSessionContext().messages;
+  function stored(file: string): { messages: unknown[]; cancelled: Set<unknown> } {
+    const manager = SessionManager.open(file, folder, paths.workspace);
+    const cancelled = new Set(manager.getEntries().flatMap((entry) => entry.type === "custom" && entry.customType === TURN_CANCELLED
+      ? [(entry.data as { userMessageTimestamp?: unknown } | undefined)?.userMessageTimestamp]
+      : []));
+    return { messages: manager.buildSessionContext().messages, cancelled };
+  }
 
   async function summaries(): Promise<ChatSummary[]> {
     return (await SessionManager.listAll(folder)).map((info) => ({
@@ -64,7 +75,7 @@ export function createChatService(options: ChatServiceOptions) {
       createdAt: info.created.toISOString(),
       updatedAt: info.modified.toISOString(),
       // Pi's own count includes tool results and system entries; a client counts the chat's messages.
-      messageCount: projectChat(storedMessages(info.path), false).length,
+      messageCount: projectChat(stored(info.path).messages, false).length,
       running: turns.has(info.id),
     }));
   }
@@ -79,14 +90,15 @@ export function createChatService(options: ChatServiceOptions) {
     const turn = turns.get(id);
     const file = transcriptOf(id);
     if (!file && !turn?.session) throw notFound(id);
-    const messages = turn?.session ? turn.session.messages : storedMessages(file!);
+    const { messages, cancelled } = turn?.session ? { messages: turn.session.messages, cancelled: undefined } : stored(file!);
     const base: ChatSummary = file
       ? await summary(id)
       : { id, title: "", createdAt: "", updatedAt: "", messageCount: 0, running: true };
-    return { ...base, ...(turn ? { turnId: turn.turnId } : {}), messages: projectChat(messages, turn !== undefined) };
+    return { ...base, ...(turn ? { turnId: turn.turnId } : {}), messages: projectChat(messages, turn !== undefined, cancelled) };
   }
 
   async function send(id: string, text: string): Promise<AsyncIterable<ChatStreamEvent>> {
+    if (stopping) throw new GatewayRouteError(503, "daemon_stopping", "the daemon is stopping; send again once it restarts");
     if (turns.has(id)) throw busy(id);
     let settle!: () => void;
     const turn: Turn = { turnId: randomUUID(), cancelRequested: false, settled: new Promise((resolve) => { settle = resolve; }) };
@@ -115,28 +127,20 @@ export function createChatService(options: ChatServiceOptions) {
       mkdirSync(folder, { recursive: true, mode: 0o700 });
       const file = transcriptOf(id);
       const manager = file ? SessionManager.open(file, folder, paths.workspace) : SessionManager.create(paths.workspace, folder, { id });
+      let toolNames: string[];
       try {
         const created = await createHarnessSession({ home: paths.home, cwd: paths.workspace, sessionManager: manager, headless: true });
         session = created.session;
-        manager.appendCustomEntry("pi-template-provenance", {
-          origin: "gateway-chat",
-          caller: "owner",
-          chatId: id,
-          turnId: turn.turnId,
-          taskDirectory: paths.workspace,
-          effectiveCapabilities: created.toolNames,
-          trustPolicyVersion: ONBOARDING_VERSION,
-          approvalPolicy: "deny-when-live-approval-is-unavailable",
-        });
+        toolNames = created.toolNames;
         await session.bindExtensions({ mode: "print" });
       } catch (error) {
-        throw new GatewayRouteError(503, "session_refused", error instanceof Error ? error.message : String(error));
+        throw refused(error);
       }
       turn.session = session;
-      let userSaved = false;
+      let userMessageTimestamp: number | undefined;
       unsubscribe = session.subscribe((event: AgentSessionEvent) => {
-        if (event.type === "message_end" && event.message.role === "user" && !userSaved) {
-          userSaved = true;
+        if (event.type === "message_end" && event.message.role === "user" && userMessageTimestamp === undefined) {
+          userMessageTimestamp = event.message.timestamp;
           changed(id);
         }
         if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
@@ -152,24 +156,44 @@ export function createChatService(options: ChatServiceOptions) {
       });
       const live = session;
       let accepted!: () => void;
-      const acceptance = new Promise<void>((resolve) => { accepted = resolve; });
+      const acceptance = new Promise<boolean>((resolve) => { accepted = () => resolve(true); });
       // Chat text goes to the model as typed: no slash commands, skill commands, or prompt templates.
       const running = live.prompt(text, {
         expandPromptTemplates: false,
-        preflightResult: (result) => { if (result === "started") accepted(); },
+        preflightResult: (result) => {
+          if (result !== "started") return;
+          // Written once Pi accepts the turn, so a refused send leaves the transcript as it was.
+          manager.appendCustomEntry("pi-template-provenance", {
+            origin: "gateway-chat",
+            caller: "owner",
+            chatId: id,
+            turnId: turn.turnId,
+            taskDirectory: paths.workspace,
+            effectiveCapabilities: toolNames,
+            trustPolicyVersion: ONBOARDING_VERSION,
+            approvalPolicy: "deny-when-live-approval-is-unavailable",
+          });
+          accepted();
+        },
       });
-      const started = Promise.race([acceptance, running.then(() => undefined)]);
+      let started: boolean;
       try {
-        await started;
+        started = await Promise.race([acceptance, running.then(() => false)]);
       } catch (error) {
-        throw new GatewayRouteError(503, "session_refused", error instanceof Error ? error.message : String(error));
+        throw refused(error);
       }
+      if (!started) throw refused("Pi did not start the turn");
       emit({ type: "turn.started", chatId: id, turnId: turn.turnId });
       if (turn.cancelRequested) void live.abort();
       void running.then(
         () => finished(live),
         (error: unknown) => ({ status: "failed" as const, error: error instanceof Error ? error.message : String(error) }),
-      ).then(async (outcome) => {
+      ).then((result): { status: ChatTurnStatus; error?: string } => {
+        // A cancelled turn can end as an error, such as the abort reaching a tool call; the owner asked for the stop.
+        if (!turn.cancelRequested || result.status !== "failed") return result;
+        if (userMessageTimestamp !== undefined) manager.appendCustomEntry(TURN_CANCELLED, { turnId: turn.turnId, userMessageTimestamp });
+        return { status: "cancelled" };
+      }).then(async (outcome) => {
         unsubscribe();
         await release();
         emit({ type: "turn.finished", ...outcome });
@@ -211,6 +235,7 @@ export function createChatService(options: ChatServiceOptions) {
     if (!trimmed || trimmed.length > CHAT_TITLE_MAX) {
       throw new GatewayRouteError(400, "invalid_request", `title must be 1 to ${CHAT_TITLE_MAX} characters`);
     }
+    if (/[\u0000-\u001f\u007f]/.test(trimmed)) throw new GatewayRouteError(400, "invalid_request", "title must not hold control characters");
     const turn = turns.get(id);
     if (turn && !turn.session) throw busy(id);
     if (turn?.session) {
@@ -233,6 +258,7 @@ export function createChatService(options: ChatServiceOptions) {
   }
 
   async function stop(): Promise<void> {
+    stopping = true;
     const running = [...turns.values()];
     for (const turn of running) {
       turn.cancelRequested = true;

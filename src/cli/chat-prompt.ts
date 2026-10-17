@@ -12,20 +12,30 @@ async function write(text: string): Promise<void> {
  * keeps the partial reply. Exits 0 when the turn completes and 1 when it fails or is cancelled.
  */
 export async function runChatPrompt(client: GatewayClient, options: { chatId: string; message: string; json: boolean }): Promise<number> {
-  const events = await client.sendChat(options.chatId, options.message);
   let turnId: string | undefined;
+  let interrupted = false;
   const cancel = (): void => { void client.cancelChat(options.chatId, turnId).catch(() => undefined); };
-  process.once("SIGINT", cancel);
+  // Installed before the request, so a Ctrl-C while the turn starts cancels it once it has an id
+  // rather than killing the CLI; a cancel without the id could stop another client's turn.
+  const interrupt = (): void => {
+    interrupted = true;
+    if (turnId) cancel();
+  };
+  process.once("SIGINT", interrupt);
   let finished: Extract<ChatStreamEvent, { type: "turn.finished" }> | undefined;
   try {
+    const events = await client.sendChat(options.chatId, options.message);
     for await (const event of events) {
-      if (event.type === "turn.started") turnId = event.turnId;
+      if (event.type === "turn.started") {
+        turnId = event.turnId;
+        if (interrupted) cancel();
+      }
       if (event.type === "turn.finished") finished = event;
       if (options.json) await write(`${JSON.stringify(event)}\n`);
       else if (event.type === "text.delta") await write(event.delta);
     }
   } finally {
-    process.removeListener("SIGINT", cancel);
+    process.removeListener("SIGINT", interrupt);
   }
   if (!options.json) await write("\n");
   if (finished?.status === "completed") return 0;

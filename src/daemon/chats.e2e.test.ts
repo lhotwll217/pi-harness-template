@@ -107,13 +107,15 @@ async function eventsUntilNote(from: number): Promise<GatewayEvent[]> {
   return slice.slice(0, slice.findIndex((event) => event.kind === GatewayEventKind.NotesChanged));
 }
 
-/** The real CLI against this daemon; `onStdout` sees each chunk and may signal the child. */
-async function cli(args: readonly string[], onStdout?: (chunk: string, child: ReturnType<typeof spawn>) => void) {
+/** The real CLI against this daemon; `onSpawn` and `onStdout` may signal the child. */
+async function cli(args: readonly string[], onStdout?: (chunk: string, child: ReturnType<typeof spawn>) => void,
+  onSpawn?: (child: ReturnType<typeof spawn>) => void) {
   return await new Promise<{ status: number | null; stdout: string; stderr: string }>((resolveRun, reject) => {
     const child = spawn(join(checkoutRoot, "pi-template"), args, {
       env: { PATH: process.env.PATH, HOME: process.env.HOME, PI_TEMPLATE_HOME: home, PI_TEMPLATE_PORT: "0" },
       timeout: 30_000,
     });
+    onSpawn?.(child);
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; onStdout?.(chunk, child); });
@@ -160,6 +162,9 @@ try {
   assert.equal((await call("PATCH", "/chats/c1", { title: "Greeting" })).body.title, "Greeting");
   assert.equal((await call("GET", "/chats")).body[0].title, "Greeting");
   assert.equal((await call("PATCH", "/chats/c1", { title: "x".repeat(201) })).status, 400);
+  assert.deepEqual((await call("PATCH", "/chats/c1", { title: "bell\u0007" })).body.code, "invalid_request");
+  assert.equal((await call("PATCH", "/chats/c1", { title: "two\nlines" })).body.title, "two lines");
+  assert.equal((await call("PATCH", "/chats/c1", { title: "Greeting" })).body.title, "Greeting");
   faux.setResponses([fauxAssistantMessage("again")]);
   assert.equal(text((await send("c1", "once more")).events), "again");
   assert.deepEqual((await call("GET", "/chats/c1")).body.messages.map((message: any) => message.role), ["user", "assistant", "user", "assistant"]);
@@ -216,8 +221,27 @@ try {
   const tree = (await call("GET", "/workspace/tree")).body;
   assert.deepEqual([tree.entries.map((entry: any) => entry.path), tree.truncated], [["notes", "notes/today.md", "hello.md"], false]);
   assert.deepEqual((await call("GET", "/workspace/file?path=../daemon.json")).body.code, "invalid_path");
+  const oversized = await call("PUT", "/workspace/file?path=big.md", { content: "\u0001".repeat(1_000_001) });
+  assert.deepEqual([oversized.status, oversized.body.code], [413, "too_large"], "an oversized save reaches the file limit");
+  const longPath = Array.from({ length: 110 }, () => "a".repeat(48)).join("/");
+  const tooLong = await call("PUT", `/workspace/file?path=${longPath}/x.md`, { content: "x" });
+  assert.deepEqual([tooLong.status, tooLong.body.code], [400, "invalid_path"]);
+  assert.ok(!tooLong.body.error.includes(paths.workspace), "a refusal names no absolute path");
+  assert.equal(existsSync(join(paths.workspace, "a".repeat(48))), false);
   assert.deepEqual((await call("GET", "/chats/c4")).body.messages[1].parts.map((part: any) => [part.type, part.status ?? ""]),
     [["tool", "done"], ["text", ""]]);
+
+  faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("bash", { command: "sleep 5" }), { stopReason: "toolUse" }),
+    fauxAssistantMessage("slept"),
+  ]);
+  let cancelledInTool: { status: number; body: any } | undefined;
+  const midTool = await send("c9", "sleep", async (event) => {
+    if (event.type === "tool.started" && !cancelledInTool) cancelledInTool = await call("POST", "/chats/c9/cancel", {});
+  });
+  assert.deepEqual(cancelledInTool?.body, { cancelled: true });
+  assert.deepEqual(midTool.events.at(-1), { seq: midTool.events.length - 1, type: "turn.finished", status: "cancelled" });
+  assert.equal((await call("GET", "/chats/c9")).body.messages.at(-1).status, "cancelled", "the stored turn reads cancelled");
 
   faux.setResponses([fauxAssistantMessage("hi")]);
   assert.deepEqual(await cli(["prompt", "--chat", "c8", "say", "hi"]), { status: 0, stdout: "hi\n", stderr: "" });
@@ -231,6 +255,19 @@ try {
   });
   assert.deepEqual([cancelledByCtrlC.status, cancelledByCtrlC.stderr], [1, '{"error":"the chat turn was cancelled"}\n']);
   assert.equal((await call("GET", "/chats/c8")).body.messages.at(-1).status, "cancelled");
+  faux.setResponses([fauxAssistantMessage(LONG_REPLY)]);
+  const early = await cli(["prompt", "--chat", "c8", "long"], undefined, (child) => {
+    let signalled = false;
+    const poll = setInterval(() => void call("GET", "/chats/c8").then(({ body }) => {
+      if (!body.running || signalled) return;
+      signalled = true;
+      clearInterval(poll);
+      child.kill("SIGINT");
+    }), 5);
+    child.once("close", () => clearInterval(poll));
+  });
+  assert.deepEqual([early.status, early.stderr], [1, '{"error":"the chat turn was cancelled"}\n'],
+    "a Ctrl-C while the turn starts cancels it");
 
   savePermissionMode(home, "ask");
   faux.setResponses([
@@ -250,12 +287,27 @@ try {
   assert.deepEqual(chatFiles(), before);
   rmSync(paths.protectedPaths);
 
-  faux.setResponses([fauxAssistantMessage(LONG_REPLY)]);
+  const c3File = join(paths.chatTranscripts, chatFiles().find((name) => name.endsWith("_c3.jsonl"))!);
+  const c3Before = [readFileSync(c3File, "utf8"), (await call("GET", "/chats/c3")).body.updatedAt];
+  writeFileSync(paths.piAuth, "{}");
+  writeFileSync(paths.piModels, JSON.stringify({ providers: { [faux.getModel().provider]: {
+    api: faux.getModel().api, baseUrl: "http://127.0.0.1:1", models: [faux.getModel()] } } }));
+  const noKey = await send("c3", "hello again");
+  assert.deepEqual([noKey.status, noKey.body.code], [503, "session_refused"]);
+  assert.deepEqual([readFileSync(c3File, "utf8"), (await call("GET", "/chats/c3")).body.updatedAt], c3Before,
+    "a refused turn leaves an existing chat untouched");
+  seedFauxProviderHome(paths, faux.getModel());
+
+  faux.setResponses([fauxAssistantMessage(LONG_REPLY), fauxAssistantMessage(LONG_REPLY)]);
   let closing: Promise<void> | undefined;
-  const interrupted = await send("c7", "long again", (event) => {
-    if (event.type === "text.delta" && !closing) closing = daemon.close();
+  let lateSend: Awaited<ReturnType<typeof send>> | undefined;
+  const interrupted = await send("c7", "long again", async (event) => {
+    if (event.type !== "text.delta" || closing) return;
+    closing = daemon.close();
+    lateSend = await send("c10", "arrives while stopping");
   });
   await closing;
+  assert.deepEqual([lateSend?.status, lateSend?.body.code], [503, "daemon_stopping"]);
   assert.deepEqual(interrupted.events.at(-1)?.type === "turn.finished" ? (interrupted.events.at(-1) as any).status : "none", "cancelled");
   daemon = await startDaemon({ port: 0, fingerprintIntervalMs: 60_000, scheduler: { wakeIntervalMs: 60_000 } });
   const afterRestart = (await call("GET", "/chats/c7")).body;

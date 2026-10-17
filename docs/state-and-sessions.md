@@ -101,23 +101,27 @@ daemon is the only writer of chat transcripts. The Gateway routes
 - **A fresh session per turn.** Each turn builds a headless harness session in
   the workspace, so every session start check runs on every turn; a refused
   check answers 503 `session_refused` and writes nothing. Provenance records
-  `origin: "gateway-chat"` with the chat and turn ids. The message goes to the
+  `origin: "gateway-chat"` with the chat and turn ids once Pi accepts the turn. The message goes to the
   model as typed: no slash commands, skill commands, or prompt templates.
 - **The reply streams** as NDJSON on the `POST /chats/:id/messages` response:
   `turn.started`, `text.delta`, `tool.started`, `tool.finished`, and last
   `turn.finished` with `completed`, `cancelled`, or `failed`. A client that
   disconnects stops only the stream; `POST /chats/:id/cancel` stops the turn,
-  and Pi keeps the partial reply in the transcript.
+  and Pi keeps the partial reply in the transcript. A cancelled turn reports
+  `cancelled` even when Pi ends it as an error, as when the cancel lands
+  during a tool call; the transcript marks it with a
+  `pi-template-turn-cancelled` entry so it reads `cancelled` later too.
 - **A chat reads as** text and tool calls only: each user message, then one
   assistant message folding the replies and tool results up to the next user
   message, with Pi's thinking dropped. A turn that ended without a reply and
   no longer runs, as when the daemon stopped mid-turn, reads `interrupted`.
 - **Title** is the name set by `PATCH /chats/:id` (Pi's `session_info`, up to
-  200 characters), else the first message.
+  200 characters on one line, without control characters), else the first
+  message.
 - **Delete** renames the transcript to `<file>.deleted-<time>`, out of the
   listing; nothing is unlinked, and no retention policy reclaims the space yet.
 - **Shutdown** cancels running turns before the daemon stops, so each keeps its
-  partial reply.
+  partial reply, and refuses new messages with 503 `daemon_stopping`.
 
 `pi-template prompt --chat <id> <message>` sends one turn to a chat through the
 Gateway; the run state lives only in the daemon's memory.
