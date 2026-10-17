@@ -1,13 +1,20 @@
 import readline from "node:readline/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { getOAuthProvider, getOAuthProviderInfoList, type OAuthSelectPrompt } from "@earendil-works/pi-ai/oauth";
-import { AuthStorage, getAgentDir, ModelRegistry, type AuthCredential } from "@earendil-works/pi-coding-agent";
+import {
+  InMemoryCredentialStore,
+  InMemoryModelsStore,
+  type AuthInteraction,
+  type AuthPrompt,
+  type Credential,
+} from "@earendil-works/pi-ai";
+import { getAgentDir, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { harnessPaths, isPermissionMode, type PermissionMode, type SkillPolicy } from "@pi-template/contracts";
 import {
   AGENT_DEFINITION,
   definitionIds,
   agentDefinitionSummary,
+  readStandaloneCredentials,
   runOnboarding,
   type OnboardingAnswers,
   type OnboardingDependencies,
@@ -33,9 +40,12 @@ export interface InteractiveOnboardingIO {
   flushPendingQuestion?(): void;
 }
 
+type CreateModelRuntime = typeof ModelRuntime.create;
+
 export interface CliOnboardingDependencies extends OnboardingDependencies {
   interactiveIO?: InteractiveOnboardingIO;
   standalonePiAuthPath?: string;
+  createModelRuntime?: CreateModelRuntime;
 }
 
 interface PiImportSource {
@@ -73,8 +83,6 @@ function parseFlags(argv: readonly string[]): OnboardFlags {
   const values = new Map<string, string>();
   const repeated = new Map<string, string[]>();
   let nonInteractive = false;
-  // Agent-operated / no-local-browser onboarding routes login to Pi's device-code flow
-  // instead of the localhost browser callback (docs/onboarding.md#agent-operated-onboarding).
   let noBrowser = process.env.PI_TEMPLATE_NO_BROWSER === "1";
   let acknowledgeResources = false;
   let approveWorkspaceContext = false;
@@ -187,11 +195,10 @@ const isAffirmativeAnswer = (value: string): boolean => ["y", "yes"].includes(va
 const isNegativeAnswer = (value: string): boolean => ["n", "no"].includes(value.trim().toLowerCase());
 const isDefaultYesAnswer = (value: string): boolean => !value.trim() || isAffirmativeAnswer(value);
 
-function importableProviders(sourceAuthPath: string): string[] {
-  const storage = AuthStorage.create(sourceAuthPath);
-  return storage.list().filter((provider) => {
-    const credential = storage.get(provider);
-    if (credential?.type === "api_key") return Boolean(credential.key.trim());
+function importableProviders(stored: Record<string, unknown>): string[] {
+  return Object.keys(stored).filter((provider) => {
+    const credential = stored[provider] as Credential | undefined;
+    if (credential?.type === "api_key") return Boolean(credential.key?.trim());
     return credential?.type === "oauth" &&
       Boolean(credential.access.trim()) &&
       Boolean(credential.refresh.trim()) &&
@@ -214,88 +221,96 @@ function importedProvider(providers: readonly string[], preferredProvider: strin
   return preferredProvider && providers.includes(preferredProvider) ? preferredProvider : providers[0]!;
 }
 
-function selectAvailableModel(
+async function selectAvailableModel(
+  runtime: ModelRuntime,
   provider: string,
-  storage: AuthStorage,
-  modelsPath?: string,
   preferredModel?: string,
-): string | undefined {
-  const registry = modelsPath && existsSync(modelsPath)
-    ? ModelRegistry.create(storage, modelsPath)
-    : ModelRegistry.inMemory(storage);
-  const models = registry.getAvailable().filter((model) => model.provider === provider);
+): Promise<string | undefined> {
+  const models = await runtime.getAvailable(provider);
   return models.find((model) => model.id === preferredModel)?.id ?? models[0]?.id;
 }
 
-const looksLikeDeviceCodeOption = (option: { id: string; label: string }): boolean =>
-  /device/i.test(option.id) || /device/i.test(option.label);
+/**
+ * A runtime over in-memory copies of the given credentials and the model catalog cache, so
+ * login, model discovery, and any OAuth refresh never write the harness's or the standalone
+ * Pi agent directory.
+ */
+async function scratchRuntime(
+  createRuntime: CreateModelRuntime,
+  credentials: Record<string, Credential> = {},
+  modelsPath: string | null = null,
+): Promise<ModelRuntime> {
+  const store = new InMemoryCredentialStore();
+  for (const [provider, credential] of Object.entries(credentials)) await store.modify(provider, async () => credential);
+  return await createRuntime({ credentials: store, modelsPath, modelsStore: new InMemoryModelsStore() });
+}
+
+// Pi labels each provider's browserless method: device code (OpenAI Codex, Radius) or
+// Anthropic's "Copy code login (headless)".
+const isBrowserlessOption = (option: { id: string; label: string }): boolean =>
+  /device|headless/i.test(option.id) || /device|headless/i.test(option.label);
 
 async function loginCredential(
   io: InteractiveOnboardingIO,
+  runtime: ModelRuntime,
   providerId: string,
   preferDeviceCode: boolean,
-): Promise<AuthCredential> {
-  const provider = getOAuthProvider(providerId);
-  if (!provider) throw new Error(`unknown OAuth provider: ${providerId}`);
-  let manualInputPending = false;
-  const select = async (prompt: OAuthSelectPrompt): Promise<string | undefined> => {
-    // Headless / agent-operated login: skip the human choice and take the device-code
-    // method (no localhost browser callback) when the provider offers one.
+): Promise<Credential> {
+  const select = async (prompt: Extract<AuthPrompt, { type: "select" }>): Promise<string> => {
     if (preferDeviceCode) {
-      const deviceOption = prompt.options.find(looksLikeDeviceCodeOption);
-      if (deviceOption) {
-        io.write(`${prompt.message}\n  → ${deviceOption.label} (--no-browser)\n`);
-        return deviceOption.id;
+      const browserlessOption = prompt.options.find(isBrowserlessOption);
+      if (browserlessOption) {
+        io.write(`${prompt.message}\n  → ${browserlessOption.label} (--no-browser)\n`);
+        return browserlessOption.id;
       }
     }
     io.write(`${prompt.message}\n`);
     prompt.options.forEach((option, index) => io.write(`  ${index + 1}. ${option.label}\n`));
     const answer = (await io.question("Selection: ")).trim();
-    if (!answer) return undefined;
     const numeric = /^\d+$/.test(answer) ? Number(answer) : undefined;
-    return numeric === undefined ? prompt.options.find(({ id }) => id === answer)?.id : prompt.options[numeric - 1]?.id;
+    const selected = numeric === undefined ? prompt.options.find(({ id }) => id === answer)?.id : prompt.options[numeric - 1]?.id;
+    if (!selected) throw new Error("login method selection cancelled");
+    return selected;
   };
-  const loginOptions: Parameters<typeof provider.login>[0] = {
-    onAuth: ({ url, instructions }) => {
-      io.write(`Open ${url}\n`);
-      if (instructions) io.write(`${instructions}\n`);
-    },
-    onDeviceCode: ({ userCode, verificationUri }) => {
-      io.write(`Open ${verificationUri} and enter code ${userCode}\n`);
-    },
-    onPrompt: async ({ message, placeholder, allowEmpty }) => {
-      const answer = await io.question(`${message}${placeholder ? ` (${placeholder})` : ""}: `);
-      if (!allowEmpty && !answer.trim()) throw new Error(`${message} is required`);
+  const interaction: AuthInteraction = {
+    async prompt(prompt) {
+      if (prompt.type === "select") return await select(prompt);
+      if (prompt.type === "manual_code") {
+        const onAbort = () => io.flushPendingQuestion?.();
+        prompt.signal?.addEventListener("abort", onAbort, { once: true });
+        try {
+          const answer = await io.question(`${prompt.message} `);
+          prompt.signal?.throwIfAborted();
+          return answer;
+        } finally {
+          prompt.signal?.removeEventListener("abort", onAbort);
+        }
+      }
+      const answer = await io.question(`${prompt.message}${prompt.placeholder ? ` (${prompt.placeholder})` : ""}: `);
+      if (!answer.trim()) throw new Error(`${prompt.message} is required`);
       return answer;
     },
-    onProgress: (message) => io.write(`${message}\n`),
-    onManualCodeInput: async () => {
-      manualInputPending = true;
-      try {
-        return await io.question("Paste the redirect URL (or press Enter once the browser finishes): ");
-      } finally {
-        manualInputPending = false;
+    notify(event) {
+      if (event.type === "auth_url") {
+        io.write(`Open ${event.url}\n`);
+        if (event.instructions) io.write(`${event.instructions}\n`);
+      } else if (event.type === "device_code") {
+        io.write(`Open ${event.verificationUri} and enter code ${event.userCode}\n`);
+      } else {
+        io.write(`${event.message}\n`);
       }
     },
-    onSelect: select,
   };
-  try {
-    const credentials = await provider.login(loginOptions);
-    return { type: "oauth", ...credentials };
-  } finally {
-    // The provider races the browser callback against manual paste and does not cancel
-    // the loser: whenever the flow ends (callback won, or the exchange failed) with the
-    // paste prompt still pending, it would swallow the next typed line. Resolve it with
-    // an empty line so the question queue is clear.
-    if (manualInputPending) io.flushPendingQuestion?.();
-  }
+  return await runtime.login(providerId, "oauth", interaction);
 }
 
 async function freshAuthentication(
   io: InteractiveOnboardingIO,
   preferDeviceCode: boolean,
+  createRuntime: CreateModelRuntime,
 ): Promise<InteractiveAuthSelection> {
-  const providers = getOAuthProviderInfoList().filter(({ available }) => available);
+  const runtime = await scratchRuntime(createRuntime);
+  const providers = runtime.getProviders().flatMap(({ id, auth }) => auth.oauth ? [{ id, name: auth.oauth.name }] : []);
   io.write("Built-in provider login:\n");
   providers.forEach((provider, index) => {
     io.write(`  ${index + 1}. ${provider.name} (${provider.id})\n`);
@@ -308,8 +323,8 @@ async function freshAuthentication(
     const provider = (await io.question("Provider id: ")).trim();
     const apiKey = (await io.question("Provider API key: ")).trim();
     if (!provider || !apiKey) throw new CliUsageError("provider id and API key are required");
-    const credential: AuthCredential = { type: "api_key", key: apiKey };
-    const model = selectAvailableModel(provider, AuthStorage.inMemory({ [provider]: credential })) ??
+    const credential: Credential = { type: "api_key", key: apiKey };
+    const model = await selectAvailableModel(await scratchRuntime(createRuntime, { [provider]: credential }), provider) ??
       (await io.question("Model id: ")).trim();
     if (!model) throw new CliUsageError("model id is required");
     return { answer: { kind: "credential", provider, credential }, provider, model };
@@ -321,8 +336,8 @@ async function freshAuthentication(
   // A failed login attempt (expired or already-consumed code, state mismatch, network)
   // must never kill the resumable flow: report one line and re-offer the menu.
   try {
-    const credential = await loginCredential(io, selected.id, preferDeviceCode);
-    const model = selectAvailableModel(selected.id, AuthStorage.inMemory({ [selected.id]: credential }));
+    const credential = await loginCredential(io, runtime, selected.id, preferDeviceCode);
+    const model = await selectAvailableModel(runtime, selected.id);
     if (!model) throw new Error(`no authenticated model is available for provider ${selected.id}`);
     return {
       answer: { kind: "credential", provider: selected.id, credential },
@@ -332,7 +347,7 @@ async function freshAuthentication(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     io.write(`\nLogin did not complete: ${message.split("\n")[0]}\nChoose again, or press Ctrl-C to exit.\n`);
-    return await freshAuthentication(io, preferDeviceCode);
+    return await freshAuthentication(io, preferDeviceCode, createRuntime);
   }
 }
 
@@ -340,19 +355,24 @@ async function interactiveAuth(
   io: InteractiveOnboardingIO,
   source: PiImportSource | undefined,
   preferDeviceCode: boolean,
+  createRuntime: CreateModelRuntime,
 ): Promise<InteractiveAuthSelection> {
   if (source && existsSync(source.agentDir)) {
     const importChoice = await io.question(`Copy existing standalone Pi setup from ${source.agentDir}? [Y/n] `);
     if (isDefaultYesAnswer(importChoice)) {
       if (!existsSync(source.authPath)) throw new CliUsageError("the standalone Pi setup has no authorization file to import");
-      const providers = importableProviders(source.authPath);
+      const stored = readStandaloneCredentials(source.authPath);
+      const providers = importableProviders(stored);
       if (providers.length === 0) throw new CliUsageError("the standalone Pi setup has no usable authorizations to import");
       const importedSelection = importedModelSelection(source);
       const provider = importedProvider(providers, importedSelection?.provider);
-      const model = selectAvailableModel(
+      const model = await selectAvailableModel(
+        await scratchRuntime(
+          createRuntime,
+          { [provider]: stored[provider] as Credential },
+          existsSync(source.modelsPath) ? source.modelsPath : null,
+        ),
         provider,
-        AuthStorage.create(source.authPath),
-        source.modelsPath,
         importedSelection?.provider === provider ? importedSelection.model : undefined,
       );
       if (!model) throw new CliUsageError("the standalone Pi setup has no model default for the imported provider");
@@ -360,7 +380,7 @@ async function interactiveAuth(
     }
     if (!isNegativeAnswer(importChoice)) throw new CliUsageError("answer y or n to the standalone Pi import offer");
   }
-  return await freshAuthentication(io, preferDeviceCode);
+  return await freshAuthentication(io, preferDeviceCode, createRuntime);
 }
 
 function protectedPaths(raw: string): string[] {
@@ -458,8 +478,9 @@ async function interactiveAnswers(
   source: PiImportSource | undefined,
   home: string | undefined,
   preferDeviceCode: boolean,
+  createRuntime: CreateModelRuntime,
 ): Promise<OnboardingAnswers> {
-  const auth = await interactiveAuth(io, source, preferDeviceCode);
+  const auth = await interactiveAuth(io, source, preferDeviceCode, createRuntime);
   const protectedRaw = (await io.question("Protected paths (comma-separated, blank for none): ")).trim();
   const defaults = reviewDefaults(home, auth, protectedPaths(protectedRaw));
   writeReview(io, defaults, home);
@@ -477,6 +498,7 @@ export async function onboard(
   const {
     interactiveIO,
     standalonePiAuthPath,
+    createModelRuntime = (options) => ModelRuntime.create(options),
     ...machineDependencies
   } = dependencies;
   if (flags.nonInteractive) return await runOnboarding(answersFromFlags(flags), machineDependencies);
@@ -491,7 +513,7 @@ export async function onboard(
     const destinationAuthPath = resolve(harnessPaths(machineDependencies.home).piAuth);
     const standaloneSource = piImportSource(standalonePiAuthPath ?? join(getAgentDir(), "auth.json"));
     const source = standaloneSource.authPath === destinationAuthPath ? undefined : standaloneSource;
-    const answers = await interactiveAnswers(io, source, machineDependencies.home, flags.noBrowser);
+    const answers = await interactiveAnswers(io, source, machineDependencies.home, flags.noBrowser, createModelRuntime);
     return await runOnboarding(answers, machineDependencies);
   } finally {
     rl?.close();

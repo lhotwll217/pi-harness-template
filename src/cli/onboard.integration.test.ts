@@ -2,10 +2,27 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { registerOAuthProvider, unregisterOAuthProvider } from "@earendil-works/pi-ai/oauth";
+import type { OAuthAuth } from "@earendil-works/pi-ai";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { harnessPaths } from "@pi-template/contracts";
 import { passingOnboardingDependencies } from "../../test/helpers/onboarding";
-import { onboard } from "./onboard";
+import { onboard, type CliOnboardingDependencies } from "./onboard";
+
+function anthropicLoginRuntime(oauth: OAuthAuth): NonNullable<CliOnboardingDependencies["createModelRuntime"]> {
+  return async (options) => {
+    const runtime = await ModelRuntime.create(options);
+    const builtin = runtime.getProvider("anthropic")!;
+    runtime.registerNativeProvider({
+      id: builtin.id,
+      name: builtin.name,
+      auth: { oauth },
+      getModels: () => builtin.getModels(),
+      stream: (model, context, streamOptions) => builtin.stream(model, context, streamOptions),
+      streamSimple: (model, context, streamOptions) => builtin.streamSimple(model, context, streamOptions),
+    });
+    return runtime;
+  };
+}
 
 const root = mkdtempSync(join(tmpdir(), "pi-template-cli-onboard-"));
 
@@ -116,17 +133,36 @@ try {
   assert.equal(readFileSync(standaloneSettings, "utf8"), settingsBytes);
   assert.equal(readFileSync(standaloneModels, "utf8"), modelsBytes);
 
-  registerOAuthProvider({
-    id: "anthropic",
+  {
+    const bomDir = join(root, "standalone-pi-bom");
+    mkdirSync(bomDir, { recursive: true });
+    writeFileSync(join(bomDir, "auth.json"), `\uFEFF${authBytes}`);
+    writeFileSync(join(bomDir, "settings.json"), settingsBytes);
+    writeFileSync(join(bomDir, "models.json"), modelsBytes);
+    const bomHome = join(root, "imported-bom-home");
+    const bomDependencies = passingOnboardingDependencies(bomHome);
+    delete bomDependencies.authVerifier;
+    const bomResult = await onboard([], {
+      ...bomDependencies,
+      interactiveIO: scriptedInteraction(["", "", ""]).io,
+      standalonePiAuthPath: join(bomDir, "auth.json"),
+    });
+    assert.equal(bomResult.complete, true);
+    assert.deepEqual(JSON.parse(readFileSync(harnessPaths(bomHome).piAuth, "utf8")), JSON.parse(authBytes));
+  }
+
+  const deterministicLogin = anthropicLoginRuntime({
     name: "Deterministic OAuth",
     async login() {
-      return { access: "canned-access", refresh: "canned-refresh", expires: 4_102_444_800_000 };
+      return { type: "oauth", access: "canned-access", refresh: "canned-refresh", expires: 4_102_444_800_000 };
     },
-    async refreshToken(credentials) { return credentials; },
-    getApiKey(credentials) { return credentials.access; },
+    async refresh(credential) { return credential; },
+    async toAuth(credential) { return { apiKey: credential.access }; },
   });
-  try {
+  {
     const loginHome = join(root, "login-home");
+    mkdirSync(harnessPaths(loginHome).piAgentDir, { recursive: true });
+    writeFileSync(harnessPaths(loginHome).piAuth, JSON.stringify({ openai: { type: "api_key", key: "kept-key" } }));
     const loginInteraction = scriptedInteraction(["anthropic", "", ""]);
     let loginModel: { provider: string; model: string } | undefined;
     const loginDependencies = passingOnboardingDependencies(loginHome);
@@ -138,6 +174,7 @@ try {
     const loggedIn = await onboard([], {
       ...loginDependencies,
       interactiveIO: loginInteraction.io,
+      createModelRuntime: deterministicLogin,
       standalonePiAuthPath: join(root, "missing-standalone", "auth.json"),
     });
 
@@ -150,11 +187,14 @@ try {
     assert.ok(loginModel?.model);
     assert.match(loginInteraction.transcript(), /Deterministic OAuth/);
     assert.doesNotMatch(loginInteraction.transcript(), /Copy existing standalone Pi setup/);
-    assert.deepEqual(JSON.parse(readFileSync(harnessPaths(loginHome).piAuth, "utf8")).anthropic, {
-      type: "oauth",
-      access: "canned-access",
-      refresh: "canned-refresh",
-      expires: 4_102_444_800_000,
+    assert.deepEqual(JSON.parse(readFileSync(harnessPaths(loginHome).piAuth, "utf8")), {
+      openai: { type: "api_key", key: "kept-key" },
+      anthropic: {
+        type: "oauth",
+        access: "canned-access",
+        refresh: "canned-refresh",
+        expires: 4_102_444_800_000,
+      },
     });
 
     const emptyStandaloneDir = join(root, "empty-standalone");
@@ -163,13 +203,12 @@ try {
     const declinedImport = await onboard([], {
       ...passingOnboardingDependencies(join(root, "declined-empty-import-home")),
       interactiveIO: declinedImportInteraction.io,
+      createModelRuntime: deterministicLogin,
       standalonePiAuthPath: join(emptyStandaloneDir, "auth.json"),
     });
     assert.equal(declinedImport.complete, true);
     assert.match(declinedImportInteraction.questions()[0] ?? "", /standalone Pi/);
     assert.equal(declinedImportInteraction.questions()[1], "Authentication choice: ");
-  } finally {
-    unregisterOAuthProvider("anthropic");
   }
 
   const customHome = join(root, "custom-home");
@@ -248,45 +287,50 @@ try {
   assert.equal(readFileSync(standaloneSettings, "utf8"), settingsBytes);
   assert.equal(readFileSync(standaloneModels, "utf8"), modelsBytes);
 
-  // Agent-operated login: --no-browser routes the provider's method choice to device-code
-  // without a human picking, so an agent driving the terminal never hits the browser
-  // callback. The fake provider offers both methods and records which the flow chose.
-  let chosenLoginMethod: string | undefined;
-  registerOAuthProvider({
-    id: "anthropic",
-    name: "Faux Method Provider",
-    async login(options) {
-      chosenLoginMethod = await options.onSelect({
-        message: "Select login method:",
-        options: [
-          { id: "browser", label: "Browser login (default)" },
-          { id: "device_code", label: "Device code login (headless)" },
-        ],
-      });
-      return { access: "device-access", refresh: "device-refresh", expires: 4_102_444_800_000 };
-    },
-    async refreshToken(credentials) { return credentials; },
-    getApiKey(credentials) { return credentials.access; },
-  });
-  try {
-    const deviceHome = join(root, "device-home");
-    const deviceInteraction = scriptedInteraction(["anthropic", "", ""]); // provider, protected paths, accept
+  const browserlessMethods = [
+    { id: "device_code", label: "Device code login (headless)" },
+    { id: "copy_code", label: "Copy code login (headless)" },
+  ];
+  for (const browserless of browserlessMethods) {
+    let chosenLoginMethod: string | undefined;
+    const methodChoosingLogin = anthropicLoginRuntime({
+      name: "Faux Method Provider",
+      async login(interaction) {
+        chosenLoginMethod = await interaction.prompt({
+          type: "select",
+          message: "Select login method:",
+          options: [{ id: "browser", label: "Browser login (default)" }, browserless],
+        });
+        if (chosenLoginMethod === "copy_code") {
+          await interaction.prompt({ type: "manual_code", message: "Paste the code Anthropic shows after you sign in:" });
+        }
+        return { type: "oauth", access: "device-access", refresh: "device-refresh", expires: 4_102_444_800_000 };
+      },
+      async refresh(credential) { return credential; },
+      async toAuth(credential) { return { apiKey: credential.access }; },
+    });
+    const deviceHome = join(root, `${browserless.id}-home`);
+    const deviceInteraction = scriptedInteraction(
+      browserless.id === "copy_code" ? ["anthropic", "code#state", "", ""] : ["anthropic", "", ""],
+    );
     const deviceDependencies = passingOnboardingDependencies(deviceHome);
     delete deviceDependencies.authVerifier;
     deviceDependencies.modelVerifier = () => true;
     const deviceResult = await onboard(["--no-browser"], {
       ...deviceDependencies,
       interactiveIO: deviceInteraction.io,
+      createModelRuntime: methodChoosingLogin,
       standalonePiAuthPath: join(root, "absent-standalone-device", "auth.json"),
     });
     assert.equal(deviceResult.complete, true);
-    assert.equal(chosenLoginMethod, "device_code", "--no-browser selects device-code login");
-    assert.match(deviceInteraction.transcript(), /Device code login.*--no-browser/s);
+    assert.equal(chosenLoginMethod, browserless.id, `--no-browser selects ${browserless.id} login`);
+    assert.ok(deviceInteraction.transcript().includes(`→ ${browserless.label} (--no-browser)`));
     // The method was auto-chosen: only the provider pick was asked, never a method "Selection:".
     assert.ok(!deviceInteraction.questions().includes("Selection: "),
-      "device-code method is chosen without asking");
-  } finally {
-    unregisterOAuthProvider("anthropic");
+      "the browserless method is chosen without asking");
+    if (browserless.id === "copy_code") {
+      assert.ok(deviceInteraction.questions().includes("Paste the code Anthropic shows after you sign in: "));
+    }
   }
 
   const forbiddenTerm = ["owner", "operator"].join("-");
@@ -295,7 +339,7 @@ try {
   );
   assert.deepEqual(forbiddenOccurrences, []);
 
-  process.stdout.write("ok — consolidated onboarding imports, authenticates, customizes, routes --no-browser to device-code, and honors explicit flags\n");
+  process.stdout.write("ok — consolidated onboarding imports, authenticates, customizes, routes --no-browser to device-code or copy-code, and honors explicit flags\n");
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

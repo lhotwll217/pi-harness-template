@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ONBOARDING_VERSION,
+  ensureHarnessWorkspace,
   harnessPaths,
   type OnboardingProgress,
 } from "@pi-template/contracts";
@@ -114,6 +115,57 @@ try {
     (error) => error instanceof OnboardingStageError && error.stage === "model",
   );
   assert.equal(loginProvider, "fake-login");
+
+  const savedProviders = {
+    anthropic: { type: "api_key", key: "anthropic-secret" },
+    openai: { type: "api_key", key: "openai-secret" },
+  };
+  const googleAnswer: OnboardingAnswers = {
+    auth: { kind: "credential", provider: "google", credential: { type: "api_key", key: "google-secret" } },
+  };
+  for (const [name, contents] of [
+    ["truncated", JSON.stringify(savedProviders).slice(0, 40)],
+    ["array", "[]"],
+    ["null", "null"],
+  ] as const) {
+    const damagedHome = join(root, `damaged-auth-${name}`);
+    writeFileSync(ensureHarnessWorkspace(damagedHome).piAuth, contents);
+    await assert.rejects(
+      runOnboarding(googleAnswer, { ...dependencies(), home: damagedHome }),
+      (error) => error instanceof OnboardingStageError && error.stage === "auth" &&
+        error.message.includes("auth.json") && error.message.includes("fix or remove it"),
+    );
+    assert.equal(readFileSync(harnessPaths(damagedHome).piAuth, "utf8"), contents);
+  }
+
+  const bomHome = join(root, "bom-auth");
+  writeFileSync(ensureHarnessWorkspace(bomHome).piAuth, `\uFEFF${JSON.stringify(savedProviders)}`);
+  await assert.rejects(
+    runOnboarding(googleAnswer, { ...dependencies(), home: bomHome }),
+    (error) => error instanceof OnboardingStageError && error.stage === "model",
+  );
+  assert.deepEqual(JSON.parse(readFileSync(harnessPaths(bomHome).piAuth, "utf8")), {
+    ...savedProviders,
+    google: { type: "api_key", key: "google-secret" },
+  });
+
+  const legacyAzureSource = join(root, "standalone-legacy-azure-auth.json");
+  writeFileSync(legacyAzureSource, JSON.stringify({
+    "azure-openai-responses": { type: "api_key", key: "azure-secret" },
+    openai: { type: "api_key", key: "openai-secret" },
+  }));
+  const legacyAzureHome = join(root, "legacy-azure-import");
+  await assert.rejects(
+    runOnboarding(
+      { auth: { kind: "import", sourceAuthPath: legacyAzureSource } },
+      { ...dependencies(), home: legacyAzureHome },
+    ),
+    (error) => error instanceof OnboardingStageError && error.stage === "model",
+  );
+  assert.deepEqual(JSON.parse(readFileSync(harnessPaths(legacyAzureHome).piAuth, "utf8")), {
+    azure: { type: "api_key", key: "azure-secret" },
+    openai: { type: "api_key", key: "openai-secret" },
+  });
 
   const resumeHome = join(root, "resume");
   await assert.rejects(

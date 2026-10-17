@@ -8,11 +8,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
-import {
-  AuthStorage,
-  ModelRegistry,
-  type AuthCredential,
-} from "@earendil-works/pi-coding-agent";
+import type { Credential } from "@earendil-works/pi-ai";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
   ONBOARDING_STAGES,
   ONBOARDING_VERSION,
@@ -41,7 +38,7 @@ type JsonObject = Record<string, unknown>;
 
 export interface OnboardingAnswers {
   auth?:
-    | { kind: "credential"; provider: string; credential: AuthCredential }
+    | { kind: "credential"; provider: string; credential: Credential }
     | {
         kind: "import";
         sourceAuthPath: string;
@@ -70,7 +67,7 @@ export interface OnboardingDependencies {
   now?: () => string;
   authVerifier?: (paths: HarnessPaths) => boolean;
   providerLogin?: (paths: HarnessPaths, provider: string) => Promise<void>;
-  modelVerifier?: (paths: HarnessPaths, selection: { provider: string; model: string }) => boolean;
+  modelVerifier?: (paths: HarnessPaths, selection: { provider: string; model: string }) => boolean | Promise<boolean>;
   sandbox?: SandboxAdapter;
   service?: DaemonServiceAdapter;
   readiness?: (home: string) => Promise<{ ok: boolean; reason: string }>;
@@ -97,6 +94,27 @@ function readObject(path: string): JsonObject {
   } catch {
     return {};
   }
+}
+
+function readAuthFile(path: string): JsonObject {
+  if (!existsSync(path)) return {};
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(path, "utf8").replace(/^\uFEFF/, ""));
+  } catch (error) {
+    throw new Error(`${path} could not be parsed; fix or remove it: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${path} must hold a JSON object of provider credentials; fix or remove it`);
+  }
+  return value as JsonObject;
+}
+
+/** Pi 1.0.3 renamed provider azure-openai-responses to azure without migrating auth.json (earendil-works/pi#9714). */
+export function readStandaloneCredentials(path: string): JsonObject {
+  const credentials = readAuthFile(path);
+  const { "azure-openai-responses": legacyAzure, ...rest } = credentials;
+  return legacyAzure === undefined || "azure" in rest ? credentials : { ...rest, azure: legacyAzure };
 }
 
 function writeJsonAtomic(path: string, value: unknown, mode = 0o600): void {
@@ -149,11 +167,7 @@ function selectedModel(paths: HarnessPaths): { provider: string; model: string }
 }
 
 function defaultAuthVerifier(paths: HarnessPaths): boolean {
-  try {
-    return AuthStorage.create(paths.piAuth).list().length > 0;
-  } catch {
-    return false;
-  }
+  return Object.keys(readObject(paths.piAuth)).length > 0;
 }
 
 function sameJson(left: unknown, right: unknown): boolean {
@@ -179,11 +193,9 @@ export async function runOnboarding(
   const paths = harnessPaths(dependencies.home);
   const now = dependencies.now ?? (() => new Date().toISOString());
   const authVerifier = dependencies.authVerifier ?? defaultAuthVerifier;
-  const modelVerifier = dependencies.modelVerifier ?? ((ownedPaths, selection) => {
-    const auth = AuthStorage.create(ownedPaths.piAuth);
-    const registry = ModelRegistry.create(auth, ownedPaths.piModels);
-    const model = registry.find(selection.provider, selection.model);
-    return !!model && registry.hasConfiguredAuth(model);
+  const modelVerifier = dependencies.modelVerifier ?? (async (ownedPaths, selection) => {
+    const runtime = await ModelRuntime.create({ authPath: ownedPaths.piAuth, modelsPath: ownedPaths.piModels });
+    return (await runtime.getAvailable(selection.provider)).some(({ id }) => id === selection.model);
   });
   const sandbox = dependencies.sandbox ?? createSandboxAdapter();
   const service = dependencies.service ?? createLaunchdServiceAdapter({ platform: dependencies.platform });
@@ -215,11 +227,12 @@ export async function runOnboarding(
           const answer = answers.auth;
           if (answer?.kind === "credential") {
             if (!answer.provider.trim()) throw new Error("provider name is required");
-            AuthStorage.create(paths.piAuth).set(answer.provider, answer.credential);
+            // Pi does not export its file-backed credential store; merge so every other provider stays.
+            writeJsonAtomic(paths.piAuth, { ...readAuthFile(paths.piAuth), [answer.provider]: answer.credential });
           } else if (answer?.kind === "import") {
-            const imported = readObject(answer.sourceAuthPath);
+            const imported = readStandaloneCredentials(answer.sourceAuthPath);
             if (!Object.keys(imported).length) throw new Error("approved credential import contains no providers");
-            copyFileAtomic(answer.sourceAuthPath, paths.piAuth);
+            writeJsonAtomic(paths.piAuth, imported);
             if (answer.sourceSettingsPath && existsSync(answer.sourceSettingsPath)) {
               importModelSettings(answer.sourceSettingsPath, paths.piSettings);
             }
@@ -248,7 +261,7 @@ export async function runOnboarding(
             ...(enabledModels ? { enabledModels } : {}),
           });
           const selection = selectedModel(paths);
-          if (!selection || !modelVerifier(paths, selection)) throw new Error("selected model is unavailable or unauthorized");
+          if (!selection || !(await modelVerifier(paths, selection))) throw new Error("selected model is unavailable or unauthorized");
           break;
         }
         case "resources": {

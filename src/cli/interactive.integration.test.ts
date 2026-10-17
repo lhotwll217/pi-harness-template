@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   DatabaseQueryAction,
   ONBOARDING_VERSION,
@@ -165,7 +166,26 @@ try {
     entry.data?.taskDirectory === cwd &&
     entry.data?.trustPolicyVersion === ONBOARDING_VERSION));
 
-  process.stdout.write("ok — interactive runtime uses exact resources, Gateway tools, workspace context, and owned transcripts\n");
+  const standaloneDir = join(root, "standalone-sessions");
+  const standalone = SessionManager.create(cwd, standaloneDir);
+  standalone.appendMessage({ role: "user", content: "from standalone Pi", timestamp: 0 });
+  standalone.appendMessage(fauxAssistantMessage("standalone reply"));
+  const standaloneFile = standalone.getSessionFile()!;
+  const standaloneBytes = readFileSync(standaloneFile, "utf8");
+  await runtime.runtime.importFromJsonl(standaloneFile);
+  const firstImport = runtime.runtime.session.sessionFile!;
+  await runtime.runtime.importFromJsonl(standaloneFile);
+  const secondImport = runtime.runtime.session.sessionFile!;
+  const transcripts = runtime.runtime.session.sessionManager.getSessionDir();
+  assert.equal(relative(join(home, "transcripts"), transcripts).startsWith(".."), false);
+  assert.deepEqual([firstImport, secondImport], [
+    join(transcripts, basename(standaloneFile)),
+    join(transcripts, basename(standaloneFile, ".jsonl") + "-1.jsonl"),
+  ]);
+  assert.equal(readFileSync(firstImport, "utf8").startsWith(standaloneBytes), true);
+  assert.equal(readFileSync(secondImport, "utf8").startsWith(standaloneBytes), true);
+
+  process.stdout.write("ok — interactive runtime uses exact resources, Gateway tools, workspace context, owned transcripts, and non-overwriting imports\n");
 } finally {
   if (runtime) await runtime.runtime.dispose();
   fakeModelLayer?.unregister();

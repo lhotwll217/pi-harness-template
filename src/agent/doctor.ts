@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
   ONBOARDING_VERSION,
   ensureHarnessWorkspace,
@@ -63,10 +63,8 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
       modelAvailable = options.providerModelVerifier(provider, model);
     } else {
       try {
-        const storage = AuthStorage.create(paths.piAuth);
-        const registry = ModelRegistry.create(storage, paths.piModels);
-        const resolvedModel = registry.find(provider, model);
-        modelAvailable = !!resolvedModel && registry.hasConfiguredAuth(resolvedModel);
+        const runtime = await ModelRuntime.create({ authPath: paths.piAuth, modelsPath: paths.piModels });
+        modelAvailable = (await runtime.getAvailable(provider)).some(({ id }) => id === model);
       } catch {
         modelAvailable = false;
       }

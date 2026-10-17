@@ -73,12 +73,15 @@ probe and fails closed. Automation changes *who operates the flow*, never
 The one step that structurally assumes a human is provider login: the default
 browser flow opens a page and waits on a localhost callback. An agent driving a
 terminal cannot complete that. `pi-template onboard --no-browser` (or the
-`PI_TEMPLATE_NO_BROWSER` environment variable) routes login to the provider's
-device-code flow instead — the harness prints a URL and a short code, the owner
-approves on any device, and polling completes with no callback and no redirect
-URL to paste. The agent relays the URL and code to the owner; nothing else in
-the flow needs a human. The interactive default stays browser login, which is
-the better experience for a person at a laptop.
+`PI_TEMPLATE_NO_BROWSER` environment variable) takes the login method Pi marks
+as headless instead. For a device-code provider such as OpenAI Codex, the
+harness prints a URL and a short code, the owner approves on any device, and
+polling completes with no callback and no redirect URL to paste. Anthropic
+offers copy-code login instead: the owner signs in at the printed URL and the
+code Anthropic shows is pasted back. The agent relays the URL, and the code
+when there is one; nothing else in the flow needs a human. The interactive
+default stays browser login, which is the better experience for a person at a
+laptop.
 
 ## Readiness
 
@@ -107,6 +110,11 @@ Owner Operator's pattern — never a subcommand the owner must discover:
   flows; the harness does not reinvent login), and manual API-key entry only as
   an explicit fallback. Without a standalone Pi install, the owner
   authenticates the harness like any other fresh tool.
+- The auth stage reads `auth.json` as Pi does (a leading byte-order mark is
+  ignored) and stops with the file untouched when it is not a JSON object, so
+  a damaged file never loses its saved providers. Import renames the provider
+  key `azure-openai-responses`, which Pi 1.0.3 renamed to `azure` without
+  migrating stored credentials.
 - Guided setup is consolidated onto one review surface: after the import offer
   and a dedicated protected-paths question, every remaining choice — provider
   and model, the exact agent definition, permission mode, skill policy,
